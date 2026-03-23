@@ -318,7 +318,13 @@ console.log("📝 Creating launcher...");
 // We use a shell wrapper that invokes node with explicit CommonJS treatment
 const launcher = `#!/bin/sh
 # HyperAgent Launcher - resolves native addons from lib/ directory
-exec node --no-warnings "\${0%/*}/../lib/hyperagent-launcher.cjs" "$@"
+# When invoked via PATH, $0 may be a bare name (no slash). Resolve it first.
+SELF="$0"
+case "$SELF" in */*) ;; *) SELF="$(command -v -- "$SELF")" ;; esac
+# Resolve symlinks so this works when npm links the bin globally
+SELF="$(readlink -f "$SELF" 2>/dev/null || realpath "$SELF" 2>/dev/null || echo "$SELF")"
+SCRIPT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+exec node --no-warnings "\${SCRIPT_DIR}/../lib/hyperagent-launcher.cjs" "$@"
 `;
 
 // The actual launcher logic in CommonJS
