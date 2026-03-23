@@ -46,6 +46,7 @@ import {
   contentHash,
   loadOperatorConfig,
   exceedsRiskThreshold,
+  resolvePluginSource,
 } from "../plugin-system/manager.js";
 import { deepAudit, formatAuditResult } from "../plugin-system/auditor.js";
 import { extractSuggestedCommands } from "./command-suggestions.js";
@@ -701,11 +702,12 @@ if (discoveredCount > 0) {
 async function syncPluginsToSandbox(): Promise<void> {
   const enabled = pluginManager.getEnabledPlugins();
 
-  // Dynamic-import each enabled plugin's index.ts to get the register fn
+  // Dynamic-import each enabled plugin to get the register fn
   const registrations = [];
   const loadErrors: string[] = [];
   for (const plugin of enabled) {
-    const indexPath = join(plugin.dir, "index.ts");
+    // Resolve .ts (dev) or .js (npm/dist) — centralised in plugin-system
+    const indexPath = resolvePluginSource(plugin.dir);
 
     // SECURITY CHECK 1: Verify source hasn't changed since audit/approval
     if (!pluginManager.verifySourceHash(plugin.manifest.name)) {

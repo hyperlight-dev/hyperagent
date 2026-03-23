@@ -309,21 +309,50 @@ export function contentHash(source: string): string {
 }
 
 /**
+ * Resolve the source file for a plugin directory.
+ *
+ * In dev mode (source repo), prefers .ts so edits are reflected immediately
+ * without a rebuild. Under node_modules (npm install / bundled binary),
+ * Node.js refuses to strip types from .ts files, so we always use .js.
+ */
+export function resolvePluginSource(pluginDir: string): string {
+  const tsPath = join(pluginDir, "index.ts");
+  const jsPath = join(pluginDir, "index.js");
+
+  // Under node_modules, Node.js can't type-strip .ts — always use .js.
+  // Use path-segment check to avoid false positives on dirs named "node_modules_foo".
+  const underNodeModules =
+    /[\\/]node_modules[\\/]/.test(pluginDir) ||
+    pluginDir.startsWith("node_modules/");
+  if (underNodeModules) {
+    return jsPath;
+  }
+
+  // Dev mode: prefer .ts for live editing, fall back to .js
+  return existsSync(tsPath) ? tsPath : jsPath;
+}
+
+/**
  * Compute combined hash of plugin source and manifest.
  * Used for approval fingerprint and tamper detection.
  * Any change to either file invalidates the approval.
+ *
+ * Note: approvals are scoped to the install context. A plugin approved
+ * in dev (from .ts) must be re-approved when loaded from node_modules
+ * (.js), since the source content differs. This is intentional —
+ * the compiled output should be verified independently.
  */
 export function computePluginHash(pluginDir: string): string | null {
-  const tsPath = join(pluginDir, "index.ts");
+  const sourcePath = resolvePluginSource(pluginDir);
   const jsonPath = join(pluginDir, "plugin.json");
 
   try {
-    const tsContent = readFileSync(tsPath, "utf8");
+    const sourceContent = readFileSync(sourcePath, "utf8");
     const jsonContent = readFileSync(jsonPath, "utf8");
 
     // Hash both files together — any change invalidates
     return createHash("sha256")
-      .update(tsContent, "utf8")
+      .update(sourceContent, "utf8")
       .update(jsonContent, "utf8")
       .digest("hex");
   } catch {
@@ -648,16 +677,17 @@ export function createPluginManager(pluginsDir: string) {
   // ── Source Loading ────────────────────────────────────────────
 
   /**
-   * Load the source code of a plugin's index.js for auditing.
+   * Load the source code of a plugin for auditing.
+   * Resolves .ts (dev) or .js (npm/dist) via resolvePluginSource().
    * Returns the source string, or null if the file doesn't exist.
    */
   function loadSource(name: string): string | null {
     const plugin = plugins.get(name);
     if (!plugin) return null;
 
-    const indexPath = join(plugin.dir, "index.ts");
+    const indexPath = resolvePluginSource(plugin.dir);
     if (!existsSync(indexPath)) {
-      console.error(`[plugins] Warning: ${name}/index.ts not found`);
+      console.error(`[plugins] Warning: ${indexPath} not found`);
       return null;
     }
 
@@ -667,7 +697,7 @@ export function createPluginManager(pluginsDir: string) {
       return source;
     } catch (err) {
       console.error(
-        `[plugins] Warning: failed to read ${name}/index.ts: ${(err as Error).message}`,
+        `[plugins] Warning: failed to read ${name} source: ${(err as Error).message}`,
       );
       return null;
     }
@@ -804,7 +834,7 @@ export function createPluginManager(pluginsDir: string) {
    * Approve a plugin. Requires an existing audit result.
    * Persists the approval to disk immediately.
    *
-   * Uses combined hash (index.ts + plugin.json) for tamper detection.
+   * Uses combined hash (plugin source + plugin.json) for tamper detection.
    *
    * @returns true if approved, false if plugin not found or not audited
    */
@@ -851,7 +881,7 @@ export function createPluginManager(pluginsDir: string) {
 
   /**
    * Check if a plugin has a valid, current approval.
-   * Compares the stored content hash against combined hash (index.ts + plugin.json).
+   * Compares the stored content hash against combined hash (plugin source + plugin.json).
    */
   function isApproved(name: string): boolean {
     const plugin = plugins.get(name);
@@ -869,7 +899,7 @@ export function createPluginManager(pluginsDir: string) {
 
   /**
    * Refresh the `approved` flag on all plugins based on the
-   * persisted approval store and current combined hash (index.ts + plugin.json).
+   * persisted approval store and current combined hash (plugin source + plugin.json).
    * Called after discover() to sync runtime flags with disk state.
    */
   function refreshAllApprovals(): void {
@@ -1167,7 +1197,7 @@ export function createPluginManager(pluginsDir: string) {
     const plugin = plugins.get(name);
     if (!plugin || !plugin.source) return false;
 
-    const indexPath = join(plugin.dir, "index.ts");
+    const indexPath = resolvePluginSource(plugin.dir);
     try {
       const currentSource = readFileSync(indexPath, "utf8");
       return currentSource === plugin.source;

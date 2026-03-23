@@ -24,6 +24,7 @@ import {
   coerceConfigValue,
   loadOperatorConfig,
   exceedsRiskThreshold,
+  resolvePluginSource,
 } from "../src/plugin-system/manager.js";
 
 // ── Fixtures path ────────────────────────────────────────────────────
@@ -443,6 +444,61 @@ describe("contentHash", () => {
 
   it("should differ for different inputs", () => {
     expect(contentHash("hello")).not.toBe(contentHash("world"));
+  });
+});
+
+// ── resolvePluginSource ──────────────────────────────────────────────
+
+describe("resolvePluginSource", () => {
+  // Create temp fixtures with controlled file combinations
+  const tmpBase = join(
+    dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "tmp-resolve-test-" + process.pid,
+  );
+  const devDir = join(tmpBase, "dev-plugin");
+  const devJsOnly = join(tmpBase, "dev-js-only");
+  const nmDir = join(tmpBase, "node_modules", "test-plugin");
+
+  beforeEach(async () => {
+    const { mkdirSync, writeFileSync: fsWrite } = await import("node:fs");
+    mkdirSync(devDir, { recursive: true });
+    fsWrite(join(devDir, "index.ts"), "export const x = 1;");
+    fsWrite(join(devDir, "index.js"), "exports.x = 1;");
+
+    mkdirSync(devJsOnly, { recursive: true });
+    fsWrite(join(devJsOnly, "index.js"), "exports.x = 1;");
+
+    mkdirSync(nmDir, { recursive: true });
+    fsWrite(join(nmDir, "index.ts"), "export const x = 1;");
+    fsWrite(join(nmDir, "index.js"), "exports.x = 1;");
+  });
+
+  afterEach(async () => {
+    const { rmSync } = await import("node:fs");
+    rmSync(tmpBase, { recursive: true, force: true });
+  });
+
+  it("should prefer .ts over .js in dev (non-node_modules) dirs", () => {
+    const result = resolvePluginSource(devDir);
+    expect(result).toMatch(/index\.ts$/);
+  });
+
+  it("should fall back to .js when .ts does not exist in dev", () => {
+    const result = resolvePluginSource(devJsOnly);
+    expect(result).toMatch(/index\.js$/);
+  });
+
+  it("should always return .js under node_modules paths", () => {
+    const result = resolvePluginSource(nmDir);
+    expect(result).toMatch(/index\.js$/);
+  });
+
+  it("should return .js path even if .js missing under node_modules", () => {
+    unlinkSync(join(nmDir, "index.js"));
+    const result = resolvePluginSource(nmDir);
+    // Must return .js (not .ts) — Node can't strip types under node_modules
+    expect(result).toMatch(/index\.js$/);
   });
 });
 
