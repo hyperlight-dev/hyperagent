@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.1.2] - 2026-03-23
+
+### Fixed
+
+- **npm global install** — Launcher script now resolves symlinks before computing lib/ path, fixing `Cannot find module 'hyperagent-launcher.cjs'` when installed via `npm install -g` (symlink from npm bin dir broke relative path resolution)
+- **PATH invocation** — Handle bare command name (no slash in `$0`) by resolving via `command -v` before symlink resolution
+
 ## [v0.1.1] - 2026-03-23
 
 ### Fixed
@@ -84,5 +91,6 @@ Initial public release.
 - Path jailing for filesystem plugins
 - SSRF protection for fetch plugin (DNS + post-connect IP validation)
 
+[v0.1.2]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.1.2
 [v0.1.1]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.1.1
 [v0.1.0]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.1.0
