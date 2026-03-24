@@ -1207,6 +1207,17 @@ export async function handleSlashCommand(
               break;
             }
 
+            // Load source before enabling — syncPluginsToSandbox needs
+            // plugin.source for verifySourceHash(). Without this, the
+            // hash check fails and the plugin is silently disabled.
+            if (!pluginManager.loadSource(pluginName)) {
+              console.log(
+                `  ${C.err("❌ Failed to load source for")} "${pluginName}". Plugin will not be enabled.`,
+              );
+              console.log();
+              break;
+            }
+
             pluginManager.enable(pluginName);
             console.log(
               `  ✅ Plugin "${pluginName}" enabled (approved fast-path).`,

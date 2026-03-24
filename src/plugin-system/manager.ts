@@ -718,10 +718,27 @@ export function createPluginManager(pluginsDir: string) {
     const plugin = plugins.get(name);
     if (!plugin) return false;
 
-    // Load source if not already loaded
+    // For schema extraction, prefer .ts source — it's the canonical
+    // schema definition and the Rust parser handles it best. Under
+    // node_modules, only .js exists so we fall back gracefully.
+    // try/catch guards against TOCTOU (file deleted between exists check and read).
+    const tsPath = join(plugin.dir, "index.ts");
+    let extractionSource: string | null = null;
+    if (existsSync(tsPath)) {
+      try {
+        extractionSource = readFileSync(tsPath, "utf8");
+      } catch {
+        // Fall through to plugin.source / loadSource
+      }
+    }
+    if (!extractionSource) {
+      extractionSource = plugin.source ?? loadSource(name);
+    }
+    if (!extractionSource) return false;
+
+    // Also ensure plugin.source is loaded for hash verification
     if (!plugin.source) {
-      const source = loadSource(name);
-      if (!source) return false;
+      if (!loadSource(name)) return false;
     }
 
     // If analysis guest is not enabled, fall back to manifest.
@@ -735,7 +752,7 @@ export function createPluginManager(pluginsDir: string) {
     }
 
     try {
-      const metadata = await extractPluginMetadata(plugin.source!);
+      const metadata = await extractPluginMetadata(extractionSource);
 
       // Use extracted schema or fall back to manifest
       if (metadata.schema) {
