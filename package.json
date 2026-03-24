@@ -31,7 +31,7 @@
   },
   "dependencies": {
     "@github/copilot-sdk": "^0.1.32",
-    "@hyperlight/js-host-api": "file:deps/hyperlight-js/src/js-host-api",
+    "@hyperlight/js-host-api": "file:deps/js-host-api",
     "boxen": "^8.0.1",
     "hyperlight-analysis": "file:src/code-validator/guest",
     "zod": "^3.25.0"

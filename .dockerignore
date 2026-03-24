@@ -13,8 +13,6 @@ tests/
 .claude/
 
 # Rust build artifacts (huge - 9GB+)
-deps/hyperlight-js/target/
-src/hyperlight-analysis-guest/target/
 **/target/
 
 # KEEP dist/lib/node_modules (bundled @github/copilot SDK)

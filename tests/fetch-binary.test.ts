@@ -15,7 +15,7 @@ import { createServer, type Server } from "node:http";
 import { type AddressInfo } from "node:net";
 
 // Import hyperlight-js directly
-import { SandboxBuilder } from "../deps/hyperlight-js/src/js-host-api/lib.js";
+import { SandboxBuilder } from "../deps/js-host-api/lib.js";
 
 // Import the fetch plugin createHostFunctions function
 import { createHostFunctions } from "../plugins/fetch/index.js";

@@ -12,20 +12,17 @@ For contribution guidelines (issues, PRs, DCO), see [CONTRIBUTING.md](../CONTRIB
 - **just** command runner (`cargo install just`)
 - **GitHub CLI** (`gh`) authenticated
 
-## Clone and Build
+## Build
 
 ```bash
 git clone https://github.com/hyperlight-dev/hyperagent
 cd hyperagent
 
-# Install Node dependencies
-npm install
-
-# Build native Hyperlight components
-just build
+# First-time setup — builds native addons, installs npm deps
+just setup
 
 # Verify setup
-npm test
+just test
 ```
 
 ## Running from Source

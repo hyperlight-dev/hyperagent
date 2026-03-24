@@ -27,8 +27,9 @@ WORKDIR /build
 # Copy package files first for layer caching
 COPY package*.json ./
 
-# Copy the hyperlight deps (for file: dependency)
-COPY deps/hyperlight-js/src/js-host-api/ ./deps/hyperlight-js/src/js-host-api/
+# Copy the NAPI addon (must be a real directory, not a symlink —
+# use `just docker-build` or resolve symlinks before `docker build`)
+COPY deps/js-host-api/ ./deps/js-host-api/
 COPY src/code-validator/guest/ ./src/code-validator/guest/
 
 # Install dependencies

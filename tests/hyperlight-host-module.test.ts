@@ -16,7 +16,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Import hyperlight-js directly
-import { SandboxBuilder } from "../deps/hyperlight-js/src/js-host-api/lib.js";
+import { SandboxBuilder } from "../deps/js-host-api/lib.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
