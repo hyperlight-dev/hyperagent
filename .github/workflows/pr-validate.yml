@@ -24,6 +24,8 @@ jobs:
       docs-only: ${{ steps.docs-only.outputs.result }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
       - uses: dorny/paths-filter@v3
         id: changes
         with:
