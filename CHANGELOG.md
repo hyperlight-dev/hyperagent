@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.1.4] - 2026-03-24
+
+### Fixed
+
+- **Plugin schema extraction** — Schema extraction failed on compiled `.js` files, causing `applyInlineConfig` to find no recognised keys and `allowedDomains` to never be set. Now prefers `.ts` source for schema parsing (read-only) with TOCTOU-safe fallback to `.js`
+- **Pre-approved plugin enable** — Fast-path (approved plugins skip audit) failed to call `loadSource()`, leaving `plugin.source` null. `verifySourceHash()` then returned false, silently disabling the plugin on sandbox rebuild
+- **CI docs-only skip** — PR validation now skips heavy CI jobs (lint, build, test) when only markdown files change. `skills/**` and `patterns/**` are treated as code (they have integrity tests)
+
 ## [v0.1.3] - 2026-03-24
 
 ### Fixed
@@ -98,6 +106,7 @@ Initial public release.
 - Path jailing for filesystem plugins
 - SSRF protection for fetch plugin (DNS + post-connect IP validation)
 
+[v0.1.4]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.1.4
 [v0.1.3]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.1.3
 [v0.1.2]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.1.2
 [v0.1.1]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.1.1
