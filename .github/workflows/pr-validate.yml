@@ -146,7 +146,7 @@ jobs:
           path: dist/
           retention-days: 7
 
-  # Build Docker image (just setup clones deps so Dockerfile COPY works)
+  # Build Docker image (just setup builds deps + creates symlinks for Dockerfile COPY)
   build-docker:
     name: Build Docker Image
     needs: [docs-pr]
@@ -167,6 +167,14 @@ jobs:
 
       - name: Setup
         run: just setup
+
+      - name: Resolve symlinks for Docker context
+        run: |
+          if [ -L deps/js-host-api ]; then
+            target=$(readlink -f deps/js-host-api)
+            rm deps/js-host-api
+            cp -r "$target" deps/js-host-api
+          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

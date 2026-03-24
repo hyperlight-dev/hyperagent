@@ -9,26 +9,22 @@
 #   - KVM support (for running the Hyperlight micro-VM)
 #
 # First-time setup:
-#   just setup       # clones + builds hyperlight-js, installs npm deps
+#   just setup       # builds native addons, installs npm deps
 #
 # ─────────────────────────────────────────────────────────────────────
 
-# Windows: use PowerShell, replace backslashes for clang compatibility
+# Windows: use PowerShell
 set windows-shell := ["pwsh.exe", "-NoLogo", "-Command"]
-
-# In windows we need to replace the backslashes with forward slashes
-# otherwise clang will misinterpret the paths
-PWD := replace(justfile_dir(), "\\", "/")
 
 # On Windows, use Ninja generator for CMake to avoid aws-lc-sys build issues
 export CMAKE_GENERATOR := if os() == "windows" { "Ninja" } else { "" }
 
-# The hyperlight-js repo URL and ref to build against.
-# Currently using Simon's fork with in-flight PRs (binary types, call stats).
-# TODO: Switch to hyperlight-dev/hyperlight-js main once PRs land upstream.
-hyperlight-repo   := "https://github.com/simongdavies/hyperlight-js.git"
-hyperlight-ref    := "hyperagent"
-hyperlight-dir    := justfile_dir() / "deps" / "hyperlight-js"
+# The hyperlight-js workspace root, discovered from Cargo's git checkout.
+# The runtime's Cargo.toml uses a git dep on hyperlight-js-runtime, so Cargo
+# already clones the full workspace — we reuse that checkout to build the
+# NAPI addon (js-host-api) without a separate git clone.
+# Resolved lazily by the resolve-hyperlight-dir recipe.
+hyperlight-link   := justfile_dir() / "deps" / "js-host-api"
 
 # Hyperlight analysis guest (secure code validation in micro-VM)
 analysis-guest-dir := justfile_dir() / "src" / "code-validator" / "guest"
@@ -37,10 +33,11 @@ analysis-guest-dir := justfile_dir() / "src" / "code-validator" / "guest"
 runtime-dir := justfile_dir() / "src" / "sandbox" / "runtime"
 
 # HYPERLIGHT_CFLAGS needed for building guests that link rquickjs/QuickJS:
-# -I include/ provides stubs for the hyperlight target (no libc)
-# -D__wasi__=1 disables pthread support in QuickJS
-# Uses forward slashes (PWD) so clang works on Windows
-runtime-cflags := "-I" + PWD + "/deps/hyperlight-js/src/hyperlight-js-runtime/include -D__wasi__=1"
+# The hyperlight target has no libc, so QuickJS needs stub headers plus
+# -D__wasi__=1 to disable pthreads. Uses cargo metadata to find the
+# include/ dir from the hyperlight-js-runtime dependency.
+# Fails loudly if resolution fails — empty CFLAGS causes cryptic build errors.
+runtime-cflags := `node -e "var m=JSON.parse(require('child_process').execSync('cargo +1.89 metadata --format-version 1 --manifest-path src/sandbox/runtime/Cargo.toml',{encoding:'utf8',stdio:['pipe','pipe','inherit'],maxBuffer:20*1024*1024}));var p=m.packages.find(function(p){return p.name==='hyperlight-js-runtime'});if(!p){process.stderr.write('ERROR: hyperlight-js-runtime not found in cargo metadata\n');process.exit(1)}console.log('-I'+require('path').join(require('path').dirname(p.manifest_path),'include')+' -D__wasi__=1')"`
 
 # Export HYPERLIGHT_CFLAGS so cargo-hyperlight picks them up when building runtimes
 export HYPERLIGHT_CFLAGS := runtime-cflags
@@ -50,12 +47,29 @@ export HYPERLIGHT_CFLAGS := runtime-cflags
 # Without this, the default runtime (no ha:ziplib) would be embedded.
 export HYPERLIGHT_JS_RUNTIME_PATH := runtime-dir / "target" / "x86_64-hyperlight-none" / "release" / "hyperagent-runtime"
 
-# Clone (or update) the hyperlight-js dependency at the pinned ref.
-# Cross-platform: - prefix ignores clone failure (dir already exists).
+# Resolve the hyperlight-js workspace root from Cargo's git checkout.
+# Uses cargo metadata to find where hyperlight-js-runtime lives, then
+# derives the workspace src/ dir (js-host-api is a sibling crate).
+# Outputs the workspace root path (parent of src/).
 [private]
-fetch-hyperlight:
-    -git clone --branch "{{hyperlight-ref}}" --single-branch --depth 1 "{{hyperlight-repo}}" "{{hyperlight-dir}}"
-    cd "{{hyperlight-dir}}" && git fetch origin "{{hyperlight-ref}}" --depth 1 && git checkout FETCH_HEAD
+[unix]
+resolve-hyperlight-dir:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(node -e "\
+      var m=JSON.parse(require('child_process').execSync(\
+        'cargo +1.89 metadata --format-version 1 --manifest-path src/sandbox/runtime/Cargo.toml',\
+        {encoding:'utf8',stdio:['pipe','pipe','pipe'],maxBuffer:20*1024*1024}));\
+      var p=m.packages.find(function(p){return p.name==='hyperlight-js-runtime'});\
+      if(p)console.log(require('path').resolve(require('path').dirname(p.manifest_path),'..','..'));\
+      else{process.stderr.write('hyperlight-js-runtime not found in cargo metadata');process.exit(1)}")
+    js_host_api="${dir}/src/js-host-api"
+    if [ ! -d "$js_host_api" ]; then
+      echo "❌ js-host-api not found at ${js_host_api}"
+      echo "   Run: cargo +1.89 fetch --manifest-path src/sandbox/runtime/Cargo.toml"
+      exit 1
+    fi
+    echo "$dir"
 
 # Install required Rust toolchains and cargo subcommands.
 # Cross-platform (Linux/macOS/Windows) — no bash required.
@@ -65,19 +79,27 @@ ensure-tools:
     rustup toolchain install 1.89 --no-self-update
     rustup toolchain install nightly --no-self-update
 
-# Build the native hyperlight-js NAPI addon (debug — default)
-# Depends on build-runtime-release so the custom runtime with native modules
-# is always embedded. cargo clean -p prevents stale cached builds.
+# Build the native hyperlight-js NAPI addon.
+# 1. Builds the custom runtime (Cargo git dep fetches hyperlight-js automatically)
+# 2. Discovers the hyperlight-js workspace from Cargo's checkout
+# 3. Builds the NAPI addon with our custom runtime embedded
+# 4. Symlinks deps/js-host-api → checkout/src/js-host-api for npm file: dep
+# NOTE: [unix] only — Windows support is disabled pending upstream fix (issue #1).
+# When Windows lands, add [windows] variants using mklink /J for junctions.
 [private]
-build-hyperlight: fetch-hyperlight (build-runtime-release)
-    -cd "{{hyperlight-dir}}/src/hyperlight-js" && cargo clean -p hyperlight-js
-    cd "{{hyperlight-dir}}" && just build
-
-# Build the native hyperlight-js NAPI addon (release — optimised)
-[private]
-build-hyperlight-release: fetch-hyperlight (build-runtime-release)
-    -cd "{{hyperlight-dir}}/src/hyperlight-js" && cargo clean -p hyperlight-js
-    cd "{{hyperlight-dir}}" && just build release
+[unix]
+build-hyperlight target="debug": (build-runtime-release)
+    #!/usr/bin/env bash
+    set -euo pipefail
+    hl_dir=$(just resolve-hyperlight-dir)
+    # Clean stale hyperlight-js builds so build.rs re-embeds the runtime
+    cd "${hl_dir}/src/hyperlight-js" && cargo clean -p hyperlight-js 2>/dev/null || true
+    # Build the NAPI addon (inherits HYPERLIGHT_JS_RUNTIME_PATH from env)
+    cd "${hl_dir}" && just build {{ if target == "debug" { "" } else { target } }}
+    # Symlink for npm file: dependency resolution
+    mkdir -p "{{justfile_dir()}}/deps"
+    ln -sfn "${hl_dir}/src/js-host-api" "{{hyperlight-link}}"
+    echo "🔗 deps/js-host-api → ${hl_dir}/src/js-host-api"
 
 # Build the hyperlight-analysis-guest NAPI addon (debug)
 [private]
@@ -89,19 +111,19 @@ build-analysis-guest:
 build-analysis-guest-release:
     cd "{{analysis-guest-dir}}" && just build release && just build-napi release
 
-# Install npm deps (links hyperlight-js and analysis-guest from local dirs)
+# Install npm deps (builds native addons, symlinks js-host-api)
 [private]
-install: build-hyperlight build-analysis-guest
+install: (build-hyperlight) build-analysis-guest
     npm install
 
 # Install npm deps with release-built native addons
 [private]
-install-release: build-hyperlight-release build-analysis-guest-release
+install-release: (build-hyperlight "release") build-analysis-guest-release
     npm install
 
 # ── First-time setup ─────────────────────────────────────────────────
 
-# Clone hyperlight-js, build native addon, install npm deps
+# First-time setup: build native addons, install npm deps
 setup: ensure-tools install
     @echo "✅ Setup complete — run 'just start' to launch the agent"
 
@@ -187,17 +209,12 @@ test-analysis-guest:
 # ── HyperAgent Runtime (native modules) ──────────────────────────────
 
 # Build the custom runtime for the hyperlight target (debug)
-build-runtime: fetch-hyperlight
+build-runtime:
     cd "{{runtime-dir}}" && cargo +1.89 hyperlight build --target-dir target
 
 # Build the custom runtime for the hyperlight target (release)
-build-runtime-release: fetch-hyperlight
+build-runtime-release:
     cd "{{runtime-dir}}" && cargo +1.89 hyperlight build --target-dir target --release
-
-# Legacy alias — the standard build now always uses the custom runtime.
-# Kept for backwards compatibility with existing scripts/docs.
-build-with-runtime: build
-    @echo "✅ (build-with-runtime is now a no-op — 'just build' always uses the custom runtime)"
 
 # Lint Rust code in the custom runtime
 lint-runtime:
@@ -238,7 +255,7 @@ check: lint-all test-all
 clean:
     rm -rf dist node_modules
 
-# Clean everything including the hyperlight-js clone
+# Clean everything including deps/ symlinks
 clean-all: clean
     rm -rf deps
 
@@ -271,6 +288,13 @@ docker-build:
         version="0.0.0-dev"
     fi
     echo "📦 Docker build version: ${version}"
+    # Dereference symlinks — Docker COPY can't follow symlinks outside the build context
+    if [ -L deps/js-host-api ]; then
+      target=$(readlink -f deps/js-host-api)
+      rm deps/js-host-api
+      cp -r "$target" deps/js-host-api
+      trap 'rm -rf deps/js-host-api && ln -sfn "'"$target"'" deps/js-host-api' EXIT
+    fi
     docker build -t hyperagent --build-arg VERSION="${version}" .
 
 # Run hyperagent in Docker (requires /dev/kvm or /dev/mshv)

@@ -36,7 +36,7 @@ Use `just` commands for development (preferred) or npm scripts:
 
 ```bash
 # ── Development ──
-just setup         # First-time setup: clone deps, build native addons, npm install
+just setup         # First-time setup: build native addons, npm install
 just build         # Rebuild native addons and install deps
 just start         # Run agent (tsx src/agent/index.ts)
 

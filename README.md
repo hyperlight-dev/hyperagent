@@ -125,7 +125,7 @@ Requires Node.js 22+, Rust toolchain, and [just](https://github.com/casey/just) 
 git clone https://github.com/hyperlight-dev/hyperagent.git
 cd hyperagent
 
-# First-time setup — clones deps, builds native Rust addons, installs npm packages
+# First-time setup — builds native Rust addons, installs npm packages
 just setup
 
 # Run the agent (tsx transpiles on the fly — no build step needed)
@@ -140,7 +140,7 @@ Key `just` commands:
 
 | Command | What it does |
 |---------|-------------|
-| `just setup` | First-time setup (clone deps, build native addons, npm install) |
+| `just setup` | First-time setup (build native addons, npm install) |
 | `just build` | Rebuild native addons after Rust changes |
 | `just start` | Run agent with tsx (fast iteration) |
 | `just binary-release` | Build optimised standalone binary to `dist/bin/hyperagent` |

@@ -179,7 +179,7 @@ if (!napiTriple) {
 }
 console.log(`  Platform: ${platformKey} → ${napiTriple}`);
 
-const hyperlightNode = join(ROOT, `deps/hyperlight-js/src/js-host-api/js-host-api.${napiTriple}.node`);
+const hyperlightNode = join(ROOT, `deps/js-host-api/js-host-api.${napiTriple}.node`);
 const analysisNode = join(ROOT, `src/code-validator/guest/host/hyperlight-analysis.${napiTriple}.node`);
 
 if (!existsSync(hyperlightNode)) {
@@ -214,7 +214,7 @@ if (existsSync(analysisPkg)) copyFileSync(analysisPkg, join(analysisPkgDir, "pac
 // failures ("InvalidArg, Call the PromiseRaw::then failed").
 // Files are renamed to .cjs because the host package.json has "type": "module"
 // which makes Node.js treat .js as ESM — but lib.js uses require().
-const hyperlightLibJs = join(ROOT, "deps/hyperlight-js/src/js-host-api/lib.js");
+const hyperlightLibJs = join(ROOT, "deps/js-host-api/lib.js");
 const hyperlightHostApiDir = join(LIB_DIR, "js-host-api");
 mkdirSync(hyperlightHostApiDir, { recursive: true });
 copyFileSync(hyperlightNode, join(hyperlightHostApiDir, `js-host-api.${napiTriple}.node`));

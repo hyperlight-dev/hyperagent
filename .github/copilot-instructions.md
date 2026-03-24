@@ -29,7 +29,7 @@ Key config files at root: `package.json`, `tsconfig.json`, `vitest.config.ts`, `
 Always use these commands in this order for a clean build:
 
 ```bash
-just setup         # First-time only: clone deps, build native addons, npm install
+just setup         # First-time only: build native addons, npm install
 just build         # Rebuild native addons and install deps (run after Rust changes)
 ```
 
