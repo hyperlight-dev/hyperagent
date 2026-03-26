@@ -339,6 +339,37 @@ declare module "ha:ooxml-core" {
    */
   export declare function isDark(hex: string): boolean;
   /**
+   * Opaque shape fragment produced by official shape builders.
+   * Cannot be constructed from raw strings by LLM code.
+   *
+   * Internal code can read `._xml`; external (LLM) code treats this as opaque.
+   */
+  export interface ShapeFragment {
+      /** @internal Raw OOXML XML for this shape element. */
+      readonly _xml: string;
+      /** Returns the internal XML (for string concatenation in internal code). */
+      toString(): string;
+  }
+  /**
+   * Create a branded ShapeFragment wrapping validated XML.
+   * Called internally by shape builder functions (textBox, rect, table, etc.).
+   * Underscore-prefixed to signal internal-only — LLMs should use builder
+   * functions (textBox, rect, etc.) not this directly.
+   * @internal
+   */
+  export declare function _createShapeFragment(xml: string): ShapeFragment;
+  /**
+   * Check whether a value is a genuine ShapeFragment from a builder function.
+   * Uses the private symbol brand — cannot be forged by LLM code.
+   */
+  export declare function isShapeFragment(x: unknown): x is ShapeFragment;
+  /**
+   * Convert an array of ShapeFragments to a single XML string.
+   * Validates that every element is a genuine branded ShapeFragment.
+   * @throws If any element is not a ShapeFragment
+   */
+  export declare function fragmentsToXml(fragments: ShapeFragment | ShapeFragment[]): string;
+  /**
    * Get the next unique shape ID.
    * Used by shape-generating functions to ensure unique IDs within a slide.
    */
@@ -383,6 +414,12 @@ declare module "ha:ooxml-core" {
 }
 
 declare module "ha:pptx-charts" {
+  /** Maximum charts per presentation deck. */
+  export declare const MAX_CHARTS_PER_DECK = 50;
+  /** Maximum data series per chart (Excel column reference limit B–Y). */
+  export declare const MAX_SERIES_PER_CHART = 24;
+  /** Maximum categories (X-axis labels) per chart. */
+  export declare const MAX_CATEGORIES_PER_CHART = 100;
   export interface ChartSeries {
       /** Series name (appears in legend). REQUIRED. */
       name: string;
@@ -574,6 +611,9 @@ declare module "ha:pptx-charts" {
       h?: number;
   }
   export interface EmbedChartResult {
+      /** ShapeFragment for use in customSlide shapes array. */
+      shape: ShapeFragment;
+      /** @internal Raw shape XML string (kept for internal compatibility). */
       shapeXml: string;
       zipEntries: Array<{
           name: string;
@@ -581,7 +621,7 @@ declare module "ha:pptx-charts" {
       }>;
       chartRelId: string;
       chartIndex: number;
-      /** Returns shapeXml when converted to string (e.g., in string concatenation). */
+      /** @deprecated Throws error — use .shape instead. */
       toString(): string;
   }
   interface PresentationWithCharts {
@@ -737,7 +777,7 @@ declare module "ha:pptx-tables" {
    * @param opts.style.headerFontSize - Header font size in pt
    * @returns Shape XML fragment for use in slide body
    */
-  export declare function table(opts: TableOptions): string;
+  export declare function table(opts: TableOptions): ShapeFragment;
   export interface KVItem {
       key: string;
       value: string;
@@ -766,7 +806,7 @@ declare module "ha:pptx-tables" {
    * @param opts - KV table options: { x?, y?, w?, items: Array<{key, value}>, theme?, style? }
    * @returns Shape XML fragment
    */
-  export declare function kvTable(opts: KVTableOptions): string;
+  export declare function kvTable(opts: KVTableOptions): ShapeFragment;
   export interface ComparisonOption {
       /** Column header name */
       name: string;
@@ -813,7 +853,7 @@ declare module "ha:pptx-tables" {
    * @param opts - REQUIRED: { features: string[], options: Array<{name: string, values: boolean[]}> }. Optional: x?, y?, w?, theme?, style?
    * @returns Shape XML fragment
    */
-  export declare function comparisonTable(opts: ComparisonTableOptions): string;
+  export declare function comparisonTable(opts: ComparisonTableOptions): ShapeFragment;
   export interface TimelineItem {
       /** Phase/milestone label */
       label: string;
@@ -846,7 +886,7 @@ declare module "ha:pptx-tables" {
    * @param opts - Timeline options: { x?, y?, w?, items: Array<{label, description?, color?}>, theme?, style? }
    * @returns Shape XML fragment (uses table layout)
    */
-  export declare function timeline(opts: TimelineOptions): string;
+  export declare function timeline(opts: TimelineOptions): ShapeFragment;
 }
 
 declare module "ha:pptx" {
@@ -902,7 +942,7 @@ declare module "ha:pptx" {
   export interface Presentation {
       theme: Theme;
       slideCount: number;
-      addBody(shapes: string | string[], opts?: SlideOptions): void;
+      addBody(shapes: ShapeFragment | ShapeFragment[], opts?: SlideOptions): void;
       build(): Array<{
           name: string;
           data: string | Uint8Array;
@@ -1393,7 +1433,8 @@ declare module "ha:pptx" {
       extraItems?: string[] | string;
   }
   export interface CustomSlideOptions {
-      shapes: string;
+      /** Array of ShapeFragment objects from shape builders (textBox, rect, table, etc.). REQUIRED. */
+      shapes: ShapeFragment | ShapeFragment[];
       background?: string | GradientSpec;
       transition?: string;
       transitionDuration?: number;
@@ -1580,13 +1621,14 @@ declare module "ha:pptx" {
       fontSize?: number;
   }
   export { type Theme };
+  export { type ShapeFragment, isShapeFragment, fragmentsToXml };
   export { table, kvTable, comparisonTable, timeline, TABLE_STYLES, } from "ha:pptx-tables";
   export { contrastRatio };
   export { getThemeNames };
   export { inches, fontSize } from "ha:ooxml-core";
   /**
    * Create a solid fill XML element.
-   * Use for custom slide backgrounds via pres.addSlide(solidFill('000000'), shapes).
+   * Use for shape fills or customSlide({ background }) backgrounds.
    * @param {string} color - Hex color (6 digits, no #)
    * @param {number} [opacity] - Opacity from 0 (transparent) to 1 (opaque). Omit for fully opaque.
    * @returns {string} Solid fill XML
@@ -1617,9 +1659,9 @@ declare module "ha:pptx" {
    * @param {string} [opts.background] - Fill color (hex)
    * @param {number} [opts.lineSpacing] - Line spacing in points
    * @param {boolean} [opts.autoFit] - Auto-scale fontSize to fit text in shape. Use when text length is variable.
-   * @returns {string} Shape XML fragment
+   * @returns {ShapeFragment} Branded shape fragment
    */
-  export declare function textBox(opts: TextBoxOptions): string;
+  export declare function textBox(opts: TextBoxOptions): ShapeFragment;
   /**
    * Create a colored rectangle with optional text.
    * @param {Object} opts
@@ -1636,9 +1678,9 @@ declare module "ha:pptx" {
    * @param {number} [opts.cornerRadius] - Corner radius in points
    * @param {string} [opts.borderColor] - Border color
    * @param {number} [opts.borderWidth=1] - Border width in points
-   * @returns {string} Shape XML fragment
+   * @returns {ShapeFragment} Branded shape fragment
    */
-  export declare function rect(opts: RectOptions): string;
+  export declare function rect(opts: RectOptions): ShapeFragment;
   /**
    * Create a bulleted list.
    * @param {Object} opts
@@ -1651,9 +1693,9 @@ declare module "ha:pptx" {
    * @param {string} [opts.color] - Text color
    * @param {string} [opts.bulletColor] - Bullet color
    * @param {number} [opts.lineSpacing=24] - Line spacing
-   * @returns {string} Shape XML fragment
+   * @returns {ShapeFragment} Branded shape fragment
    */
-  export declare function bulletList(opts: BulletListOptions): string;
+  export declare function bulletList(opts: BulletListOptions): ShapeFragment;
   /**
    * Create a numbered list.
    * @param {Object} opts
@@ -1666,9 +1708,9 @@ declare module "ha:pptx" {
    * @param {string} [opts.color] - Text color
    * @param {number} [opts.lineSpacing=24] - Line spacing
    * @param {number} [opts.startAt=1] - Starting number
-   * @returns {string} Shape XML fragment
+   * @returns {ShapeFragment} Branded shape fragment
    */
-  export declare function numberedList(opts: NumberedListOptions): string;
+  export declare function numberedList(opts: NumberedListOptions): ShapeFragment;
   /**
    * Create an image placeholder (colored rect with label).
    * Use this until binary image embedding is supported.
@@ -1680,9 +1722,9 @@ declare module "ha:pptx" {
    * @param {string} [opts.label='Image'] - Placeholder label
    * @param {string} [opts.fill='3D4450'] - Background color (dark gray)
    * @param {string} [opts.color='B0B8C0'] - Label color (light gray, passes WCAG AA on 3D4450)
-   * @returns {string} Shape XML fragment
+   * @returns {ShapeFragment} Branded shape fragment
    */
-  export declare function imagePlaceholder(opts: ImagePlaceholderOptions): string;
+  export declare function imagePlaceholder(opts: ImagePlaceholderOptions): ShapeFragment;
   /**
    * Create a big metric display (number + label stacked).
    * @param {Object} opts
@@ -1698,9 +1740,9 @@ declare module "ha:pptx" {
    * @param {string} [opts.labelColor] - Label text color (hex). OMIT to auto-select against background.
    * @param {string} [opts.background] - Background fill
    * @param {boolean} [opts.forceColor] - Set true to bypass WCAG contrast validation for valueColor/labelColor.
-   * @returns {string} Shape XML fragment
+   * @returns {ShapeFragment} Branded shape fragment
    */
-  export declare function statBox(opts: StatBoxOptions): string;
+  export declare function statBox(opts: StatBoxOptions): ShapeFragment;
   /**
    * Create a line between two points.
    * @param {Object} opts
@@ -1711,9 +1753,9 @@ declare module "ha:pptx" {
    * @param {string} [opts.color='666666'] - Line color (hex)
    * @param {number} [opts.width=1.5] - Line width in points
    * @param {string} [opts.dash] - Dash style: 'solid', 'dash', 'dot', 'dashDot'
-   * @returns {string} Shape XML fragment
+   * @returns {ShapeFragment} Branded shape fragment
    */
-  export declare function line(opts: LineOptions): string;
+  export declare function line(opts: LineOptions): ShapeFragment;
   /**
    * Create an arrow (line with arrowhead) between two points.
    * @param {Object} opts
@@ -1726,9 +1768,9 @@ declare module "ha:pptx" {
    * @param {string} [opts.headType='triangle'] - Arrowhead: 'triangle', 'stealth', 'diamond', 'oval', 'arrow'
    * @param {boolean} [opts.bothEnds=false] - Arrowhead on both ends
    * @param {string} [opts.dash] - Dash style: 'solid', 'dash', 'dot', 'dashDot'
-   * @returns {string} Shape XML fragment
+   * @returns {ShapeFragment} Branded shape fragment
    */
-  export declare function arrow(opts: ArrowOptions): string;
+  export declare function arrow(opts: ArrowOptions): ShapeFragment;
   /**
    * Create a circle or ellipse shape.
    * @param {Object} opts
@@ -1742,9 +1784,9 @@ declare module "ha:pptx" {
    * @param {string} [opts.color='FFFFFF'] - Text color
    * @param {string} [opts.borderColor] - Border color
    * @param {number} [opts.borderWidth=1] - Border width in points
-   * @returns {string} Shape XML fragment
+   * @returns {ShapeFragment} Branded shape fragment
    */
-  export declare function circle(opts: CircleOptions): string;
+  export declare function circle(opts: CircleOptions): ShapeFragment;
   /**
    * Create a callout box — rounded rectangle with accent left border.
    * Good for highlighting insights, quotes, or key takeaways.
@@ -1758,9 +1800,9 @@ declare module "ha:pptx" {
    * @param {string} [opts.background='F5F5F5'] - Fill color
    * @param {number} [opts.fontSize=14] - Font size
    * @param {string} [opts.color] - Text color (hex). OMIT to auto-select a readable colour against the background. Do NOT hardcode.
-   * @returns {string} Shape XML fragment
+   * @returns {ShapeFragment} Branded shape fragment
    */
-  export declare function callout(opts: CalloutOptions): string;
+  export declare function callout(opts: CalloutOptions): ShapeFragment;
   /**
    * Create a preset shape icon.
    *
@@ -1798,9 +1840,9 @@ declare module "ha:pptx" {
    * @param {string} [opts.text] - Optional text inside the shape
    * @param {number} [opts.fontSize=12] - Text font size
    * @param {string} [opts.color='FFFFFF'] - Text color
-   * @returns {string} Shape XML fragment
+   * @returns {ShapeFragment} Branded shape fragment
    */
-  export declare function icon(opts: IconOptions): string;
+  export declare function icon(opts: IconOptions): ShapeFragment;
   /**
    * Create a shape from an SVG path string.
    * Enables custom icons, logos, and diagrams using standard SVG path data.
@@ -1835,9 +1877,9 @@ declare module "ha:pptx" {
    * @param {string} [opts.fill] - Fill color (hex, e.g. '2196F3')
    * @param {string} [opts.stroke] - Stroke color (hex)
    * @param {number} [opts.strokeWidth=1] - Stroke width in points
-   * @returns {string} Shape XML fragment
+   * @returns {ShapeFragment} Branded shape fragment
    */
-  export declare function svgPath(opts: SvgPathOptions): string;
+  export declare function svgPath(opts: SvgPathOptions): ShapeFragment;
   /**
    * Create a gradient fill XML fragment for use in shapes.
    * Supports transparency for cinematic photo overlays (e.g., transparent-to-black).
@@ -1923,9 +1965,9 @@ declare module "ha:pptx" {
    * @param {string} [opts.align='l'] - Paragraph alignment ('l', 'ctr', 'r')
    * @param {string} [opts.valign='t'] - Vertical alignment ('t', 'ctr', 'b')
    * @param {string} [opts.background] - Fill color (hex)
-   * @returns {string} Shape XML fragment
+   * @returns {ShapeFragment} Branded shape fragment
    */
-  export declare function richText(opts: RichTextOptions): string;
+  export declare function richText(opts: RichTextOptions): ShapeFragment;
   /** Options for panel() composite shape */
   export interface PanelOptions {
       /** X position in inches */
@@ -1992,7 +2034,7 @@ declare module "ha:pptx" {
    * @param opts - Panel options
    * @returns Shape XML fragments for all panel elements
    */
-  export declare function panel(opts: PanelOptions): string;
+  export declare function panel(opts: PanelOptions): ShapeFragment;
   /** Options for card() composite shape */
   export interface CardOptions extends PanelOptions {
       /** Accent color for top border (hex). If set, adds a colored stripe at top */
@@ -2017,7 +2059,7 @@ declare module "ha:pptx" {
    * @param opts - Card options
    * @returns Shape XML fragments
    */
-  export declare function card(opts: CardOptions): string;
+  export declare function card(opts: CardOptions): ShapeFragment;
   /**
    * Create a text box with a clickable hyperlink.
    * The entire text box is clickable. For inline hyperlinks within
@@ -2034,9 +2076,9 @@ declare module "ha:pptx" {
    * @param {string} [opts.color='2196F3'] - Text color (default blue)
    * @param {boolean} [opts.underline=true] - Underline text
    * @param {Object} pres - Presentation builder (needed to register the link relationship)
-   * @returns {string} Shape XML fragment
+   * @returns {ShapeFragment} Branded shape fragment
    */
-  export declare function hyperlink(opts: HyperlinkOptions, pres: PresentationInternal): string;
+  export declare function hyperlink(opts: HyperlinkOptions, pres: PresentationInternal): ShapeFragment;
   /** Image dimensions in pixels */
   export interface ImageDimensions {
       width: number;
@@ -2100,9 +2142,9 @@ declare module "ha:pptx" {
    * @param {string} [opts.format='png'] - Image format: 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'svg'
    * @param {string} [opts.fit='stretch'] - How to fit image: 'stretch' (distort to fill), 'contain' (fit within, may letterbox), 'cover' (fill, may crop)
    * @param {string} [opts.name] - Optional image name (for the ZIP path)
-   * @returns {string} Shape XML fragment for use in slide body
+   * @returns {ShapeFragment} Branded shape fragment for use in slide body
    */
-  export declare function embedImage(pres: PresentationInternal, opts: EmbedImageOptions): string;
+  export declare function embedImage(pres: PresentationInternal, opts: EmbedImageOptions): ShapeFragment;
   /**
    * Helper to embed an image from a URL with auto-detected format.
    * This combines readBinary() and embedImage() into a simpler workflow.
@@ -2129,11 +2171,11 @@ declare module "ha:pptx" {
    * @param {number} opts.w - Width in inches
    * @param {number} opts.h - Height in inches
    * @param {string} [opts.format] - Override format detection (png, jpg, gif, etc.)
-   * @returns {string} Shape XML fragment for use in slide body
+   * @returns {ShapeFragment} Branded shape fragment for use in slide body
    */
   export declare function embedImageFromUrl(pres: PresentationInternal, opts: EmbedImageOptions & {
       url: string;
-  }): string;
+  }): ShapeFragment;
   /** Slide width in inches (16:9 aspect ratio). */
   export declare const SLIDE_WIDTH_INCHES = 13.333;
   /** Slide height in inches (16:9 aspect ratio). */
@@ -2168,9 +2210,7 @@ declare module "ha:pptx" {
    * @param items - Array of shape XML strings or objects with toString()
    * @returns Combined XML string
    */
-  export declare function shapes(items: Array<string | {
-      toString(): string;
-  } | null | undefined>): string;
+  export declare function shapes(items: Array<ShapeFragment | null | undefined>): ShapeFragment;
   /**
    * Calculate positions for items in equal-width columns.
    * Useful for stat boxes, image cards, or any side-by-side layout.
@@ -2241,9 +2281,9 @@ declare module "ha:pptx" {
    * @param {number} [opts.y=0] - Y position in inches
    * @param {number} [opts.w] - Width in inches (default: full slide width)
    * @param {number} [opts.h] - Height in inches (default: full slide height)
-   * @returns {string} OOXML shape string
+   * @returns {ShapeFragment} Branded shape fragment
    */
-  export declare function overlay(opts?: OverlayOptions): string;
+  export declare function overlay(opts?: OverlayOptions): ShapeFragment;
   /**
    * Create a gradient overlay for cinematic effects.
    * Use for half-fades, vignettes, or directional darkening on image slides.
@@ -2271,9 +2311,9 @@ declare module "ha:pptx" {
    * @param {number} [opts.y=0] - Y position in inches
    * @param {number} [opts.w] - Width in inches (default full slide)
    * @param {number} [opts.h] - Height in inches (default full slide)
-   * @returns {string} OOXML shape string
+   * @returns {ShapeFragment} Branded shape fragment
    */
-  export declare function gradientOverlay(opts?: GradientOverlayOptions): string;
+  export declare function gradientOverlay(opts?: GradientOverlayOptions): ShapeFragment;
   /**
    * Create a full-bleed background image that covers the entire slide.
    * Use with customSlide to create hero slides with image backgrounds.
@@ -2290,22 +2330,22 @@ declare module "ha:pptx" {
    * @param {Object} pres - Presentation object from createPresentation()
    * @param {Uint8Array} data - Image data (from fetchBinary, readBinary, or shared-state)
    * @param {string} [format='jpg'] - Image format (jpg, png, gif, webp, etc.)
-   * @returns {string} OOXML shape string for a full-slide image
+   * @returns {ShapeFragment} Branded shape fragment for a full-slide image
    */
-  export declare function backgroundImage(pres: PresentationInternal, data: Uint8Array, format?: string): string;
+  export declare function backgroundImage(pres: PresentationInternal, data: Uint8Array, format?: string): ShapeFragment;
   /**
    * Create a gradient background for slides.
-   * Use with pres.addSlide() or as defaultBackground in createPresentation().
+   * Use with customSlide({ background }) or as defaultBackground in createPresentation().
    *
    * @param {string} color1 - Start color (hex, e.g. '000000')
    * @param {string} color2 - End color (hex, e.g. '1a1a2e')
    * @param {number} [angle=270] - Gradient angle in degrees (0=right, 90=down, 180=left, 270=up)
-   * @returns {string} Background XML for use with pres.addSlide()
+   * @returns {string} Background XML for use with customSlide()
    *
    * @example
    * // Vertical gradient (top to bottom)
-   * const bg = gradientBg('000000', '1a1a2e', 180);
-   * pres.addSlide(bg, shapes);
+   * const pres = createPresentation({ theme: 'brutalist' });
+   * customSlide(pres, { shapes: [...], background: '000000' });
    *
    * @example
    * // As default background for all slides
@@ -2315,6 +2355,19 @@ declare module "ha:pptx" {
    * });
    */
   export declare function gradientBg(color1: string, color2: string, angle?: number): string;
+  export interface ValidationIssue {
+      code: string;
+      severity: "error" | "warn";
+      message: string;
+      part?: string;
+      slideIndex?: number;
+      hint?: string;
+  }
+  export interface ValidationResult {
+      ok: boolean;
+      errors: ValidationIssue[];
+      warnings: ValidationIssue[];
+  }
   /**
    * Create a new presentation builder.
    *
@@ -2331,11 +2384,12 @@ declare module "ha:pptx" {
    * titleSlide(pres, { title: 'My Title' });
    * contentSlide(pres, { title: 'Content', bullets: ['Point 1', 'Point 2'] });
    *
-   * // For CUSTOM layouts, use pres.addSlide() directly:
-   * const bg = solidFill(pres.theme.bg);
-   * const shapes = textBox({x: 1, y: 1, w: 8, h: 1, text: 'Custom text'}) +
-   *                rect({x: 1, y: 3, w: 4, h: 2, fill: pres.theme.accent1});
-   * pres.addSlide(bg, shapes, { transition: 'fade' });
+   * // For CUSTOM layouts, use customSlide():
+   * customSlide(pres, {
+   *   shapes: [textBox({x: 1, y: 1, w: 8, h: 1, text: 'Custom text'}),
+   *            rect({x: 1, y: 3, w: 4, h: 2, fill: pres.theme.accent1})],
+   *   transition: 'fade'
+   * });
    *
    * // Build final file
    * const zip = pres.buildZip();
@@ -2423,12 +2477,19 @@ declare module "ha:pptx" {
        * pres.addBody(textBox({x:1, y:1, w:8, h:1, text:'Hello'}));
        *
        * // With solid background:
-       * pres.addBody(shapes, { background: '0D1117', transition: 'fade' });
+       * pres.addBody([shape1, shape2], { background: '0D1117', transition: 'fade' });
        *
        * // With gradient background:
-       * pres.addBody(shapes, { background: {color1: '000000', color2: '1a1a2e', angle: 180} });
+       * pres.addBody([shape1], { background: {color1: '000000', color2: '1a1a2e', angle: 180} });
        */
-      addBody(shapesXml: string | string[], slideOpts?: SlideOptions): void;
+      addBody(shapesInput: ShapeFragment | ShapeFragment[] | string | string[], slideOpts?: SlideOptions): void;
+      /**
+       * Internal: add shapes (as pre-validated XML string) to a new slide.
+       * Resolves background from per-slide > defaultBackground > theme.
+       * Not on the Presentation interface — internal use only.
+       * @internal
+       */
+      _addBodyRaw(shapesStr: string, slideOpts?: SlideOptions): void;
       /**
        * Insert a slide at a specific index. Existing slides shift right.
        * @param {number} index - Position to insert (0-based). Clamped to valid range.
@@ -2714,17 +2775,18 @@ declare module "ha:pptx" {
    * Add a blank slide with just the theme background (NO content).
    *
    * ⚠️ WARNING: This creates an EMPTY slide. You CANNOT add shapes to it later.
-   * For custom layouts with shapes, use pres.addSlide() directly instead:
+   * For custom layouts with shapes, use customSlide() instead:
    *
    * @example
    * // DON'T do this — blankSlide creates empty slide with no way to add content:
    * blankSlide(pres);  // Creates empty slide, cannot add shapes after
    *
-   * // DO this instead — use addSlide for custom layouts:
-   * const bg = solidFill(pres.theme.bg);
-   * const shapes = textBox({x: 1, y: 1, w: 8, h: 1, text: 'Custom slide'}) +
-   *                rect({x: 1, y: 3, w: 4, h: 2, fill: pres.theme.accent1});
-   * pres.addSlide(bg, shapes, { transition: 'fade' });
+   * // DO this instead — use customSlide for custom layouts:
+   * customSlide(pres, {
+   *   shapes: [textBox({x: 1, y: 1, w: 8, h: 1, text: 'Custom slide'}),
+   *            rect({x: 1, y: 3, w: 4, h: 2, fill: pres.theme.accent1})],
+   *   transition: 'fade'
+   * });
    *
    * @param {Object} pres - Presentation object from createPresentation(). REQUIRED as first param.
    * @returns {void}
@@ -3230,9 +3292,9 @@ declare module "ha:pptx" {
    * @param {string} [opts.titleColor='8B949E'] - Title color
    * @param {boolean} [opts.lineNumbers=false] - Show line numbers
    * @param {number} [opts.cornerRadius=4] - Corner radius in points
-   * @returns {string} Shape XML fragment
+   * @returns {ShapeFragment} Branded shape fragment
    */
-  export declare function codeBlock(opts: CodeBlockOptions): string;
+  export declare function codeBlock(opts: CodeBlockOptions): ShapeFragment;
   /**
    * Slide configuration for batch creation.
    * Each object describes one slide using a declarative config.
@@ -3364,20 +3426,21 @@ declare module "ha:pptx" {
    *
    * @example
    * // Single image
-   * const imgXml = await fetchAndEmbed(pres, {
+   * const img = fetchAndEmbed(pres, {
    *   url: "https://example.com/photo.jpg",
-   *   x: 1, y: 1, w: 4, h: 3
+   *   x: 1, y: 1, w: 4, h: 3,
+   *   fetchFn: fetchBinary
    * });
-   * customSlide(pres, { shapes: imgXml + textBox({...}) });
+   * customSlide(pres, { shapes: [img, textBox({...})] });
    *
    * @example
    * // With fetch plugin
    * import { fetchBinary } from "host:fetch";
-   * const imgXml = await fetchAndEmbed(pres, {
+   * const img = fetchAndEmbed(pres, {
    *   url: "https://cdn.example.com/hero.jpg",
    *   x: 0, y: 0, w: 13.333, h: 7.5,
    *   fit: "cover",
-   *   fetchFn: fetchBinary  // Pass the fetch function
+   *   fetchFn: fetchBinary
    * });
    *
    * @param {Object} pres - Presentation object
@@ -3390,7 +3453,7 @@ declare module "ha:pptx" {
    * @param {string} [opts.format] - Image format (auto-detected from URL if omitted)
    * @param {string} [opts.fit] - Fit mode: 'stretch', 'contain', 'cover'
    * @param {Function} opts.fetchFn - Fetch function (e.g., fetchBinary from host:fetch)
-   * @returns {string} Image XML fragment for use in shapes
+   * @returns {ShapeFragment} Branded image shape fragment
    */
   export declare function fetchAndEmbed(pres: Pres, opts: {
       url: string;
@@ -3401,7 +3464,7 @@ declare module "ha:pptx" {
       format?: string;
       fit?: "stretch" | "contain" | "cover";
       fetchFn: (url: string) => Uint8Array;
-  }): string;
+  }): ShapeFragment;
   /**
    * Fetch multiple images and embed them all, returning XML fragments.
    * Uses fetchBinaryBatch for efficient parallel downloads when maxParallelFetches > 1.
@@ -3416,13 +3479,13 @@ declare module "ha:pptx" {
    *   ],
    *   fetchBatchFn: fetchBinaryBatch
    * });
-   * // images = [{ url, xml }, { url, xml }, { url, xml }] or [{ url, error }, ...]
+   * // images = [{ url, shape }, { url, shape }, { url, shape }] or [{ url, error }, ...]
    *
    * @param {Object} pres - Presentation object
    * @param {Object} opts - Options
    * @param {Array} opts.items - Array of {url, x, y, w, h, format?, fit?}
    * @param {Function} opts.fetchBatchFn - Batch fetch function (fetchBinaryBatch from host:fetch)
-   * @returns {Array} Array of {url, xml} or {url, error} for each item
+   * @returns {Array} Array of {url, shape: ShapeFragment} or {url, error} for each item
    */
   export declare function fetchAndEmbedBatch(pres: Pres, opts: {
       items: Array<{
@@ -3441,7 +3504,7 @@ declare module "ha:pptx" {
       }>;
   }): Array<{
       url: string;
-      xml?: string;
+      shape?: ShapeFragment;
       error?: string;
   }>;
 }

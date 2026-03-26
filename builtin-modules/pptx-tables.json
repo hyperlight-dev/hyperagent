@@ -3,14 +3,17 @@
   "description": "Styled tables for PPTX presentations - headers, borders, alternating rows",
   "author": "system",
   "mutable": false,
-  "sourceHash": "sha256:399b5349b1c8c187",
-  "dtsHash": "sha256:82d903ffbf4dfb1e",
+  "sourceHash": "sha256:5940fb396a67f801",
+  "dtsHash": "sha256:3ba75bbc44353467",
   "importStyle": "named",
   "hints": {
     "overview": "Table generation for PPTX. Always used with ha:pptx.",
-    "relatedModules": ["ha:pptx"],
+    "relatedModules": [
+      "ha:pptx"
+    ],
     "criticalRules": [
-      "comparisonTable: options array must not be empty, each option needs {name, values}"
+      "comparisonTable: options array must not be empty, each option needs {name, values}",
+      "All table functions return ShapeFragment — pass directly to customSlide shapes array"
     ],
     "commonPatterns": [
       "table({x, y, w, headers, rows, style}) for data tables",

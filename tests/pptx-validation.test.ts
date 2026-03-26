@@ -17,6 +17,9 @@ const pptx: any = await import("../builtin-modules/pptx.js");
 const charts: any = await import("../builtin-modules/pptx-charts.js");
 const tables: any = await import("../builtin-modules/pptx-tables.js");
 
+/** Convert ShapeFragment or string to XML string for test assertions */
+const toXml = (v: unknown): string => (typeof v === "string" ? v : String(v));
+
 // ══════════════════════════════════════════════════════════════════════
 // ooxml-core: Central Validation Functions
 // ══════════════════════════════════════════════════════════════════════
@@ -453,25 +456,29 @@ describe("pptx shape validation", () => {
 
     it("should emit spcPts for lineSpacing in points", () => {
       // lineSpacing: 24 should produce spcPts val="2400" (points × 100 = centipoints)
-      const xml = pptx.textBox({
-        x: 0,
-        y: 0,
-        w: 4,
-        h: 1,
-        text: "test",
-        lineSpacing: 24,
-      });
+      const xml = toXml(
+        pptx.textBox({
+          x: 0,
+          y: 0,
+          w: 4,
+          h: 1,
+          text: "test",
+          lineSpacing: 24,
+        }),
+      );
       expect(xml).toContain('<a:spcPts val="2400"/>');
     });
 
     it("should not add lnSpc element when lineSpacing omitted", () => {
-      const xml = pptx.textBox({
-        x: 0,
-        y: 0,
-        w: 4,
-        h: 1,
-        text: "no spacing",
-      });
+      const xml = toXml(
+        pptx.textBox({
+          x: 0,
+          y: 0,
+          w: 4,
+          h: 1,
+          text: "no spacing",
+        }),
+      );
       expect(xml).not.toContain("<a:lnSpc>");
     });
 
@@ -522,15 +529,17 @@ describe("pptx shape validation", () => {
         .fill("This line of text needs space")
         .join("\n");
       // With autoFit and explicit large fontSize, it should scale down
-      const xml = pptx.textBox({
-        x: 1,
-        y: 1,
-        w: 8,
-        h: 1.5,
-        text: longText,
-        fontSize: 72,
-        autoFit: true,
-      });
+      const xml = toXml(
+        pptx.textBox({
+          x: 1,
+          y: 1,
+          w: 8,
+          h: 1.5,
+          text: longText,
+          fontSize: 72,
+          autoFit: true,
+        }),
+      );
       // The fontSize in the XML should be smaller than 72pt (7200 centipoints)
       // Look for sz="XXXX" where XXXX < 7200
       const match = xml.match(/sz="(\d+)"/);
@@ -814,7 +823,7 @@ describe("pptx shape validation", () => {
 
     it("should render SVG icons from SVG_ICONS map", () => {
       // "layers" is an SVG icon, not an OOXML preset
-      const result = pptx.icon({ x: 1, y: 1, w: 0.5, shape: "layers" });
+      const result = toXml(pptx.icon({ x: 1, y: 1, w: 0.5, shape: "layers" }));
       // SVG icons use custGeom, not prstGeom
       expect(result).toContain("<a:custGeom>");
       expect(result).toContain("<a:pathLst>");
@@ -841,13 +850,15 @@ describe("pptx shape validation", () => {
     });
 
     it("should accept valid SVG path with fill", () => {
-      const xml = pptx.svgPath({
-        x: 1,
-        y: 1,
-        w: 1,
-        d: "M0 0L24 12L0 24Z",
-        fill: "2196F3",
-      });
+      const xml = toXml(
+        pptx.svgPath({
+          x: 1,
+          y: 1,
+          w: 1,
+          d: "M0 0L24 12L0 24Z",
+          fill: "2196F3",
+        }),
+      );
       expect(xml).toContain("<a:custGeom>");
       expect(xml).toContain("<a:moveTo>");
       expect(xml).toContain("<a:lnTo>");
@@ -856,49 +867,57 @@ describe("pptx shape validation", () => {
     });
 
     it("should parse cubic bezier curves", () => {
-      const xml = pptx.svgPath({
-        x: 0,
-        y: 0,
-        w: 1,
-        d: "M0 0C10 0 20 10 20 20",
-        fill: "FFFFFF",
-      });
+      const xml = toXml(
+        pptx.svgPath({
+          x: 0,
+          y: 0,
+          w: 1,
+          d: "M0 0C10 0 20 10 20 20",
+          fill: "FFFFFF",
+        }),
+      );
       expect(xml).toContain("<a:cubicBezTo>");
     });
 
     it("should parse quadratic bezier curves", () => {
-      const xml = pptx.svgPath({
-        x: 0,
-        y: 0,
-        w: 1,
-        d: "M0 0Q12 0 12 12",
-        fill: "FFFFFF",
-      });
+      const xml = toXml(
+        pptx.svgPath({
+          x: 0,
+          y: 0,
+          w: 1,
+          d: "M0 0Q12 0 12 12",
+          fill: "FFFFFF",
+        }),
+      );
       expect(xml).toContain("<a:quadBezTo>");
     });
 
     it("should handle relative commands (lowercase)", () => {
-      const xml = pptx.svgPath({
-        x: 0,
-        y: 0,
-        w: 1,
-        d: "m5 5l10 0l0 10l-10 0z",
-        fill: "FFFFFF",
-      });
+      const xml = toXml(
+        pptx.svgPath({
+          x: 0,
+          y: 0,
+          w: 1,
+          d: "m5 5l10 0l0 10l-10 0z",
+          fill: "FFFFFF",
+        }),
+      );
       expect(xml).toContain("<a:moveTo>");
       expect(xml).toContain("<a:lnTo>");
       expect(xml).toContain("<a:close/>");
     });
 
     it("should support stroke without fill", () => {
-      const xml = pptx.svgPath({
-        x: 0,
-        y: 0,
-        w: 1,
-        d: "M0 0L10 10",
-        stroke: "333333",
-        strokeWidth: 2,
-      });
+      const xml = toXml(
+        pptx.svgPath({
+          x: 0,
+          y: 0,
+          w: 1,
+          d: "M0 0L10 10",
+          stroke: "333333",
+          strokeWidth: 2,
+        }),
+      );
       expect(xml).toContain("<a:noFill/>");
       expect(xml).toContain("333333");
       expect(xml).toContain("a:ln");
@@ -906,52 +925,60 @@ describe("pptx shape validation", () => {
 
     it("should use custom viewBox dimensions", () => {
       // With viewBox 100x100, coordinates should be normalized differently
-      const xml = pptx.svgPath({
-        x: 0,
-        y: 0,
-        w: 1,
-        d: "M50 50L100 100",
-        fill: "FFFFFF",
-        viewBox: { w: 100, h: 100 },
-      });
+      const xml = toXml(
+        pptx.svgPath({
+          x: 0,
+          y: 0,
+          w: 1,
+          d: "M50 50L100 100",
+          fill: "FFFFFF",
+          viewBox: { w: 100, h: 100 },
+        }),
+      );
       // 50/100 = 0.5 = 50000 EMUs
       expect(xml).toContain('x="50000"');
     });
 
     it("should parse SVG arc commands (A/a)", () => {
       // Absolute arc: M10,10 A5,5 0 0,1 20,10 (half circle)
-      const xml = pptx.svgPath({
-        x: 0,
-        y: 0,
-        w: 1,
-        d: "M10 10 A5 5 0 0 1 20 10",
-        fill: "FFFFFF",
-      });
+      const xml = toXml(
+        pptx.svgPath({
+          x: 0,
+          y: 0,
+          w: 1,
+          d: "M10 10 A5 5 0 0 1 20 10",
+          fill: "FFFFFF",
+        }),
+      );
       expect(xml).toContain("<a:cubicBezTo>"); // arcs are approximated with beziers
       expect(xml).toContain("<a:moveTo>");
     });
 
     it("should parse relative SVG arc commands (a)", () => {
       // Relative arc: m10,10 a5,5 0 0,1 10,0
-      const xml = pptx.svgPath({
-        x: 0,
-        y: 0,
-        w: 1,
-        d: "m10 10 a5 5 0 0 1 10 0",
-        fill: "FFFFFF",
-      });
+      const xml = toXml(
+        pptx.svgPath({
+          x: 0,
+          y: 0,
+          w: 1,
+          d: "m10 10 a5 5 0 0 1 10 0",
+          fill: "FFFFFF",
+        }),
+      );
       expect(xml).toContain("<a:cubicBezTo>");
     });
 
     it("should handle degenerate arcs (zero radius)", () => {
       // Zero radius should produce a line
-      const xml = pptx.svgPath({
-        x: 0,
-        y: 0,
-        w: 1,
-        d: "M10 10 A0 0 0 0 1 20 10",
-        fill: "FFFFFF",
-      });
+      const xml = toXml(
+        pptx.svgPath({
+          x: 0,
+          y: 0,
+          w: 1,
+          d: "M10 10 A0 0 0 0 1 20 10",
+          fill: "FFFFFF",
+        }),
+      );
       expect(xml).toContain("<a:lnTo>");
     });
   });
@@ -1180,14 +1207,16 @@ describe("pptx shape validation", () => {
 
     it("should auto-detect png format from URL", () => {
       const pres = pptx.createPresentation();
-      const shape = pptx.embedImageFromUrl(pres, {
-        url: "https://example.com/image.png",
-        data: new Uint8Array(10),
-        x: 1,
-        y: 2,
-        w: 3,
-        h: 2,
-      });
+      const shape = toXml(
+        pptx.embedImageFromUrl(pres, {
+          url: "https://example.com/image.png",
+          data: new Uint8Array(10),
+          x: 1,
+          y: 2,
+          w: 3,
+          h: 2,
+        }),
+      );
       expect(shape).toContain("p:pic");
       expect(pres._images[0].contentType).toBe("image/png");
     });
@@ -1466,7 +1495,7 @@ describe("pptx slide validation", () => {
         pptx.textBox({ x: 0, y: 0, w: 4, h: 1, text: "Inserted" }),
       );
       expect(pres.slides.length).toBe(3);
-      expect(pres.slides[1].shapes).toContain("Inserted");
+      expect(toXml(pres.slides[1].shapes)).toContain("Inserted");
     });
 
     it("should reorder slides with valid newOrder array", () => {
@@ -1861,43 +1890,49 @@ describe("pptx-tables validation", () => {
     });
 
     it("should use dark theme colors when theme.bg is dark", () => {
-      const xml = tables.table({
-        x: 0,
-        y: 0,
-        w: 10,
-        headers: ["Name"],
-        rows: [["Alpha"], ["Beta"]],
-        theme: { bg: "1B2A4A", fg: "E6EDF3" },
-      });
+      const xml = toXml(
+        tables.table({
+          x: 0,
+          y: 0,
+          w: 10,
+          headers: ["Name"],
+          rows: [["Alpha"], ["Beta"]],
+          theme: { bg: "1B2A4A", fg: "E6EDF3" },
+        }),
+      );
       // On dark themes: alt-row should be dark (2D333B), text should be light (E6EDF3)
       expect(xml).toContain("2D333B"); // dark alt-row
       expect(xml).toContain("E6EDF3"); // light text
     });
 
     it("should use light theme colors when theme.bg is light", () => {
-      const xml = tables.table({
-        x: 0,
-        y: 0,
-        w: 10,
-        headers: ["Name"],
-        rows: [["Alpha"], ["Beta"]],
-        theme: { bg: "FFFFFF" },
-      });
+      const xml = toXml(
+        tables.table({
+          x: 0,
+          y: 0,
+          w: 10,
+          headers: ["Name"],
+          rows: [["Alpha"], ["Beta"]],
+          theme: { bg: "FFFFFF" },
+        }),
+      );
       // On light themes: alt-row should be light (F5F5F5), text should be dark (333333)
       expect(xml).toContain("F5F5F5"); // light alt-row
       expect(xml).toContain("333333"); // dark text
     });
 
     it("should allow style overrides to take precedence over theme", () => {
-      const xml = tables.table({
-        x: 0,
-        y: 0,
-        w: 10,
-        headers: ["Name"],
-        rows: [["Alpha"]],
-        theme: { bg: "1B2A4A", fg: "E6EDF3" },
-        style: { textColor: "FF0000", altRowColor: "00FF00" },
-      });
+      const xml = toXml(
+        tables.table({
+          x: 0,
+          y: 0,
+          w: 10,
+          headers: ["Name"],
+          rows: [["Alpha"]],
+          theme: { bg: "1B2A4A", fg: "E6EDF3" },
+          style: { textColor: "FF0000", altRowColor: "00FF00" },
+        }),
+      );
       expect(xml).toContain("FF0000"); // explicit text color
       expect(xml).not.toContain("E6EDF3"); // theme should be overridden
     });
@@ -1933,13 +1968,15 @@ describe("pptx-tables validation", () => {
     });
 
     it("should pass theme through to underlying table()", () => {
-      const xml = tables.kvTable({
-        x: 0,
-        y: 0,
-        w: 6,
-        items: [{ key: "Name", value: "HyperAgent" }],
-        theme: { bg: "1B2A4A", fg: "E6EDF3" },
-      });
+      const xml = toXml(
+        tables.kvTable({
+          x: 0,
+          y: 0,
+          w: 6,
+          items: [{ key: "Name", value: "HyperAgent" }],
+          theme: { bg: "1B2A4A", fg: "E6EDF3" },
+        }),
+      );
       // On dark theme, should use light text
       expect(xml).toContain("E6EDF3");
     });
@@ -1995,14 +2032,16 @@ describe("pptx-tables validation", () => {
     });
 
     it("should pass theme through to underlying table()", () => {
-      const xml = tables.comparisonTable({
-        x: 0,
-        y: 0,
-        w: 10,
-        features: ["Speed", "Cost"],
-        options: [{ name: "Alpha", values: [true, false] }],
-        theme: { bg: "1B2A4A", fg: "E6EDF3" },
-      });
+      const xml = toXml(
+        tables.comparisonTable({
+          x: 0,
+          y: 0,
+          w: 10,
+          features: ["Speed", "Cost"],
+          options: [{ name: "Alpha", values: [true, false] }],
+          theme: { bg: "1B2A4A", fg: "E6EDF3" },
+        }),
+      );
       // On dark theme, should use light text
       expect(xml).toContain("E6EDF3");
     });
@@ -2041,16 +2080,18 @@ describe("pptx-tables validation", () => {
     });
 
     it("should pass theme through to underlying table()", () => {
-      const xml = tables.timeline({
-        x: 0,
-        y: 0,
-        w: 12,
-        items: [
-          { label: "Phase 1", description: "Planning" },
-          { label: "Phase 2", description: "Execution" },
-        ],
-        theme: { bg: "1B2A4A", fg: "E6EDF3" },
-      });
+      const xml = toXml(
+        tables.timeline({
+          x: 0,
+          y: 0,
+          w: 12,
+          items: [
+            { label: "Phase 1", description: "Planning" },
+            { label: "Phase 2", description: "Execution" },
+          ],
+          theme: { bg: "1B2A4A", fg: "E6EDF3" },
+        }),
+      );
       // On dark theme, should use light text
       expect(xml).toContain("E6EDF3");
     });
@@ -2342,13 +2383,13 @@ describe("layout helpers", () => {
 
   describe("overlay", () => {
     it("should create full-slide overlay by default", () => {
-      const xml = pptx.overlay();
+      const xml = toXml(pptx.overlay());
       expect(xml).toContain("p:sp"); // is a shape
       expect(xml).toContain("000000"); // default black color
     });
 
     it("should respect custom options", () => {
-      const xml = pptx.overlay({ color: "FF0000", opacity: 0.7 });
+      const xml = toXml(pptx.overlay({ color: "FF0000", opacity: 0.7 }));
       expect(xml).toContain("FF0000");
     });
   });

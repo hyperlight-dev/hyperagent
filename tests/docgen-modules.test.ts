@@ -11,6 +11,9 @@ import { describe, it, expect } from "vitest";
 
 const core = await import("../builtin-modules/ooxml-core.js");
 
+/** Convert ShapeFragment or string to XML string for test assertions */
+const toXml = (v: unknown): string => (typeof v === "string" ? v : String(v));
+
 describe("ooxml-core", () => {
   describe("unit conversions", () => {
     it("should convert inches to EMU", () => {
@@ -155,14 +158,16 @@ describe("pptx", () => {
 
   describe("textBox", () => {
     it("should generate shape XML with text", () => {
-      const xml = pptx.textBox({
-        x: 1,
-        y: 2,
-        w: 8,
-        h: 1,
-        text: "Hello",
-        fontSize: 24,
-      });
+      const xml = toXml(
+        pptx.textBox({
+          x: 1,
+          y: 2,
+          w: 8,
+          h: 1,
+          text: "Hello",
+          fontSize: 24,
+        }),
+      );
       expect(xml).toContain("p:sp");
       expect(xml).toContain("txBox");
       expect(xml).toContain("<a:t>Hello</a:t>");
@@ -170,97 +175,113 @@ describe("pptx", () => {
     });
 
     it("should escape XML in text", () => {
-      const xml = pptx.textBox({ x: 0, y: 0, w: 1, h: 1, text: "A & B" });
+      const xml = toXml(
+        pptx.textBox({ x: 0, y: 0, w: 1, h: 1, text: "A & B" }),
+      );
       expect(xml).toContain("A &amp; B");
       expect(xml).not.toContain("A & B");
     });
 
     it("should handle array of paragraphs", () => {
-      const xml = pptx.textBox({
-        x: 0,
-        y: 0,
-        w: 1,
-        h: 1,
-        text: ["Line 1", "Line 2"],
-      });
+      const xml = toXml(
+        pptx.textBox({
+          x: 0,
+          y: 0,
+          w: 1,
+          h: 1,
+          text: ["Line 1", "Line 2"],
+        }),
+      );
       expect(xml).toContain("<a:t>Line 1</a:t>");
       expect(xml).toContain("<a:t>Line 2</a:t>");
     });
 
     it("should normalize 'center' alignment to 'ctr' (OOXML enum)", () => {
-      const xml = pptx.textBox({
-        x: 0,
-        y: 0,
-        w: 4,
-        h: 1,
-        text: "Centered",
-        align: "center",
-      });
+      const xml = toXml(
+        pptx.textBox({
+          x: 0,
+          y: 0,
+          w: 4,
+          h: 1,
+          text: "Centered",
+          align: "center",
+        }),
+      );
       expect(xml).toContain('algn="ctr"');
       expect(xml).not.toContain('algn="center"');
     });
 
     it("should pass through valid alignment values unchanged", () => {
-      const xml = pptx.textBox({
-        x: 0,
-        y: 0,
-        w: 4,
-        h: 1,
-        text: "Right",
-        align: "r",
-      });
+      const xml = toXml(
+        pptx.textBox({
+          x: 0,
+          y: 0,
+          w: 4,
+          h: 1,
+          text: "Right",
+          align: "r",
+        }),
+      );
       expect(xml).toContain('algn="r"');
     });
   });
 
   describe("rect", () => {
     it("should generate rectangle with fill", () => {
-      const xml = pptx.rect({
-        x: 1,
-        y: 2,
-        w: 3,
-        h: 1,
-        fill: "#FF0000",
-      });
+      const xml = toXml(
+        pptx.rect({
+          x: 1,
+          y: 2,
+          w: 3,
+          h: 1,
+          fill: "#FF0000",
+        }),
+      );
       expect(xml).toContain("p:sp");
       expect(xml).toContain('val="FF0000"');
       expect(xml).toContain('prst="rect"');
     });
 
     it("should use roundRect when cornerRadius is set", () => {
-      const xml = pptx.rect({
-        x: 0,
-        y: 0,
-        w: 1,
-        h: 1,
-        fill: "000000",
-        cornerRadius: 5,
-      });
+      const xml = toXml(
+        pptx.rect({
+          x: 0,
+          y: 0,
+          w: 1,
+          h: 1,
+          fill: "000000",
+          cornerRadius: 5,
+        }),
+      );
       expect(xml).toContain('prst="roundRect"');
     });
 
     it("should include text overlay when specified", () => {
-      const xml = pptx.rect({
-        x: 0,
-        y: 0,
-        w: 2,
-        h: 1,
-        fill: "2196F3",
-        text: "Label",
-      });
+      const xml = toXml(
+        pptx.rect({
+          x: 0,
+          y: 0,
+          w: 2,
+          h: 1,
+          fill: "2196F3",
+          text: "Label",
+        }),
+      );
       expect(xml).toContain("<a:t>Label</a:t>");
     });
   });
 
   describe("bulletList", () => {
     it("should generate bulleted items", () => {
-      const xml = pptx.bulletList({
-        x: 1,
-        y: 2,
-        w: 8,
-        h: 4,
-        items: ["First", "Second", "Third"],
-      });
+      const xml = toXml(
+        pptx.bulletList({
+          x: 1,
+          y: 2,
+          w: 8,
+          h: 4,
+          items: ["First", "Second", "Third"],
+        }),
+      );
       expect(xml).toContain("<a:t>First</a:t>");
       expect(xml).toContain("<a:t>Second</a:t>");
       expect(xml).toContain("<a:t>Third</a:t>");
@@ -268,14 +289,16 @@ describe("pptx", () => {
     });
 
     it("should produce well-formed XML with bulletColor", () => {
-      const xml = pptx.bulletList({
-        x: 0,
-        y: 0,
-        w: 8,
-        h: 4,
-        items: ["Item A", "Item B"],
-        bulletColor: "FF0000",
-      });
+      const xml = toXml(
+        pptx.bulletList({
+          x: 0,
+          y: 0,
+          w: 8,
+          h: 4,
+          items: ["Item A", "Item B"],
+          bulletColor: "FF0000",
+        }),
+      );
       // Every opened tag must close — no mismatched tags
       // The bullet char must use XML entity, not raw Unicode
       expect(xml).toContain('char="&#x2022;"');
@@ -291,15 +314,17 @@ describe("pptx", () => {
 
 describe("statBox", () => {
   it("should generate value + label layout", () => {
-    const xml = pptx.statBox({
-      x: 1,
-      y: 2,
-      w: 3,
-      h: 2,
-      value: "$2.4M",
-      label: "Revenue",
-      valueSize: 36,
-    });
+    const xml = toXml(
+      pptx.statBox({
+        x: 1,
+        y: 2,
+        w: 3,
+        h: 2,
+        value: "$2.4M",
+        label: "Revenue",
+        valueSize: 36,
+      }),
+    );
     expect(xml).toContain("<a:t>$2.4M</a:t>");
     expect(xml).toContain("<a:t>Revenue</a:t>");
     expect(xml).toContain('sz="3600"'); // 36pt
@@ -350,110 +375,126 @@ describe("slide builders", () => {
 
 describe("line", () => {
   it("should generate connection shape XML", () => {
-    const xml = pptx.line({
-      x1: 1,
-      y1: 2,
-      x2: 5,
-      y2: 2,
-      color: "#FF0000",
-      width: 2,
-    });
+    const xml = toXml(
+      pptx.line({
+        x1: 1,
+        y1: 2,
+        x2: 5,
+        y2: 2,
+        color: "#FF0000",
+        width: 2,
+      }),
+    );
     expect(xml).toContain("p:cxnSp");
     expect(xml).toContain('val="FF0000"');
     expect(xml).toContain('prst="line"');
   });
 
   it("should handle reverse direction (flip)", () => {
-    const xml = pptx.line({ x1: 5, y1: 3, x2: 1, y2: 1 });
+    const xml = toXml(pptx.line({ x1: 5, y1: 3, x2: 1, y2: 1 }));
     expect(xml).toContain('flipH="1"');
     expect(xml).toContain('flipV="1"');
   });
 
   it("should support dash styles", () => {
-    const xml = pptx.line({
-      x1: 0,
-      y1: 0,
-      x2: 5,
-      y2: 0,
-      dash: "dash",
-    });
+    const xml = toXml(
+      pptx.line({
+        x1: 0,
+        y1: 0,
+        x2: 5,
+        y2: 0,
+        dash: "dash",
+      }),
+    );
     expect(xml).toContain('prstDash val="dash"');
   });
 });
 
 describe("arrow", () => {
   it("should generate line with arrowhead", () => {
-    const xml = pptx.arrow({
-      x1: 1,
-      y1: 2,
-      x2: 5,
-      y2: 4,
-      color: "2196F3",
-    });
+    const xml = toXml(
+      pptx.arrow({
+        x1: 1,
+        y1: 2,
+        x2: 5,
+        y2: 4,
+        color: "2196F3",
+      }),
+    );
     expect(xml).toContain("p:cxnSp");
     expect(xml).toContain('type="triangle"');
     expect(xml).toContain("a:tailEnd");
   });
 
   it("should support both-ends arrowhead", () => {
-    const xml = pptx.arrow({
-      x1: 0,
-      y1: 0,
-      x2: 5,
-      y2: 0,
-      bothEnds: true,
-    });
+    const xml = toXml(
+      pptx.arrow({
+        x1: 0,
+        y1: 0,
+        x2: 5,
+        y2: 0,
+        bothEnds: true,
+      }),
+    );
     expect(xml).toContain("a:headEnd");
     expect(xml).toContain("a:tailEnd");
   });
 
   it("should support custom head types", () => {
-    const xml = pptx.arrow({
-      x1: 0,
-      y1: 0,
-      x2: 5,
-      y2: 0,
-      headType: "stealth",
-    });
+    const xml = toXml(
+      pptx.arrow({
+        x1: 0,
+        y1: 0,
+        x2: 5,
+        y2: 0,
+        headType: "stealth",
+      }),
+    );
     expect(xml).toContain('type="stealth"');
   });
 });
 
 describe("circle", () => {
   it("should generate ellipse shape", () => {
-    const xml = pptx.circle({
-      x: 5,
-      y: 3,
-      w: 2,
-      fill: "4CAF50",
-    });
+    const xml = toXml(
+      pptx.circle({
+        x: 5,
+        y: 3,
+        w: 2,
+        fill: "4CAF50",
+      }),
+    );
     expect(xml).toContain("p:sp");
     expect(xml).toContain('prst="ellipse"');
     expect(xml).toContain('val="4CAF50"');
   });
 
   it("should include text when specified", () => {
-    const xml = pptx.circle({
-      x: 5,
-      y: 3,
-      w: 2,
-      fill: "FF0000",
-      text: "OK",
-    });
+    const xml = toXml(
+      pptx.circle({
+        x: 5,
+        y: 3,
+        w: 2,
+        fill: "FF0000",
+        text: "OK",
+      }),
+    );
     expect(xml).toContain("<a:t>OK</a:t>");
   });
 });
 
 describe("callout", () => {
   it("should generate accent bar + text box", () => {
-    const xml = pptx.callout({
-      x: 1,
-      y: 2,
-      w: 8,
-      h: 1.5,
-      text: "Key insight here",
-      accentColor: "E91E63",
-    });
+    const xml = toXml(
+      pptx.callout({
+        x: 1,
+        y: 2,
+        w: 8,
+        h: 1.5,
+        text: "Key insight here",
+        accentColor: "E91E63",
+      }),
+    );
     expect(xml).toContain("Key insight here");
     expect(xml).toContain('val="E91E63"');
     // Should have two shapes (accent bar + main box)
@@ -463,19 +504,21 @@ describe("callout", () => {
 
 describe("icon", () => {
   it("should generate preset shape", () => {
-    const xml = pptx.icon({
-      x: 1,
-      y: 2,
-      w: 0.5,
-      shape: "star",
-      fill: "FFD700",
-    });
+    const xml = toXml(
+      pptx.icon({
+        x: 1,
+        y: 2,
+        w: 0.5,
+        shape: "star",
+        fill: "FFD700",
+      }),
+    );
     expect(xml).toContain('prst="star5"');
     expect(xml).toContain('val="FFD700"');
   });
 
   it("should support heart shape", () => {
-    const xml = pptx.icon({ x: 0, y: 0, w: 1, shape: "heart" });
+    const xml = toXml(pptx.icon({ x: 0, y: 0, w: 1, shape: "heart" }));
     expect(xml).toContain('prst="heart"');
   });
 });
@@ -491,18 +534,20 @@ describe("gradientFill", () => {
 
 describe("richText", () => {
   it("should support mixed formatting runs", () => {
-    const xml = pptx.richText({
-      x: 1,
-      y: 2,
-      w: 8,
-      h: 1,
-      paragraphs: [
-        [
-          { text: "Hello ", bold: true, color: "FF6666" },
-          { text: "World", italic: true, color: "66AAFF" },
+    const xml = toXml(
+      pptx.richText({
+        x: 1,
+        y: 2,
+        w: 8,
+        h: 1,
+        paragraphs: [
+          [
+            { text: "Hello ", bold: true, color: "FF6666" },
+            { text: "World", italic: true, color: "66AAFF" },
+          ],
         ],
-      ],
-    });
+      }),
+    );
     expect(xml).toContain("<a:t>Hello </a:t>");
     expect(xml).toContain("<a:t>World</a:t>");
     expect(xml).toContain('b="1"');
@@ -510,13 +555,15 @@ describe("richText", () => {
   });
 
   it("should support multiple paragraphs", () => {
-    const xml = pptx.richText({
-      x: 0,
-      y: 0,
-      w: 5,
-      h: 2,
-      paragraphs: [[{ text: "Line 1" }], [{ text: "Line 2" }]],
-    });
+    const xml = toXml(
+      pptx.richText({
+        x: 0,
+        y: 0,
+        w: 5,
+        h: 2,
+        paragraphs: [[{ text: "Line 1" }], [{ text: "Line 2" }]],
+      }),
+    );
     expect((xml.match(/<a:p>/g) || []).length).toBe(2);
   });
 });
@@ -524,16 +571,18 @@ describe("richText", () => {
 describe("hyperlink", () => {
   it("should generate clickable text with link relationship", () => {
     const pres = pptx.createPresentation();
-    const xml = pptx.hyperlink(
-      {
-        x: 1,
-        y: 2,
-        w: 4,
-        h: 0.5,
-        text: "Visit GitHub",
-        url: "https://github.com",
-      },
-      pres,
+    const xml = toXml(
+      pptx.hyperlink(
+        {
+          x: 1,
+          y: 2,
+          w: 4,
+          h: 0.5,
+          text: "Visit GitHub",
+          url: "https://github.com",
+        },
+        pres,
+      ),
     );
     expect(xml).toContain("<a:t>Visit GitHub</a:t>");
     expect(xml).toContain("a:hlinkClick");
@@ -584,13 +633,15 @@ describe("hyperlink", () => {
 
 describe("numberedList", () => {
   it("should generate numbered items", () => {
-    const xml = pptx.numberedList({
-      x: 1,
-      y: 2,
-      w: 8,
-      h: 4,
-      items: ["First", "Second", "Third"],
-    });
+    const xml = toXml(
+      pptx.numberedList({
+        x: 1,
+        y: 2,
+        w: 8,
+        h: 4,
+        items: ["First", "Second", "Third"],
+      }),
+    );
     expect(xml).toContain("<a:t>First</a:t>");
     expect(xml).toContain("<a:t>Third</a:t>");
     expect(xml).toContain("buAutoNum");
@@ -600,19 +651,21 @@ describe("numberedList", () => {
 
 describe("imagePlaceholder", () => {
   it("should generate placeholder rect", () => {
-    const xml = pptx.imagePlaceholder({ x: 2, y: 3, w: 5, h: 4 });
+    const xml = toXml(pptx.imagePlaceholder({ x: 2, y: 3, w: 5, h: 4 }));
     expect(xml).toContain("Image");
     expect(xml).toContain('prst="roundRect"');
   });
 
   it("should accept custom label", () => {
-    const xml = pptx.imagePlaceholder({
-      x: 0,
-      y: 0,
-      w: 3,
-      h: 2,
-      label: "Logo here",
-    });
+    const xml = toXml(
+      pptx.imagePlaceholder({
+        x: 0,
+        y: 0,
+        w: 3,
+        h: 2,
+        label: "Logo here",
+      }),
+    );
     expect(xml).toContain("Logo here");
   });
 });
@@ -621,14 +674,16 @@ describe("embedImage", () => {
   it("should generate picture shape XML with blip reference", () => {
     const pres = pptx.createPresentation();
     const fakeImage = new Uint8Array([0x89, 0x50, 0x4e, 0x47]); // PNG header
-    const xml = pptx.embedImage(pres, {
-      x: 1,
-      y: 2,
-      w: 5,
-      h: 3,
-      data: fakeImage,
-      format: "png",
-    });
+    const xml = toXml(
+      pptx.embedImage(pres, {
+        x: 1,
+        y: 2,
+        w: 5,
+        h: 3,
+        data: fakeImage,
+        format: "png",
+      }),
+    );
     expect(xml).toContain("p:pic");
     expect(xml).toContain("a:blip");
     expect(xml).toContain("rIdImage1");
@@ -857,13 +912,15 @@ describe("build", () => {
 
 describe("codeBlock", () => {
   it("should create a code block with monospace font and dark background", () => {
-    const xml = pptx.codeBlock({
-      x: 1,
-      y: 2,
-      w: 10,
-      h: 4,
-      code: 'fn main() {\n    println!("Hello");\n}',
-    });
+    const xml = toXml(
+      pptx.codeBlock({
+        x: 1,
+        y: 2,
+        w: 10,
+        h: 4,
+        code: 'fn main() {\n    println!("Hello");\n}',
+      }),
+    );
     expect(xml).toContain("Consolas"); // monospace font
     expect(xml).toContain('val="161B22"'); // dark background
     expect(xml).toContain('val="E6EDF3"'); // light text
@@ -871,42 +928,48 @@ describe("codeBlock", () => {
   });
 
   it("should support line numbers", () => {
-    const xml = pptx.codeBlock({
-      x: 0,
-      y: 0,
-      w: 10,
-      h: 3,
-      code: "line one\nline two\nline three",
-      lineNumbers: true,
-    });
+    const xml = toXml(
+      pptx.codeBlock({
+        x: 0,
+        y: 0,
+        w: 10,
+        h: 3,
+        code: "line one\nline two\nline three",
+        lineNumbers: true,
+      }),
+    );
     expect(xml).toContain("1  line one");
     expect(xml).toContain("3  line three");
   });
 
   it("should support optional title bar", () => {
-    const xml = pptx.codeBlock({
-      x: 0,
-      y: 0,
-      w: 10,
-      h: 4,
-      code: "hello()",
-      title: "example.rs",
-    });
+    const xml = toXml(
+      pptx.codeBlock({
+        x: 0,
+        y: 0,
+        w: 10,
+        h: 4,
+        code: "hello()",
+        title: "example.rs",
+      }),
+    );
     expect(xml).toContain("example.rs");
     expect(xml).toContain('val="0D1117"'); // title bar bg
   });
 
   it("should accept custom colors and font", () => {
-    const xml = pptx.codeBlock({
-      x: 0,
-      y: 0,
-      w: 8,
-      h: 3,
-      code: "test",
-      background: "1E1E1E",
-      color: "D4D4D4",
-      fontFamily: "Courier New",
-    });
+    const xml = toXml(
+      pptx.codeBlock({
+        x: 0,
+        y: 0,
+        w: 8,
+        h: 3,
+        code: "test",
+        background: "1E1E1E",
+        color: "D4D4D4",
+        fontFamily: "Courier New",
+      }),
+    );
     expect(xml).toContain('val="1E1E1E"');
     expect(xml).toContain('val="D4D4D4"');
     expect(xml).toContain("Courier New");
@@ -1265,16 +1328,18 @@ const tables: any = await import("../builtin-modules/pptx-tables.js");
 describe("pptx-tables", () => {
   describe("table", () => {
     it("should generate table XML with headers and rows", () => {
-      const xml = tables.table({
-        x: 1,
-        y: 2,
-        w: 10,
-        headers: ["Name", "Value"],
-        rows: [
-          ["CPU", "1000ms"],
-          ["Heap", "64MB"],
-        ],
-      });
+      const xml = toXml(
+        tables.table({
+          x: 1,
+          y: 2,
+          w: 10,
+          headers: ["Name", "Value"],
+          rows: [
+            ["CPU", "1000ms"],
+            ["Heap", "64MB"],
+          ],
+        }),
+      );
       expect(xml).toContain("a:tbl");
       expect(xml).toContain("<a:t>Name</a:t>");
       expect(xml).toContain("<a:t>Value</a:t>");
@@ -1283,37 +1348,43 @@ describe("pptx-tables", () => {
     });
 
     it("should escape XML in cell content", () => {
-      const xml = tables.table({
-        x: 0,
-        y: 0,
-        w: 5,
-        headers: ["Test"],
-        rows: [["A & B"]],
-      });
+      const xml = toXml(
+        tables.table({
+          x: 0,
+          y: 0,
+          w: 5,
+          headers: ["Test"],
+          rows: [["A & B"]],
+        }),
+      );
       expect(xml).toContain("A &amp; B");
     });
 
     it("should apply custom header styling", () => {
-      const xml = tables.table({
-        x: 0,
-        y: 0,
-        w: 5,
-        headers: ["H1"],
-        rows: [["D1"]],
-        style: { headerBg: "FF0000", headerColor: "000000" },
-      });
+      const xml = toXml(
+        tables.table({
+          x: 0,
+          y: 0,
+          w: 5,
+          headers: ["H1"],
+          rows: [["D1"]],
+          style: { headerBg: "FF0000", headerColor: "000000" },
+        }),
+      );
       expect(xml).toContain('val="FF0000"');
     });
 
     it("should support alternating row colors", () => {
-      const xml = tables.table({
-        x: 0,
-        y: 0,
-        w: 5,
-        headers: ["H"],
-        rows: [["R1"], ["R2"], ["R3"]],
-        style: { altRows: true, altRowColor: "EEEEFF" },
-      });
+      const xml = toXml(
+        tables.table({
+          x: 0,
+          y: 0,
+          w: 5,
+          headers: ["H"],
+          rows: [["R1"], ["R2"], ["R3"]],
+          style: { altRows: true, altRowColor: "EEEEFF" },
+        }),
+      );
       expect(xml).toContain('val="EEEEFF"');
       expect(xml).toContain('bandRow="1"');
     });
@@ -1321,15 +1392,17 @@ describe("pptx-tables", () => {
 
   describe("kvTable", () => {
     it("should create a two-column key-value table", () => {
-      const xml = tables.kvTable({
-        x: 1,
-        y: 2,
-        w: 6,
-        items: [
-          { key: "CPU", value: "1000ms" },
-          { key: "Heap", value: "64MB" },
-        ],
-      });
+      const xml = toXml(
+        tables.kvTable({
+          x: 1,
+          y: 2,
+          w: 6,
+          items: [
+            { key: "CPU", value: "1000ms" },
+            { key: "Heap", value: "64MB" },
+          ],
+        }),
+      );
       expect(xml).toContain("<a:t>CPU</a:t>");
       expect(xml).toContain("<a:t>1000ms</a:t>");
       expect(xml).toContain("<a:t>Heap</a:t>");
@@ -1339,17 +1412,19 @@ describe("pptx-tables", () => {
 
   describe("comparisonTable", () => {
     it("should generate comparison with check/cross marks", () => {
-      const xml = tables.comparisonTable({
-        x: 1,
-        y: 2,
-        w: 10,
-        features: ["Fast startup", "Low memory", "Sandboxed"],
-        options: [
-          { name: "VMs", values: [false, false, true] },
-          { name: "Containers", values: [true, true, false] },
-          { name: "Hyperlight", values: [true, true, true] },
-        ],
-      });
+      const xml = toXml(
+        tables.comparisonTable({
+          x: 1,
+          y: 2,
+          w: 10,
+          features: ["Fast startup", "Low memory", "Sandboxed"],
+          options: [
+            { name: "VMs", values: [false, false, true] },
+            { name: "Containers", values: [true, true, false] },
+            { name: "Hyperlight", values: [true, true, true] },
+          ],
+        }),
+      );
       expect(xml).toContain("a:tbl");
       expect(xml).toContain("<a:t>VMs</a:t>");
       expect(xml).toContain("<a:t>Hyperlight</a:t>");
@@ -1360,16 +1435,18 @@ describe("pptx-tables", () => {
 
   describe("timeline", () => {
     it("should generate timeline with phases", () => {
-      const xml = tables.timeline({
-        x: 0.5,
-        y: 3,
-        w: 12,
-        items: [
-          { label: "Q1", description: "Research" },
-          { label: "Q2", description: "Build" },
-          { label: "Q3", description: "Launch" },
-        ],
-      });
+      const xml = toXml(
+        tables.timeline({
+          x: 0.5,
+          y: 3,
+          w: 12,
+          items: [
+            { label: "Q1", description: "Research" },
+            { label: "Q2", description: "Build" },
+            { label: "Q3", description: "Launch" },
+          ],
+        }),
+      );
       expect(xml).toContain("a:tbl");
       expect(xml).toContain("<a:t>Q1</a:t>");
       expect(xml).toContain("<a:t>Build</a:t>");
@@ -1378,14 +1455,16 @@ describe("pptx-tables", () => {
 
   describe("border XML", () => {
     it("should generate well-formed border elements", () => {
-      const xml = tables.table({
-        x: 0,
-        y: 0,
-        w: 5,
-        headers: ["H"],
-        rows: [["R1"]],
-        style: { borderColor: "334455" },
-      });
+      const xml = toXml(
+        tables.table({
+          x: 0,
+          y: 0,
+          w: 5,
+          headers: ["H"],
+          rows: [["R1"]],
+          style: { borderColor: "334455" },
+        }),
+      );
       // Each lnX element must be self-consistent (no inner </a:ln>)
       expect(xml).not.toContain("</a:ln>");
       // lnL must open and close correctly
@@ -1405,14 +1484,16 @@ describe("pptx-tables", () => {
     });
 
     it("should place borders BEFORE fill in tcPr (ECMA-376 §21.1.3.17)", () => {
-      const xml = tables.table({
-        x: 0,
-        y: 0,
-        w: 5,
-        headers: ["H"],
-        rows: [["R1"]],
-        style: { headerBg: "2196F3", borderColor: "CCCCCC" },
-      });
+      const xml = toXml(
+        tables.table({
+          x: 0,
+          y: 0,
+          w: 5,
+          headers: ["H"],
+          rows: [["R1"]],
+          style: { headerBg: "2196F3", borderColor: "CCCCCC" },
+        }),
+      );
       // In every tcPr, lnL must appear before solidFill
       const tcPrs = xml.match(/<a:tcPr[^>]*>.*?<\/a:tcPr>/gs) || [];
       expect(tcPrs.length).toBeGreaterThan(0);

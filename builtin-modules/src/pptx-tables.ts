@@ -21,6 +21,8 @@ import {
   isDark,
   nextShapeId,
   isForceAllColors,
+  _createShapeFragment,
+  type ShapeFragment,
   type Theme,
 } from "ha:ooxml-core";
 import { escapeXml } from "ha:xml-escape";
@@ -186,7 +188,7 @@ export interface TableOptions {
  * @param opts.style.headerFontSize - Header font size in pt
  * @returns Shape XML fragment for use in slide body
  */
-export function table(opts: TableOptions): string {
+export function table(opts: TableOptions): ShapeFragment {
   // ── Input validation ──────────────────────────────────────────────
   const headers = opts.headers || [];
   const rows = opts.rows || [];
@@ -254,13 +256,16 @@ export function table(opts: TableOptions): string {
   // Use explicit rowHeight if provided, otherwise auto-calculate
   const headerRowHeight = opts.rowHeight
     ? inches(opts.rowHeight)
-    : (headers.length > 0 ? inches(calcRowHeight(headers)) : 0);
+    : headers.length > 0
+      ? inches(calcRowHeight(headers))
+      : 0;
 
   const dataRowHeights = opts.rowHeight
     ? rows.map(() => inches(opts.rowHeight!))
-    : rows.map(row => inches(calcRowHeight(row)));
+    : rows.map((row) => inches(calcRowHeight(row)));
 
-  const totalAutoHeight = headerRowHeight + dataRowHeights.reduce((a, b) => a + b, 0);
+  const totalAutoHeight =
+    headerRowHeight + dataRowHeights.reduce((a, b) => a + b, 0);
   const h = opts.h ? inches(opts.h) : totalAutoHeight;
   const colWidth = Math.round(w / colCount);
 
@@ -327,13 +332,13 @@ export function table(opts: TableOptions): string {
     })
     .join("");
 
-  return `<p:graphicFrame>
+  return _createShapeFragment(`<p:graphicFrame>
 <p:nvGraphicFramePr><p:cNvPr id="${nextShapeId()}" name="Table"/><p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr>
 <p:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${w}" cy="${h}"/></p:xfrm>
 <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table">
 <a:tbl><a:tblPr firstRow="1" bandRow="${altRows ? "1" : "0"}"/><a:tblGrid>${gridCols}</a:tblGrid>${headerRow}${dataRows}</a:tbl>
 </a:graphicData></a:graphic>
-</p:graphicFrame>`;
+</p:graphicFrame>`);
 }
 
 export interface KVItem {
@@ -363,7 +368,7 @@ export interface KVTableOptions {
  * @param opts - KV table options: { x?, y?, w?, items: Array<{key, value}>, theme?, style? }
  * @returns Shape XML fragment
  */
-export function kvTable(opts: KVTableOptions): string {
+export function kvTable(opts: KVTableOptions): ShapeFragment {
   // ── Input validation ──────────────────────────────────────────────
   const items = opts.items || [];
   requireArray(items, "kvTable.items");
@@ -451,7 +456,7 @@ export interface ComparisonTableOptions {
  * @param opts - REQUIRED: { features: string[], options: Array<{name: string, values: boolean[]}> }. Optional: x?, y?, w?, theme?, style?
  * @returns Shape XML fragment
  */
-export function comparisonTable(opts: ComparisonTableOptions): string {
+export function comparisonTable(opts: ComparisonTableOptions): ShapeFragment {
   // ── Input validation ──────────────────────────────────────────────
   const features = opts.features || [];
   const options = opts.options || [];
@@ -528,15 +533,24 @@ export interface TimelineOptions {
  * @param opts - Timeline options: { x?, y?, w?, items: Array<{label, description?, color?}>, theme?, style? }
  * @returns Shape XML fragment (uses table layout)
  */
-export function timeline(opts: TimelineOptions): string {
+export function timeline(opts: TimelineOptions): ShapeFragment {
   // ── Input validation ──────────────────────────────────────────────
   // Accept 'events' and 'entries' as common aliases for 'items' (LLMs often use these)
-  const aliasOpts = opts as unknown as { events?: TimelineOptions["items"]; entries?: TimelineOptions["items"] };
+  const aliasOpts = opts as unknown as {
+    events?: TimelineOptions["items"];
+    entries?: TimelineOptions["items"];
+  };
   const rawItems = opts.items || aliasOpts.events || aliasOpts.entries || [];
   requireArray(rawItems, "timeline.items", { nonEmpty: true });
 
   // Normalize items: accept 'title' as alias for 'label', prepend 'date' if present
-  type RawItem = { label?: string; title?: string; date?: string; description?: string; color?: string };
+  type RawItem = {
+    label?: string;
+    title?: string;
+    date?: string;
+    description?: string;
+    color?: string;
+  };
   const items = rawItems.map((raw, i) => {
     const item = raw as RawItem;
     const label = item.label || item.title;

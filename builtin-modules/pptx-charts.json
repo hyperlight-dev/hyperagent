@@ -3,8 +3,8 @@
   "description": "OOXML DrawingML chart generation - bar, pie, line charts for PPTX presentations",
   "author": "system",
   "mutable": false,
-  "sourceHash": "sha256:029765ed53b96536",
-  "dtsHash": "sha256:5f653830226c3554",
+  "sourceHash": "sha256:27d40e5c5095ec38",
+  "dtsHash": "sha256:4353b8263dc99405",
   "importStyle": "named",
   "hints": {
     "overview": "Chart generation for PPTX. Always used with ha:pptx.",
@@ -16,7 +16,10 @@
       "Use chartSlide(pres, {title, chart}) for simple full-slide charts",
       "Chart values must be finite numbers — not null, undefined, or strings",
       "pieChart: labels[] and values[] must have the same length",
-      "barChart/lineChart: each series.values[] length must equal categories[] length"
+      "barChart/lineChart: each series.values[] length must equal categories[] length",
+      "Max 50 charts per deck, 24 series per chart, 100 categories per chart",
+      "embedChart returns {shape, ...} — pass result.shape to customSlide, NOT result directly",
+      "Do NOT call .toString() on chart results — it throws. Use .shape property."
     ],
     "antiPatterns": [
       "Don't import chart functions from ha:pptx — they're in this module"

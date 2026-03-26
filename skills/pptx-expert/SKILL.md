@@ -15,7 +15,9 @@ patterns:
   - image-embed
   - file-generation
 antiPatterns:
-  - Don't write inline OOXML XML — use ha:pptx module functions
+  - Don't write inline OOXML XML — use ha:pptx module shape builder functions
+  - Don't concatenate ShapeFragment objects with + — pass as arrays to customSlide
+  - Don't call .toString() on chart results — use the .shape property
   - Don't place two shapes at the same x,y coordinates
   - Don't use one monolithic handler for research + build
   - series.name is REQUIRED for all chart data series
@@ -44,6 +46,31 @@ allowed-tools:
 You are an expert at building professional, polished PowerPoint presentations
 inside the Hyperlight sandbox. You have deep knowledge of the PPTX system
 modules and always produce OOXML-compliant, visually clean output.
+
+## CRITICAL: ShapeFragment API
+
+All shape builder functions (`textBox`, `rect`, `bulletList`, `statBox`, `callout`, etc.) return `ShapeFragment` objects — **NOT raw XML strings**.
+
+- Pass ShapeFragment objects directly to slide functions: `contentSlide(pres, { body: [shape1, shape2] })`
+- `customSlide` accepts `ShapeFragment | ShapeFragment[]` — never raw strings
+- Do NOT concatenate fragments with `+` — pass them as arrays
+- Chart `embedChart()` returns `{ shape: ShapeFragment, ... }` — use `.shape` to get the fragment
+- Table functions (`table`, `kvTable`, etc.) also return ShapeFragment
+- `isShapeFragment(obj)` checks if a value is a valid fragment
+- `fragmentsToXml(fragments)` converts to XML (internal use only)
+
+## Chart Complexity Caps
+
+- Max **50 charts** per deck — split into multiple presentations if needed
+- Max **24 series** per chart (Excel column reference limit)
+- Max **100 categories** per chart — group data or paginate
+- Pie charts: max **100 slices** — group small values into "Other"
+
+## Notes Policy
+
+- Speaker notes are **plain text only** — no HTML, XML, or markup
+- Auto-sanitized: invalid XML characters stripped, truncated to 12,000 chars
+- Use `markdownToNotes(md)` to convert markdown to plain text for notes
 
 ## CRITICAL: State Management Rules
 
@@ -157,7 +184,7 @@ const grid = layoutGrid(6, { cols: 3, margin: 0.5, gap: 0.25, y: 1.5 });
 
 // Dark overlay for image backgrounds
 const bg = backgroundImage(pres, imgData, 'jpg');
-customSlide(pres, { shapes: bg + overlay({opacity: 0.6}) + textBox({...}) });
+customSlide(pres, { shapes: [bg, overlay({opacity: 0.6}), textBox({...})] });
 ```
 
 ## Slide Manipulation (Reorder, Insert, Delete)
@@ -280,7 +307,7 @@ To modify an existing handler without losing shared-state:
 - `overlay({opacity, color})` — dark overlay XML for image backgrounds
 - `SLIDE_WIDTH_INCHES` (13.333), `SLIDE_HEIGHT_INCHES` (7.5)
 
-### Shapes
+### Shapes (all return ShapeFragment)
 
 - `textBox({x, y, w, h, text, fontSize, bold, align})` — text (color auto-selected by theme)
 - `rect({x, y, w, h, fill, text, cornerRadius})` — rectangles
@@ -306,7 +333,7 @@ To modify an existing handler without losing shared-state:
 - `comboChart({categories, barSeries, lineSeries, title})` — combo charts
 - Use `chartSlide(pres, {title, chart})` to embed — NO manual chart wiring needed
 
-### Tables
+### Tables (all return ShapeFragment)
 
 **CRITICAL: Pass `theme: pres.theme` to all table functions for proper text contrast:**
 
@@ -438,4 +465,6 @@ Do NOT use `pres.build()` directly — it returns raw ZIP entries, not bytes.
 - Nested backticks (`) in template literals — the #1 cause of invisible syntax errors
 - Storing `pres` object in shared-state without serialize() — methods get stripped
 - Writing manual fetch read loops — use `fetchBinary()` or `fetchBinaryBatch()` instead
+- Concatenating ShapeFragment objects with `+` — pass as arrays instead
+- Calling `.toString()` on chart/embed results — use `.shape` property
 - **Missing `theme: pres.theme` on tables** — causes dark text on dark backgrounds (invisible)

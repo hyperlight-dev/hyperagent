@@ -3,8 +3,8 @@
   "description": "PowerPoint PPTX presentation builder - slides, text, shapes, themes, layouts",
   "author": "system",
   "mutable": false,
-  "sourceHash": "sha256:a13871a41506a523",
-  "dtsHash": "sha256:2107e369816b4bd5",
+  "sourceHash": "sha256:895d7188d5ba8b46",
+  "dtsHash": "sha256:27520514e4401465",
   "importStyle": "named",
   "hints": {
     "overview": "Core PPTX slide building. Charts in ha:pptx-charts, tables in ha:pptx-tables.",
@@ -27,13 +27,18 @@
       "ALL slide functions need pres as FIRST parameter: titleSlide(pres, opts)",
       "Charts are NOT in this module — import from ha:pptx-charts",
       "Tables are NOT in this module — import from ha:pptx-tables",
+      "Shape builders return ShapeFragment objects — NEVER construct raw XML strings",
+      "customSlide shapes must be ShapeFragment or ShapeFragment[] — raw strings are rejected",
       "Use getThemeNames() to see valid themes",
       "DARK THEMES auto-handle contrast — don't use forceColor",
-      "Don't specify text color — theme auto-selects readable colours"
+      "Don't specify text color — theme auto-selects readable colours",
+      "Speaker notes are plain text only — max 12,000 chars, auto-sanitized"
     ],
     "antiPatterns": [
       "Don't store pres object in shared-state — use pres.serialize()",
-      "Don't write raw OOXML XML — use module functions",
+      "Don't write raw OOXML XML — use module shape builder functions",
+      "Don't concatenate ShapeFragment objects with + — pass as arrays",
+      "Don't call .toString() on chart results — use .shape property",
       "Don't guess function names — call module_info first",
       "series.name is REQUIRED for all chart data series"
     ],

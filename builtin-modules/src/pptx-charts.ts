@@ -16,8 +16,22 @@ import {
   requireArray,
   requireNumber,
   nextShapeId,
+  _createShapeFragment,
+  type ShapeFragment,
 } from "ha:ooxml-core";
 import { escapeXml } from "ha:xml-escape";
+
+// ── Chart Complexity Caps ────────────────────────────────────────────
+// Hard limits to prevent decks that exhaust PowerPoint's rendering budget.
+
+/** Maximum charts per presentation deck. */
+export const MAX_CHARTS_PER_DECK = 50;
+
+/** Maximum data series per chart (Excel column reference limit B–Y). */
+export const MAX_SERIES_PER_CHART = 24;
+
+/** Maximum categories (X-axis labels) per chart. */
+export const MAX_CATEGORIES_PER_CHART = 100;
 
 // ── Namespace Constants ──────────────────────────────────────────────
 const NS_C = "http://schemas.openxmlformats.org/drawingml/2006/chart";
@@ -99,7 +113,11 @@ function seriesXml(
   // Series name is REQUIRED — charts with unnamed series produce meaningless legends.
   requireString(series.name, `series[${index}].name`);
   // Series values are REQUIRED and must be a non-empty array of numbers.
-  if (!series.values || !Array.isArray(series.values) || series.values.length === 0) {
+  if (
+    !series.values ||
+    !Array.isArray(series.values) ||
+    series.values.length === 0
+  ) {
     throw new Error(
       `series[${index}].values: array must not be empty. ` +
         `This often happens when fetched data is empty. ` +
@@ -327,6 +345,18 @@ export function barChart(opts: BarChartOptions): ChartResult {
   requireArray(opts.categories || [], "barChart.categories");
   requireArray(opts.series || [], "barChart.series", { nonEmpty: true });
   if (opts.textColor) requireHex(opts.textColor, "barChart.textColor");
+  // Enforce complexity caps
+  if ((opts.categories || []).length > MAX_CATEGORIES_PER_CHART) {
+    throw new Error(
+      `barChart: ${(opts.categories || []).length} categories exceeds the maximum of ${MAX_CATEGORIES_PER_CHART}. ` +
+        `Reduce category count or aggregate data.`,
+    );
+  }
+  if ((opts.series || []).length > MAX_SERIES_PER_CHART) {
+    throw new Error(
+      `barChart: ${(opts.series || []).length} series exceeds the maximum of ${MAX_SERIES_PER_CHART}.`,
+    );
+  }
 
   const dir = opts.horizontal ? "bar" : "col";
   const grouping = opts.stacked ? "stacked" : "clustered";
@@ -345,7 +375,10 @@ ${seriesXmls}
 ${axisXml(1, 2, opts.horizontal ? "l" : "b", true, tc)}
 ${axisXml(2, 1, opts.horizontal ? "b" : "l", false, tc)}`;
 
-  return chartResult("bar", chartXml(plotArea, opts.title, opts.showLegend, tc));
+  return chartResult(
+    "bar",
+    chartXml(plotArea, opts.title, opts.showLegend, tc),
+  );
 }
 
 export interface PieChartOptions {
@@ -418,6 +451,13 @@ export function pieChart(opts: PieChartOptions): ChartResult {
     throw new Error(
       `pieChart: labels array has ${labels.length} elements but values array ` +
         `has ${values.length}. They must have the same length — one label per slice.`,
+    );
+  }
+  // Enforce complexity caps
+  if (labels.length > MAX_CATEGORIES_PER_CHART) {
+    throw new Error(
+      `pieChart: ${labels.length} slices exceeds the maximum of ${MAX_CATEGORIES_PER_CHART}. ` +
+        `Group smaller values into an "Other" slice.`,
     );
   }
   // Validate each value is a finite number
@@ -519,7 +559,10 @@ ${seriesDataLabels}
 ${holeSize}
 </${chartTag}>`;
 
-  return chartResult("pie", chartXml(plotArea, opts.title, effectiveShowLegend, tc));
+  return chartResult(
+    "pie",
+    chartXml(plotArea, opts.title, effectiveShowLegend, tc),
+  );
 }
 
 export interface LineChartOptions {
@@ -566,6 +609,17 @@ export function lineChart(opts: LineChartOptions): ChartResult {
   requireArray(opts.categories || [], "lineChart.categories");
   requireArray(opts.series || [], "lineChart.series", { nonEmpty: true });
   if (opts.textColor) requireHex(opts.textColor, "lineChart.textColor");
+  // Enforce complexity caps
+  if ((opts.categories || []).length > MAX_CATEGORIES_PER_CHART) {
+    throw new Error(
+      `lineChart: ${(opts.categories || []).length} categories exceeds the maximum of ${MAX_CATEGORIES_PER_CHART}.`,
+    );
+  }
+  if ((opts.series || []).length > MAX_SERIES_PER_CHART) {
+    throw new Error(
+      `lineChart: ${(opts.series || []).length} series exceeds the maximum of ${MAX_SERIES_PER_CHART}.`,
+    );
+  }
 
   const chartTag = opts.area ? "c:areaChart" : "c:lineChart";
   const grouping = "standard";
@@ -650,7 +704,10 @@ ${seriesXmls}
 ${axisXml(1, 2, "b", true, tc)}
 ${axisXml(2, 1, "l", false, tc)}`;
 
-  return chartResult(opts.area ? "area" : "line", chartXml(plotArea, opts.title, opts.showLegend, tc));
+  return chartResult(
+    opts.area ? "area" : "line",
+    chartXml(plotArea, opts.title, opts.showLegend, tc),
+  );
 }
 
 export interface ComboChartOptions {
@@ -691,6 +748,12 @@ export interface ComboChartOptions {
 export function comboChart(opts: ComboChartOptions): ChartResult {
   // ── Input validation ──────────────────────────────────────────────
   requireArray(opts.categories || [], "comboChart.categories");
+  // Enforce complexity caps
+  if ((opts.categories || []).length > MAX_CATEGORIES_PER_CHART) {
+    throw new Error(
+      `comboChart: ${(opts.categories || []).length} categories exceeds the maximum of ${MAX_CATEGORIES_PER_CHART}.`,
+    );
+  }
   const barSeries = opts.barSeries || [];
   const lineSeries = opts.lineSeries || [];
   requireArray(barSeries, "comboChart.barSeries");
@@ -770,7 +833,10 @@ ${lineXmls}
 ${axisXml(1, 2, "b", true, tc)}
 ${axisXml(2, 1, "l", false, tc)}`;
 
-  return chartResult("combo", chartXml(plotArea, opts.title, opts.showLegend, tc));
+  return chartResult(
+    "combo",
+    chartXml(plotArea, opts.title, opts.showLegend, tc),
+  );
 }
 
 // ── Chart Embedding into PPTX Slides ─────────────────────────────────
@@ -783,11 +849,14 @@ export interface ChartPosition {
 }
 
 export interface EmbedChartResult {
+  /** ShapeFragment for use in customSlide shapes array. */
+  shape: ShapeFragment;
+  /** @internal Raw shape XML string (kept for internal compatibility). */
   shapeXml: string;
   zipEntries: Array<{ name: string; data: string }>;
   chartRelId: string;
   chartIndex: number;
-  /** Returns shapeXml when converted to string (e.g., in string concatenation). */
+  /** @deprecated Throws error — use .shape instead. */
   toString(): string;
 }
 
@@ -832,6 +901,14 @@ export function embedChart(
     throw new Error(
       "embedChart: 'pres' (presentation builder) is required as the first argument. " +
         "Pass the object returned by createPresentation().",
+    );
+  }
+  // Enforce deck-level chart cap
+  const currentChartCount = (pres._charts || []).length;
+  if (currentChartCount >= MAX_CHARTS_PER_DECK) {
+    throw new Error(
+      `embedChart: deck already has ${currentChartCount} charts — max ${MAX_CHARTS_PER_DECK}. ` +
+        `Reduce chart count or split into multiple presentations.`,
     );
   }
   if (chart == null || chart.type !== "chart") {
@@ -908,15 +985,21 @@ export function embedChart(
     pres._chartEntries.push(entry);
   }
 
-  // Return an object that stringifies to shapeXml for easy use in shape concatenation.
-  // This allows: shapes: textBox(...) + embedChart(pres, chart, pos) + rect(...)
-  // Instead of requiring: embedChart(...).shapeXml
+  // Return structured result — use .shape for customSlide arrays.
+  // toString() now THROWS to prevent accidental XML concatenation.
   const result: EmbedChartResult = {
+    shape: _createShapeFragment(shapeXml),
     shapeXml,
     zipEntries,
     chartRelId: relId,
     chartIndex: idx,
-    toString: () => shapeXml,
+    toString(): string {
+      throw new Error(
+        "Cannot concatenate embedChart result directly into shapes. " +
+          "Use the .shape property in your shapes array: " +
+          "customSlide(pres, { shapes: [textBox(...), chart.shape, rect(...)] })",
+      );
+    },
   };
   return result;
 }

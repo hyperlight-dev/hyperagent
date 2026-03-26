@@ -147,7 +147,10 @@ export function getSize(key: string): number {
  * Useful for debugging memory usage and finding large values.
  * @returns Object with { totalBytes, entries: [{key, bytes}...] } sorted by size descending
  */
-export function stats(): { totalBytes: number; entries: Array<{ key: string; bytes: number }> } {
+export function stats(): {
+  totalBytes: number;
+  entries: Array<{ key: string; bytes: number }>;
+} {
   const entries: Array<{ key: string; bytes: number }> = [];
   let totalBytes = 0;
 

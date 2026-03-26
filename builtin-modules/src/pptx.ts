@@ -58,6 +58,10 @@ import {
   setShapeIdCounter,
   setForceAllColors,
   isForceAllColors,
+  _createShapeFragment,
+  isShapeFragment,
+  fragmentsToXml,
+  type ShapeFragment,
   type Theme,
 } from "ha:ooxml-core";
 import { escapeXml } from "ha:xml-escape";
@@ -133,7 +137,7 @@ export interface SerializedPresentation {
 export interface Presentation {
   theme: Theme;
   slideCount: number;
-  addBody(shapes: string | string[], opts?: SlideOptions): void;
+  addBody(shapes: ShapeFragment | ShapeFragment[], opts?: SlideOptions): void;
   build(): Array<{ name: string; data: string | Uint8Array }>;
   buildZip(): Uint8Array;
   serialize(): SerializedPresentation;
@@ -700,7 +704,8 @@ export interface ChartSlideOptions {
 }
 
 export interface CustomSlideOptions {
-  shapes: string;
+  /** Array of ShapeFragment objects from shape builders (textBox, rect, table, etc.). REQUIRED. */
+  shapes: ShapeFragment | ShapeFragment[];
   background?: string | GradientSpec;
   transition?: string;
   transitionDuration?: number;
@@ -734,7 +739,9 @@ export interface StatGridSlideOptions {
 
 export interface ImageGridSlideOptions {
   title?: string;
-  images: Uint8Array[] | Array<{ data: Uint8Array; format?: string; caption?: string }>;
+  images:
+    | Uint8Array[]
+    | Array<{ data: Uint8Array; format?: string; caption?: string }>;
   imageFormat?: string;
   format?: string;
   gap?: number;
@@ -895,6 +902,9 @@ export interface FooterOptions {
 
 export { type Theme };
 
+// Re-export ShapeFragment type + validation for LLMs (NOT _createShapeFragment — internal only)
+export { type ShapeFragment, isShapeFragment, fragmentsToXml };
+
 // Re-export table-related functions from pptx-tables for convenience.
 // LLMs can import just "ha:pptx" and get access to table(), kvTable(), etc.
 export {
@@ -904,6 +914,9 @@ export {
   timeline,
   TABLE_STYLES,
 } from "ha:pptx-tables";
+
+// Import chart complexity caps for validation engine (defined in pptx-charts, single source of truth)
+import { MAX_CHARTS_PER_DECK } from "ha:pptx-charts";
 
 // Re-export contrastRatio for LLM pre-validation of color combinations
 export { contrastRatio };
@@ -943,6 +956,14 @@ let _defaultTextColor: string | null = null;
 // circular dependency with ha:pptx-tables.
 
 /**
+ * Extract XML string from a ShapeFragment for internal slide composition.
+ * Internal-only helper — not exported to LLMs.
+ */
+function _s(fragment: ShapeFragment): string {
+  return fragment._xml;
+}
+
+/**
  * Normalize items input to an array of strings.
  * Accepts: string[], string (newline-delimited), or undefined.
  * Returns: string[] (empty array if undefined).
@@ -960,7 +981,10 @@ const normalizeItems = (input: string[] | string | undefined): string[] => {
  * Get the default text color if set, otherwise return the provided fallback.
  * Used internally by text-containing shape functions.
  */
-function getDefaultTextColor(explicitColor: string | undefined, fallback: string): string {
+function getDefaultTextColor(
+  explicitColor: string | undefined,
+  fallback: string,
+): string {
   if (explicitColor) return explicitColor;
   if (_defaultTextColor) return _defaultTextColor;
   return fallback;
@@ -1032,7 +1056,7 @@ function _validateOptionalColor(
   hex: string | null | undefined,
   paramName: string,
   theme?: Theme | null,
-  opts?: { against?: string }
+  opts?: { against?: string },
 ): string | null {
   if (!hex) return null;
   // Global escape hatch: skip contrast validation entirely
@@ -1050,7 +1074,10 @@ function _validateOptionalColor(
  * @param {string} paramName - Parameter name for error messages
  * @returns {string|null} Validated hex or null if input was falsy
  */
-function _validateOptionalHex(hex: string | null | undefined, paramName: string): string | null {
+function _validateOptionalHex(
+  hex: string | null | undefined,
+  paramName: string,
+): string | null {
   if (!hex) return null;
   return requireHex(hex, paramName);
 }
@@ -1066,7 +1093,7 @@ function _validateOptionalHex(hex: string | null | undefined, paramName: string)
 function _validateOptionalNumber(
   n: number | null | undefined,
   paramName: string,
-  opts?: { min?: number; max?: number }
+  opts?: { min?: number; max?: number },
 ): number | null {
   if (n == null) return null;
   return requireNumber(n, paramName, opts);
@@ -1102,7 +1129,7 @@ function spTransform(x: number, y: number, w: number, h: number): string {
 
 /**
  * Create a solid fill XML element.
- * Use for custom slide backgrounds via pres.addSlide(solidFill('000000'), shapes).
+ * Use for shape fills or customSlide({ background }) backgrounds.
  * @param {string} color - Hex color (6 digits, no #)
  * @param {number} [opacity] - Opacity from 0 (transparent) to 1 (opaque). Omit for fully opaque.
  * @returns {string} Solid fill XML
@@ -1129,7 +1156,9 @@ function textEffectsXml(opts: TextEffectOptions): string {
     const glowColor = hexColor(opts.glow.color);
     // Radius in EMUs (1 point = 12700 EMUs)
     const radius = Math.round((opts.glow.radius ?? 5) * 12700);
-    effects.push(`<a:glow rad="${radius}"><a:srgbClr val="${glowColor}"/></a:glow>`);
+    effects.push(
+      `<a:glow rad="${radius}"><a:srgbClr val="${glowColor}"/></a:glow>`,
+    );
   }
 
   // Drop shadow effect
@@ -1172,11 +1201,19 @@ function runProperties(opts: RunPropertiesOptions): string {
 function normalizeAlign(align: string | undefined): string {
   if (!align) return "l";
   requireEnum(align, "align", VALID_ALIGNS);
-  const map: Record<string, string> = { center: "ctr", left: "l", right: "r", justify: "just" };
+  const map: Record<string, string> = {
+    center: "ctr",
+    left: "l",
+    right: "r",
+    justify: "just",
+  };
   return map[align] || align;
 }
 
-function paragraphXml(text: string, opts: ParagraphOptions | null | undefined): string {
+function paragraphXml(
+  text: string,
+  opts: ParagraphOptions | null | undefined,
+): string {
   const o = opts || {};
   const algn = normalizeAlign(o.align);
   // lineSpacing is in points (e.g. 24 = 24pt line height)
@@ -1191,12 +1228,14 @@ function paragraphXml(text: string, opts: ParagraphOptions | null | undefined): 
 function bulletParagraph(
   item: string | { text: string; bold?: boolean; color?: string },
   opts: BulletOptions | null | undefined,
-  level: number | undefined
+  level: number | undefined,
 ): string {
   // Normalize item: accept both string and object with text/bold/color
   const text = typeof item === "string" ? item : item.text;
-  const itemBold = typeof item === "object" && item !== null ? item.bold : undefined;
-  const itemColor = typeof item === "object" && item !== null ? item.color : undefined;
+  const itemBold =
+    typeof item === "object" && item !== null ? item.bold : undefined;
+  const itemColor =
+    typeof item === "object" && item !== null ? item.color : undefined;
 
   const o = opts || {};
   const lvl = level || 0;
@@ -1214,7 +1253,10 @@ function bulletParagraph(
   return `<a:p><a:pPr lvl="${lvl}" algn="${algn}">${bulletColor}<a:buFont typeface="Arial"/><a:buChar char="&#x2022;"/></a:pPr><a:r>${rPr}<a:t>${escapeXml(String(text))}</a:t></a:r></a:p>`;
 }
 
-function textBodyXml(content: string | null | undefined, opts: TextBodyOptions | null | undefined): string {
+function textBodyXml(
+  content: string | null | undefined,
+  opts: TextBodyOptions | null | undefined,
+): string {
   const o = opts || {};
   const wrap = o.wordWrap !== false ? "square" : "none";
   const anchor =
@@ -1253,9 +1295,9 @@ function textBodyXml(content: string | null | undefined, opts: TextBodyOptions |
  * @param {string} [opts.background] - Fill color (hex)
  * @param {number} [opts.lineSpacing] - Line spacing in points
  * @param {boolean} [opts.autoFit] - Auto-scale fontSize to fit text in shape. Use when text length is variable.
- * @returns {string} Shape XML fragment
+ * @returns {ShapeFragment} Branded shape fragment
  */
-export function textBox(opts: TextBoxOptions): string {
+export function textBox(opts: TextBoxOptions): ShapeFragment {
   // ── Input validation ──────────────────────────────────────────────
   _validateOptionalNumber(opts.fontSize, "textBox.fontSize", {
     min: 1,
@@ -1345,7 +1387,9 @@ export function textBox(opts: TextBoxOptions): string {
   }
 
   const { id, name } = nextShapeIdAndName("TextBox");
-  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>${spTransform(x, y, w, h)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${fill}</p:spPr>${textBodyXml(paras, opts)}</p:sp>`;
+  return _createShapeFragment(
+    `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>${spTransform(x, y, w, h)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${fill}</p:spPr>${textBodyXml(paras, opts)}</p:sp>`,
+  );
 }
 
 /**
@@ -1364,9 +1408,9 @@ export function textBox(opts: TextBoxOptions): string {
  * @param {number} [opts.cornerRadius] - Corner radius in points
  * @param {string} [opts.borderColor] - Border color
  * @param {number} [opts.borderWidth=1] - Border width in points
- * @returns {string} Shape XML fragment
+ * @returns {ShapeFragment} Branded shape fragment
  */
-export function rect(opts: RectOptions): string {
+export function rect(opts: RectOptions): ShapeFragment {
   // ── Input validation ──────────────────────────────────────────────
   _validateOptionalNumber(opts.fontSize, "rect.fontSize", { min: 1, max: 400 });
   _validateOptionalNumber(opts.borderWidth, "rect.borderWidth", { min: 0 });
@@ -1419,7 +1463,9 @@ export function rect(opts: RectOptions): string {
     : "";
 
   const { id, name } = nextShapeIdAndName("Rectangle");
-  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>${spTransform(x, y, w, h)}<a:prstGeom prst="${prst}"><a:avLst/></a:prstGeom>${fill}${border}</p:spPr>${textContent}</p:sp>`;
+  return _createShapeFragment(
+    `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>${spTransform(x, y, w, h)}<a:prstGeom prst="${prst}"><a:avLst/></a:prstGeom>${fill}${border}</p:spPr>${textContent}</p:sp>`,
+  );
 }
 
 /**
@@ -1434,9 +1480,9 @@ export function rect(opts: RectOptions): string {
  * @param {string} [opts.color] - Text color
  * @param {string} [opts.bulletColor] - Bullet color
  * @param {number} [opts.lineSpacing=24] - Line spacing
- * @returns {string} Shape XML fragment
+ * @returns {ShapeFragment} Branded shape fragment
  */
-export function bulletList(opts: BulletListOptions): string {
+export function bulletList(opts: BulletListOptions): ShapeFragment {
   // ── Input validation ──────────────────────────────────────────────
   if (opts.items != null) requireArray(opts.items, "bulletList.items");
   _validateOptionalNumber(opts.fontSize, "bulletList.fontSize", {
@@ -1462,7 +1508,8 @@ export function bulletList(opts: BulletListOptions): string {
   const w = inches(wIn);
   const h = inches(hIn);
   // Fall back to defaultTextColor, then theme foreground so bullets are always readable
-  const defaultColor = opts.color || _defaultTextColor || (opts._theme || _activeTheme)?.fg;
+  const defaultColor =
+    opts.color || _defaultTextColor || (opts._theme || _activeTheme)?.fg;
   const itemOpts = {
     fontSize: opts.fontSize || 16,
     color: defaultColor,
@@ -1474,7 +1521,9 @@ export function bulletList(opts: BulletListOptions): string {
     .join("");
 
   const { id, name } = nextShapeIdAndName("TextBox");
-  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>${spTransform(x, y, w, h)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>${textBodyXml(paras, opts)}</p:sp>`;
+  return _createShapeFragment(
+    `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>${spTransform(x, y, w, h)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>${textBodyXml(paras, opts)}</p:sp>`,
+  );
 }
 
 /**
@@ -1489,9 +1538,9 @@ export function bulletList(opts: BulletListOptions): string {
  * @param {string} [opts.color] - Text color
  * @param {number} [opts.lineSpacing=24] - Line spacing
  * @param {number} [opts.startAt=1] - Starting number
- * @returns {string} Shape XML fragment
+ * @returns {ShapeFragment} Branded shape fragment
  */
-export function numberedList(opts: NumberedListOptions): string {
+export function numberedList(opts: NumberedListOptions): ShapeFragment {
   // ── Input validation ──────────────────────────────────────────────
   if (opts.items != null) requireArray(opts.items, "numberedList.items");
   _validateOptionalNumber(opts.fontSize, "numberedList.fontSize", {
@@ -1519,7 +1568,8 @@ export function numberedList(opts: NumberedListOptions): string {
   const h = inches(hIn);
   const startAt = opts.startAt || 1;
   // Fall back to defaultTextColor, then theme foreground so items are always readable
-  const defaultColor = opts.color || _defaultTextColor || (opts._theme || _activeTheme)?.fg;
+  const defaultColor =
+    opts.color || _defaultTextColor || (opts._theme || _activeTheme)?.fg;
   const paras = (opts.items || [])
     .map((item, idx) => {
       const num = startAt + idx;
@@ -1532,7 +1582,9 @@ export function numberedList(opts: NumberedListOptions): string {
     .join("");
 
   const { id, name } = nextShapeIdAndName("TextBox");
-  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>${spTransform(x, y, w, h)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>${textBodyXml(paras, opts)}</p:sp>`;
+  return _createShapeFragment(
+    `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>${spTransform(x, y, w, h)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>${textBodyXml(paras, opts)}</p:sp>`,
+  );
 }
 
 /**
@@ -1546,9 +1598,9 @@ export function numberedList(opts: NumberedListOptions): string {
  * @param {string} [opts.label='Image'] - Placeholder label
  * @param {string} [opts.fill='3D4450'] - Background color (dark gray)
  * @param {string} [opts.color='B0B8C0'] - Label color (light gray, passes WCAG AA on 3D4450)
- * @returns {string} Shape XML fragment
+ * @returns {ShapeFragment} Branded shape fragment
  */
-export function imagePlaceholder(opts: ImagePlaceholderOptions): string {
+export function imagePlaceholder(opts: ImagePlaceholderOptions): ShapeFragment {
   return rect({
     x: opts.x,
     y: opts.y,
@@ -1577,9 +1629,9 @@ export function imagePlaceholder(opts: ImagePlaceholderOptions): string {
  * @param {string} [opts.labelColor] - Label text color (hex). OMIT to auto-select against background.
  * @param {string} [opts.background] - Background fill
  * @param {boolean} [opts.forceColor] - Set true to bypass WCAG contrast validation for valueColor/labelColor.
- * @returns {string} Shape XML fragment
+ * @returns {ShapeFragment} Branded shape fragment
  */
-export function statBox(opts: StatBoxOptions): string {
+export function statBox(opts: StatBoxOptions): ShapeFragment {
   // ── Input validation ──────────────────────────────────────────────
   _validateOptionalNumber(opts.valueSize, "statBox.valueSize", {
     min: 1,
@@ -1650,7 +1702,9 @@ export function statBox(opts: StatBoxOptions): string {
   });
 
   const { id, name } = nextShapeIdAndName("TextBox");
-  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>${spTransform(x, y, w, h)}<a:prstGeom prst="roundRect"><a:avLst/></a:prstGeom>${fill}</p:spPr>${textBodyXml(valuePara + labelPara, { valign: "middle" })}</p:sp>`;
+  return _createShapeFragment(
+    `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>${spTransform(x, y, w, h)}<a:prstGeom prst="roundRect"><a:avLst/></a:prstGeom>${fill}</p:spPr>${textBodyXml(valuePara + labelPara, { valign: "middle" })}</p:sp>`,
+  );
 }
 
 // ── Lines, Arrows, and Connectors ────────────────────────────────────
@@ -1665,9 +1719,9 @@ export function statBox(opts: StatBoxOptions): string {
  * @param {string} [opts.color='666666'] - Line color (hex)
  * @param {number} [opts.width=1.5] - Line width in points
  * @param {string} [opts.dash] - Dash style: 'solid', 'dash', 'dot', 'dashDot'
- * @returns {string} Shape XML fragment
+ * @returns {ShapeFragment} Branded shape fragment
  */
-export function line(opts: LineOptions): string {
+export function line(opts: LineOptions): ShapeFragment {
   // ── Input validation ──────────────────────────────────────────────
   _validateOptionalNumber(opts.width, "line.width", { min: 0.1, max: 100 });
   _validateOptionalHex(opts.color, "line.color");
@@ -1698,7 +1752,9 @@ export function line(opts: LineOptions): string {
       : "";
 
   const { id, name } = nextShapeIdAndName("Line");
-  return `<p:cxnSp><p:nvCxnSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvCxnSpPr/><p:nvPr/></p:nvCxnSpPr><p:spPr><a:xfrm${flipH}${flipV}><a:off x="${left}" y="${top}"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="line"><a:avLst/></a:prstGeom><a:ln w="${w}"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill>${dashXml}</a:ln></p:spPr></p:cxnSp>`;
+  return _createShapeFragment(
+    `<p:cxnSp><p:nvCxnSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvCxnSpPr/><p:nvPr/></p:nvCxnSpPr><p:spPr><a:xfrm${flipH}${flipV}><a:off x="${left}" y="${top}"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="line"><a:avLst/></a:prstGeom><a:ln w="${w}"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill>${dashXml}</a:ln></p:spPr></p:cxnSp>`,
+  );
 }
 
 /**
@@ -1713,9 +1769,9 @@ export function line(opts: LineOptions): string {
  * @param {string} [opts.headType='triangle'] - Arrowhead: 'triangle', 'stealth', 'diamond', 'oval', 'arrow'
  * @param {boolean} [opts.bothEnds=false] - Arrowhead on both ends
  * @param {string} [opts.dash] - Dash style: 'solid', 'dash', 'dot', 'dashDot'
- * @returns {string} Shape XML fragment
+ * @returns {ShapeFragment} Branded shape fragment
  */
-export function arrow(opts: ArrowOptions): string {
+export function arrow(opts: ArrowOptions): ShapeFragment {
   // ── Input validation ──────────────────────────────────────────────
   _validateOptionalNumber(opts.width, "arrow.width", { min: 0.1, max: 100 });
   _validateOptionalHex(opts.color, "arrow.color");
@@ -1753,7 +1809,9 @@ export function arrow(opts: ArrowOptions): string {
     : "";
 
   const { id, name } = nextShapeIdAndName("Arrow");
-  return `<p:cxnSp><p:nvCxnSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvCxnSpPr/><p:nvPr/></p:nvCxnSpPr><p:spPr><a:xfrm${flipH}${flipV}><a:off x="${left}" y="${top}"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="line"><a:avLst/></a:prstGeom><a:ln w="${w}"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill>${dashXml}${headArrow}${tailArrow}</a:ln></p:spPr></p:cxnSp>`;
+  return _createShapeFragment(
+    `<p:cxnSp><p:nvCxnSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvCxnSpPr/><p:nvPr/></p:nvCxnSpPr><p:spPr><a:xfrm${flipH}${flipV}><a:off x="${left}" y="${top}"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="line"><a:avLst/></a:prstGeom><a:ln w="${w}"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill>${dashXml}${headArrow}${tailArrow}</a:ln></p:spPr></p:cxnSp>`,
+  );
 }
 
 /**
@@ -1769,9 +1827,9 @@ export function arrow(opts: ArrowOptions): string {
  * @param {string} [opts.color='FFFFFF'] - Text color
  * @param {string} [opts.borderColor] - Border color
  * @param {number} [opts.borderWidth=1] - Border width in points
- * @returns {string} Shape XML fragment
+ * @returns {ShapeFragment} Branded shape fragment
  */
-export function circle(opts: CircleOptions): string {
+export function circle(opts: CircleOptions): ShapeFragment {
   // ── Input validation ──────────────────────────────────────────────
   _validateOptionalNumber(opts.fontSize, "circle.fontSize", {
     min: 1,
@@ -1822,7 +1880,9 @@ export function circle(opts: CircleOptions): string {
     : "";
 
   const { id, name } = nextShapeIdAndName("Ellipse");
-  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>${spTransform(x, y, w, h)}<a:prstGeom prst="ellipse"><a:avLst/></a:prstGeom>${fill}${border}</p:spPr>${textContent}</p:sp>`;
+  return _createShapeFragment(
+    `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>${spTransform(x, y, w, h)}<a:prstGeom prst="ellipse"><a:avLst/></a:prstGeom>${fill}${border}</p:spPr>${textContent}</p:sp>`,
+  );
 }
 
 /**
@@ -1838,9 +1898,9 @@ export function circle(opts: CircleOptions): string {
  * @param {string} [opts.background='F5F5F5'] - Fill color
  * @param {number} [opts.fontSize=14] - Font size
  * @param {string} [opts.color] - Text color (hex). OMIT to auto-select a readable colour against the background. Do NOT hardcode.
- * @returns {string} Shape XML fragment
+ * @returns {ShapeFragment} Branded shape fragment
  */
-export function callout(opts: CalloutOptions): string {
+export function callout(opts: CalloutOptions): ShapeFragment {
   // ── Input validation ──────────────────────────────────────────────
   _validateOptionalNumber(opts.fontSize, "callout.fontSize", {
     min: 1,
@@ -1878,7 +1938,7 @@ export function callout(opts: CalloutOptions): string {
     color: opts.color || autoTextColor(bg),
   });
 
-  return accentBar + mainBox;
+  return _createShapeFragment(accentBar + mainBox.toString());
 }
 
 // ── Icons (Preset Shapes) ────────────────────────────────────────────
@@ -2019,7 +2079,10 @@ const ICON_SHAPES: Record<string, string> = {
 };
 
 /** SVG path icons for tech concepts not available as OOXML presets */
-const SVG_ICONS: Record<string, { d: string; viewBox?: { w: number; h: number } }> = {
+const SVG_ICONS: Record<
+  string,
+  { d: string; viewBox?: { w: number; h: number } }
+> = {
   // Status indicators (Lucide)
   check: {
     d: "M20 6L9 17l-5-5",
@@ -2254,9 +2317,9 @@ const SVG_ICONS: Record<string, { d: string; viewBox?: { w: number; h: number } 
  * @param {string} [opts.text] - Optional text inside the shape
  * @param {number} [opts.fontSize=12] - Text font size
  * @param {string} [opts.color='FFFFFF'] - Text color
- * @returns {string} Shape XML fragment
+ * @returns {ShapeFragment} Branded shape fragment
  */
-export function icon(opts: IconOptions): string {
+export function icon(opts: IconOptions): ShapeFragment {
   // ── Input validation ──────────────────────────────────────────────
   _validateOptionalNumber(opts.fontSize, "icon.fontSize", { min: 1, max: 400 });
   _validateOptionalHex(opts.fill, "icon.fill");
@@ -2292,11 +2355,13 @@ export function icon(opts: IconOptions): string {
 
   // Validate that the icon shape exists
   if (opts.shape && !ICON_SHAPES[opts.shape]) {
-    const availableShapes = Object.keys(ICON_SHAPES).concat(Object.keys(SVG_ICONS)).sort();
+    const availableShapes = Object.keys(ICON_SHAPES)
+      .concat(Object.keys(SVG_ICONS))
+      .sort();
     throw new Error(
       `icon: unknown shape '${opts.shape}'. ` +
-      `Available shapes include: ${availableShapes.slice(0, 20).join(', ')}... ` +
-      `(${availableShapes.length} total)`
+        `Available shapes include: ${availableShapes.slice(0, 20).join(", ")}... ` +
+        `(${availableShapes.length} total)`,
     );
   }
 
@@ -2305,7 +2370,8 @@ export function icon(opts: IconOptions): string {
   const w = inches(wIn);
   const h = inches(hIn);
   // Use known ICON_SHAPES value (validated above)
-  const prst = opts.shape && ICON_SHAPES[opts.shape] ? ICON_SHAPES[opts.shape] : "rect";
+  const prst =
+    opts.shape && ICON_SHAPES[opts.shape] ? ICON_SHAPES[opts.shape] : "rect";
   // Use theme accent for icon fill when no explicit fill specified
   const fill = solidFill(fillHex);
   const textContent = opts.text
@@ -2320,7 +2386,9 @@ export function icon(opts: IconOptions): string {
     : "";
 
   const { id, name } = nextShapeIdAndName("Shape");
-  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>${spTransform(x, y, w, h)}<a:prstGeom prst="${prst}"><a:avLst/></a:prstGeom>${fill}</p:spPr>${textContent}</p:sp>`;
+  return _createShapeFragment(
+    `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>${spTransform(x, y, w, h)}<a:prstGeom prst="${prst}"><a:avLst/></a:prstGeom>${fill}</p:spPr>${textContent}</p:sp>`,
+  );
 }
 
 // ── SVG Path Parser ─────────────────────────────────────────────────
@@ -2332,7 +2400,10 @@ export function icon(opts: IconOptions): string {
  * Coordinates are normalized to OOXML EMUs based on viewBox.
  * @internal
  */
-function parseSvgPath(d: string, viewBox: { x?: number; y?: number; w: number; h: number } | undefined): string {
+function parseSvgPath(
+  d: string,
+  viewBox: { x?: number; y?: number; w: number; h: number } | undefined,
+): string {
   const vb = viewBox || { x: 0, y: 0, w: 24, h: 24 }; // default 24x24 viewBox
   const cmds: string[] = [];
   // Regex to tokenize SVG path: command letters and numbers
@@ -2617,7 +2688,8 @@ function parseSvgPath(d: string, viewBox: { x?: number; y?: number; w: number; h
           ry2 = ryAdj * ryAdj;
         }
 
-        let sq = (rx2 * ry2 - rx2 * y1p2 - ry2 * x1p2) / (rx2 * y1p2 + ry2 * x1p2);
+        let sq =
+          (rx2 * ry2 - rx2 * y1p2 - ry2 * x1p2) / (rx2 * y1p2 + ry2 * x1p2);
         if (sq < 0) sq = 0;
         const coef = (largeArc !== sweep ? 1 : -1) * Math.sqrt(sq);
         const cxp = (coef * rxAdj * y1p) / ryAdj;
@@ -2641,7 +2713,10 @@ function parseSvgPath(d: string, viewBox: { x?: number; y?: number; w: number; h
         if (!sweep && dAngle > 0) dAngle -= 2 * Math.PI;
 
         // Split arc into segments of at most 90 degrees (pi/2)
-        const numSegments = Math.max(1, Math.ceil(Math.abs(dAngle) / (Math.PI / 2)));
+        const numSegments = Math.max(
+          1,
+          Math.ceil(Math.abs(dAngle) / (Math.PI / 2)),
+        );
         const segmentAngle = dAngle / numSegments;
 
         // Generate cubic bezier for each segment
@@ -2651,7 +2726,8 @@ function parseSvgPath(d: string, viewBox: { x?: number; y?: number; w: number; h
 
           // Control point factor for cubic bezier approximation of arc
           const t = Math.tan(segmentAngle / 4);
-          const alpha = (Math.sin(segmentAngle) * (Math.sqrt(4 + 3 * t * t) - 1)) / 3;
+          const alpha =
+            (Math.sin(segmentAngle) * (Math.sqrt(4 + 3 * t * t) - 1)) / 3;
 
           const cos1 = Math.cos(currentAngle),
             sin1 = Math.sin(currentAngle);
@@ -2730,9 +2806,9 @@ function parseSvgPath(d: string, viewBox: { x?: number; y?: number; w: number; h
  * @param {string} [opts.fill] - Fill color (hex, e.g. '2196F3')
  * @param {string} [opts.stroke] - Stroke color (hex)
  * @param {number} [opts.strokeWidth=1] - Stroke width in points
- * @returns {string} Shape XML fragment
+ * @returns {ShapeFragment} Branded shape fragment
  */
-export function svgPath(opts: SvgPathOptions): string {
+export function svgPath(opts: SvgPathOptions): ShapeFragment {
   // ── Input validation ──────────────────────────────────────────────
   requireString(opts.d, "svgPath.d");
   _validateOptionalHex(opts.fill, "svgPath.fill");
@@ -2783,7 +2859,9 @@ export function svgPath(opts: SvgPathOptions): string {
     "</a:custGeom>";
 
   const { id, name } = nextShapeIdAndName("Icon");
-  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>${spTransform(x, y, w, h)}${custGeom}${fill}${stroke}</p:spPr></p:sp>`;
+  return _createShapeFragment(
+    `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>${spTransform(x, y, w, h)}${custGeom}${fill}${stroke}</p:spPr></p:sp>`,
+  );
 }
 
 // ── Gradient Fill Helper ─────────────────────────────────────────────
@@ -2808,7 +2886,12 @@ export function svgPath(opts: SvgPathOptions): string {
  * // Transparent-to-opaque overlay for photos
  * gradientFill('000000', '000000', 270, { opacity1: 0, opacity2: 0.8 })
  */
-export function gradientFill(color1: string, color2: string, angle?: number, opts?: { opacity1?: number; opacity2?: number }): string {
+export function gradientFill(
+  color1: string,
+  color2: string,
+  angle?: number,
+  opts?: { opacity1?: number; opacity2?: number },
+): string {
   // ── Input validation ──────────────────────────────────────────────
   requireHex(color1, "gradientFill.color1");
   requireHex(color2, "gradientFill.color2");
@@ -2951,9 +3034,9 @@ export function markdownToNotes(md: string): string {
  * @param {string} [opts.align='l'] - Paragraph alignment ('l', 'ctr', 'r')
  * @param {string} [opts.valign='t'] - Vertical alignment ('t', 'ctr', 'b')
  * @param {string} [opts.background] - Fill color (hex)
- * @returns {string} Shape XML fragment
+ * @returns {ShapeFragment} Branded shape fragment
  */
-export function richText(opts: RichTextOptions): string {
+export function richText(opts: RichTextOptions): ShapeFragment {
   // ── Input validation ──────────────────────────────────────────────
   if (opts.paragraphs != null) {
     requireArray(opts.paragraphs, "richText.paragraphs");
@@ -2988,7 +3071,10 @@ export function richText(opts: RichTextOptions): string {
           // Fall back to defaultTextColor, then theme foreground for runs without explicit color
           const resolvedRun = run.color
             ? run
-            : { ...run, color: _defaultTextColor || (opts._theme || _activeTheme)?.fg };
+            : {
+                ...run,
+                color: _defaultTextColor || (opts._theme || _activeTheme)?.fg,
+              };
           const rPr = runProperties(resolvedRun);
           return `<a:r>${rPr}<a:t>${escapeXml(String(run.text || ""))}</a:t></a:r>`;
         })
@@ -2998,7 +3084,9 @@ export function richText(opts: RichTextOptions): string {
     .join("");
 
   const { id, name } = nextShapeIdAndName("TextBox");
-  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>${spTransform(x, y, w, h)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${fill}</p:spPr>${textBodyXml(parasXml, opts)}</p:sp>`;
+  return _createShapeFragment(
+    `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>${spTransform(x, y, w, h)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${fill}</p:spPr>${textBodyXml(parasXml, opts)}</p:sp>`,
+  );
 }
 
 // ── Composite Shapes ─────────────────────────────────────────────────
@@ -3072,7 +3160,7 @@ export interface PanelOptions {
  * @param opts - Panel options
  * @returns Shape XML fragments for all panel elements
  */
-export function panel(opts: PanelOptions): string {
+export function panel(opts: PanelOptions): ShapeFragment {
   // Support aliases: background → fill, text → title, fontSize → titleSize, color → titleColor
   const fill = opts.fill || opts.background || "1A1A1A";
   const title = opts.title || opts.text;
@@ -3097,7 +3185,7 @@ export function panel(opts: PanelOptions): string {
     h: opts.h,
     fill,
     cornerRadius,
-  });
+  }).toString();
 
   let contentY = opts.y + pad;
 
@@ -3115,7 +3203,7 @@ export function panel(opts: PanelOptions): string {
       bold: opts.titleBold !== false,
       forceColor: true,
       autoFit: true, // Auto-scale if title wraps
-    });
+    }).toString();
     contentY += titleH + gap;
   }
 
@@ -3133,10 +3221,10 @@ export function panel(opts: PanelOptions): string {
       color: bodyColor,
       forceColor: true,
       autoFit: true, // Auto-scale if body is long
-    });
+    }).toString();
   }
 
-  return shapes;
+  return _createShapeFragment(shapes);
 }
 
 /** Options for card() composite shape */
@@ -3164,7 +3252,7 @@ export interface CardOptions extends PanelOptions {
  * @param opts - Card options
  * @returns Shape XML fragments
  */
-export function card(opts: CardOptions): string {
+export function card(opts: CardOptions): ShapeFragment {
   let shapes = "";
   const accentH = opts.accentHeight ?? 0.08;
   const accent = opts.accent || opts.accentColor; // Support alias
@@ -3178,19 +3266,19 @@ export function card(opts: CardOptions): string {
       h: accentH,
       fill: accent,
       cornerRadius: opts.cornerRadius ?? 8,
-    });
+    }).toString();
     // Adjust panel to start below accent
     shapes += panel({
       ...opts,
       y: opts.y + accentH,
       h: opts.h - accentH,
       cornerRadius: 0, // Flat top since accent has the rounded corners
-    });
+    }).toString();
   } else {
-    shapes += panel(opts);
+    shapes += panel(opts).toString();
   }
 
-  return shapes;
+  return _createShapeFragment(shapes);
 }
 
 // ── Hyperlinks ───────────────────────────────────────────────────────
@@ -3216,9 +3304,12 @@ export function card(opts: CardOptions): string {
  * @param {string} [opts.color='2196F3'] - Text color (default blue)
  * @param {boolean} [opts.underline=true] - Underline text
  * @param {Object} pres - Presentation builder (needed to register the link relationship)
- * @returns {string} Shape XML fragment
+ * @returns {ShapeFragment} Branded shape fragment
  */
-export function hyperlink(opts: HyperlinkOptions, pres: PresentationInternal): string {
+export function hyperlink(
+  opts: HyperlinkOptions,
+  pres: PresentationInternal,
+): ShapeFragment {
   // ── Input validation ──────────────────────────────────────────────
   requireString(opts.url, "hyperlink.url");
   if (pres == null) {
@@ -3249,7 +3340,9 @@ export function hyperlink(opts: HyperlinkOptions, pres: PresentationInternal): s
   const color = hexColor(opts.color || "2196F3");
 
   const { id, name } = nextShapeIdAndName("Hyperlink");
-  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>${spTransform(x, y, w, h)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr wrap="square" anchor="ctr"/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" sz="${sz}"${u} dirty="0"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:hlinkClick r:id="${linkId}"/></a:rPr><a:t>${escapeXml(String(opts.text || ""))}</a:t></a:r></a:p></p:txBody></p:sp>`;
+  return _createShapeFragment(
+    `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>${spTransform(x, y, w, h)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr wrap="square" anchor="ctr"/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" sz="${sz}"${u} dirty="0"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:hlinkClick r:id="${linkId}"/></a:rPr><a:t>${escapeXml(String(opts.text || ""))}</a:t></a:r></a:p></p:txBody></p:sp>`,
+  );
 }
 
 // ── Image Dimension Detection ───────────────────────────────────────────
@@ -3473,9 +3566,12 @@ const IMAGE_CONTENT_TYPES: Record<string, string> = {
  * @param {string} [opts.format='png'] - Image format: 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'svg'
  * @param {string} [opts.fit='stretch'] - How to fit image: 'stretch' (distort to fill), 'contain' (fit within, may letterbox), 'cover' (fill, may crop)
  * @param {string} [opts.name] - Optional image name (for the ZIP path)
- * @returns {string} Shape XML fragment for use in slide body
+ * @returns {ShapeFragment} Branded shape fragment for use in slide body
  */
-export function embedImage(pres: PresentationInternal, opts: EmbedImageOptions): string {
+export function embedImage(
+  pres: PresentationInternal,
+  opts: EmbedImageOptions,
+): ShapeFragment {
   // ── Input validation ──────────────────────────────────────────────
   if (pres == null) {
     throw new Error(
@@ -3564,7 +3660,9 @@ export function embedImage(pres: PresentationInternal, opts: EmbedImageOptions):
 
   // Picture shape with blipFill referencing the image relationship.
   // OOXML DrawingML uses r:embed (not r:id) to reference embedded media.
-  return `<p:pic><p:nvPicPr><p:cNvPr id="${nextShapeId()}" name="Image ${idx}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill>${blipFillContent}</p:blipFill><p:spPr>${spTransform(x, y, w, h)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`;
+  return _createShapeFragment(
+    `<p:pic><p:nvPicPr><p:cNvPr id="${nextShapeId()}" name="Image ${idx}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill>${blipFillContent}</p:blipFill><p:spPr>${spTransform(x, y, w, h)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>`,
+  );
 }
 
 /**
@@ -3593,9 +3691,12 @@ export function embedImage(pres: PresentationInternal, opts: EmbedImageOptions):
  * @param {number} opts.w - Width in inches
  * @param {number} opts.h - Height in inches
  * @param {string} [opts.format] - Override format detection (png, jpg, gif, etc.)
- * @returns {string} Shape XML fragment for use in slide body
+ * @returns {ShapeFragment} Branded shape fragment for use in slide body
  */
-export function embedImageFromUrl(pres: PresentationInternal, opts: EmbedImageOptions & { url: string }): string {
+export function embedImageFromUrl(
+  pres: PresentationInternal,
+  opts: EmbedImageOptions & { url: string },
+): ShapeFragment {
   if (pres == null) {
     throw new Error(
       "embedImageFromUrl: 'pres' (presentation builder) is required as the first argument.",
@@ -3813,12 +3914,10 @@ function textFitsInBox(
  * @param items - Array of shape XML strings or objects with toString()
  * @returns Combined XML string
  */
-export function shapes(
-  items: Array<string | { toString(): string } | null | undefined>,
-): string {
+export function shapes(items: Array<ShapeFragment | null | undefined>): ShapeFragment {
   if (!Array.isArray(items)) {
     throw new Error(
-      `shapes(): expected an array of shape XML fragments, but got ${typeof items}. ` +
+      `shapes(): expected an array of ShapeFragment items, but got ${typeof items}. ` +
         `Usage: shapes([textBox(...), rect(...), embedChart(...)])`,
     );
   }
@@ -3828,29 +3927,17 @@ export function shapes(
     const item = items[i];
     if (item == null) continue; // Skip null/undefined
 
-    if (typeof item === "string") {
-      result.push(item);
-    } else if (typeof item === "object" && typeof item.toString === "function") {
-      const str = item.toString();
-      // Check if toString returned "[object Object]" (default Object.prototype.toString)
-      if (str === "[object Object]") {
-        throw new Error(
-          `shapes()[${i}]: received an object that converts to "[object Object]". ` +
-            `This usually means you passed a chart/result object directly instead of ` +
-            `using its .shapeXml property or a function that returns XML. ` +
-            `For charts, either use chartSlide() or access embedChart(...).shapeXml`,
-        );
-      }
-      result.push(str);
+    if (isShapeFragment(item)) {
+      result.push(item.toString());
     } else {
       throw new Error(
-        `shapes()[${i}]: expected a string or object with toString(), but got ${typeof item}. ` +
-          `Each item must be shape XML from textBox(), rect(), embedChart(), etc.`,
+        `shapes()[${i}]: expected a ShapeFragment (from textBox(), rect(), etc.), but got ${typeof item}. ` +
+          `Each item must be a shape returned by a builder function like textBox(), rect(), embedChart(), etc.`,
       );
     }
   }
 
-  return result.join("");
+  return _createShapeFragment(result.join(""));
 }
 
 /**
@@ -3872,7 +3959,10 @@ export function shapes(
  * @param {number} [opts.h=2] - Height of all items in inches
  * @returns {Array<{x: number, y: number, w: number, h: number}>}
  */
-export function layoutColumns(count: number, opts: LayoutColumnsOptions = {}): LayoutRect[] {
+export function layoutColumns(
+  count: number,
+  opts: LayoutColumnsOptions = {},
+): LayoutRect[] {
   const margin = opts.margin ?? 0.5;
   const gap = opts.gap ?? 0.25;
   const y = opts.y ?? 1;
@@ -3912,7 +4002,10 @@ export function layoutColumns(count: number, opts: LayoutColumnsOptions = {}): L
  * @param {number} [opts.maxH] - Maximum height of grid area (auto-calc item height)
  * @returns {Array<{x: number, y: number, w: number, h: number}>}
  */
-export function layoutGrid(count: number, opts: LayoutGridOptions = {}): LayoutRect[] {
+export function layoutGrid(
+  count: number,
+  opts: LayoutGridOptions = {},
+): LayoutRect[] {
   const cols = opts.cols ?? 3;
   const margin = opts.margin ?? 0.5;
   const gapX = opts.gapX ?? opts.gap ?? 0.25;
@@ -3981,9 +4074,9 @@ export function getContentArea(opts?: { hasTitle?: boolean }): LayoutRect {
  * @param {number} [opts.y=0] - Y position in inches
  * @param {number} [opts.w] - Width in inches (default: full slide width)
  * @param {number} [opts.h] - Height in inches (default: full slide height)
- * @returns {string} OOXML shape string
+ * @returns {ShapeFragment} Branded shape fragment
  */
-export function overlay(opts: OverlayOptions = {}): string {
+export function overlay(opts: OverlayOptions = {}): ShapeFragment {
   return rect({
     x: opts.x ?? 0,
     y: opts.y ?? 0,
@@ -4021,16 +4114,28 @@ export function overlay(opts: OverlayOptions = {}): string {
  * @param {number} [opts.y=0] - Y position in inches
  * @param {number} [opts.w] - Width in inches (default full slide)
  * @param {number} [opts.h] - Height in inches (default full slide)
- * @returns {string} OOXML shape string
+ * @returns {ShapeFragment} Branded shape fragment
  */
-export function gradientOverlay(opts: GradientOverlayOptions = {}): string {
-  const color1 = opts.color1 ? requireHex(opts.color1, "gradientOverlay.color1") : "000000";
-  const color2 = opts.color2 ? requireHex(opts.color2, "gradientOverlay.color2") : "000000";
+export function gradientOverlay(
+  opts: GradientOverlayOptions = {},
+): ShapeFragment {
+  const color1 = opts.color1
+    ? requireHex(opts.color1, "gradientOverlay.color1")
+    : "000000";
+  const color2 = opts.color2
+    ? requireHex(opts.color2, "gradientOverlay.color2")
+    : "000000";
   const fromOpacity = opts.fromOpacity ?? 0.8;
   const toOpacity = opts.toOpacity ?? 0;
 
-  _validateOptionalNumber(fromOpacity, "gradientOverlay.fromOpacity", { min: 0, max: 1 });
-  _validateOptionalNumber(toOpacity, "gradientOverlay.toOpacity", { min: 0, max: 1 });
+  _validateOptionalNumber(fromOpacity, "gradientOverlay.fromOpacity", {
+    min: 0,
+    max: 1,
+  });
+  _validateOptionalNumber(toOpacity, "gradientOverlay.toOpacity", {
+    min: 0,
+    max: 1,
+  });
 
   const x = inches(opts.x ?? 0);
   const y = inches(opts.y ?? 0);
@@ -4055,7 +4160,9 @@ export function gradientOverlay(opts: GradientOverlayOptions = {}): string {
     `</a:gradFill>`;
 
   const { id, name } = nextShapeIdAndName("Rectangle");
-  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>${spTransform(x, y, w, h)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${gradFill}</p:spPr></p:sp>`;
+  return _createShapeFragment(
+    `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>${spTransform(x, y, w, h)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${gradFill}</p:spPr></p:sp>`,
+  );
 }
 
 /**
@@ -4074,9 +4181,13 @@ export function gradientOverlay(opts: GradientOverlayOptions = {}): string {
  * @param {Object} pres - Presentation object from createPresentation()
  * @param {Uint8Array} data - Image data (from fetchBinary, readBinary, or shared-state)
  * @param {string} [format='jpg'] - Image format (jpg, png, gif, webp, etc.)
- * @returns {string} OOXML shape string for a full-slide image
+ * @returns {ShapeFragment} Branded shape fragment for a full-slide image
  */
-export function backgroundImage(pres: PresentationInternal, data: Uint8Array, format: string = "jpg"): string {
+export function backgroundImage(
+  pres: PresentationInternal,
+  data: Uint8Array,
+  format: string = "jpg",
+): ShapeFragment {
   // Validate pres object — check for .theme which is always present
   if (!pres || typeof pres.theme !== "object") {
     throw new Error(
@@ -4106,17 +4217,17 @@ function solidBg(color: string): string {
 
 /**
  * Create a gradient background for slides.
- * Use with pres.addSlide() or as defaultBackground in createPresentation().
+ * Use with customSlide({ background }) or as defaultBackground in createPresentation().
  *
  * @param {string} color1 - Start color (hex, e.g. '000000')
  * @param {string} color2 - End color (hex, e.g. '1a1a2e')
  * @param {number} [angle=270] - Gradient angle in degrees (0=right, 90=down, 180=left, 270=up)
- * @returns {string} Background XML for use with pres.addSlide()
+ * @returns {string} Background XML for use with customSlide()
  *
  * @example
  * // Vertical gradient (top to bottom)
- * const bg = gradientBg('000000', '1a1a2e', 180);
- * pres.addSlide(bg, shapes);
+ * const pres = createPresentation({ theme: 'brutalist' });
+ * customSlide(pres, { shapes: [...], background: '000000' });
  *
  * @example
  * // As default background for all slides
@@ -4125,7 +4236,11 @@ function solidBg(color: string): string {
  *   defaultBackground: { color1: '0a0a0a', color2: '1a1a2e', angle: 180 }
  * });
  */
-export function gradientBg(color1: string, color2: string, angle?: number): string {
+export function gradientBg(
+  color1: string,
+  color2: string,
+  angle?: number,
+): string {
   requireHex(color1, "gradientBg.color1");
   requireHex(color2, "gradientBg.color2");
   const a = ((angle || 270) % 360) * 60000; // degrees to 60000ths
@@ -4148,8 +4263,10 @@ function _extractBgColor(bgXml: string | null | undefined): string | null {
 /** Map of transition names to OOXML transition elements. */
 const TRANSITIONS: Record<string, (spd: string) => string> = {
   fade: (spd: string) => `<p:transition spd="${spd}"><p:fade/></p:transition>`,
-  push: (spd: string) => `<p:transition spd="${spd}"><p:push dir="l"/></p:transition>`,
-  wipe: (spd: string) => `<p:transition spd="${spd}"><p:wipe dir="d"/></p:transition>`,
+  push: (spd: string) =>
+    `<p:transition spd="${spd}"><p:push dir="l"/></p:transition>`,
+  wipe: (spd: string) =>
+    `<p:transition spd="${spd}"><p:wipe dir="d"/></p:transition>`,
   split: (spd: string) =>
     `<p:transition spd="${spd}"><p:split orient="horz" dir="out"/></p:transition>`,
   cover: (spd: string) =>
@@ -4161,18 +4278,25 @@ const TRANSITIONS: Record<string, (spd: string) => string> = {
     `<p:transition spd="${spd}"><p:split orient="vert" dir="in"/></p:transition>`,
   dissolve: (spd: string) =>
     `<p:transition spd="${spd}"><p:dissolve/></p:transition>`,
-  zoom: (spd: string) => `<p:transition spd="${spd}"><p:zoom dir="in"/></p:transition>`,
+  zoom: (spd: string) =>
+    `<p:transition spd="${spd}"><p:zoom dir="in"/></p:transition>`,
   fly: (spd: string) =>
     `<p:transition spd="${spd}"><p:fly dir="l"/></p:transition>`,
   wheel: (spd: string) =>
     `<p:transition spd="${spd}"><p:wheel spokes="4"/></p:transition>`,
-  random: (spd: string) => `<p:transition spd="${spd}"><p:random/></p:transition>`,
+  random: (spd: string) =>
+    `<p:transition spd="${spd}"><p:random/></p:transition>`,
   none: () => "",
 };
 
-function buildTransitionXml(type: string | null | undefined, durationMs: number): string {
+function buildTransitionXml(
+  type: string | null | undefined,
+  durationMs: number,
+): string {
   const spd = durationMs <= 300 ? "fast" : durationMs >= 800 ? "slow" : "med";
-  const builder = type ? (TRANSITIONS[type] || TRANSITIONS.fade) : TRANSITIONS.fade;
+  const builder = type
+    ? TRANSITIONS[type] || TRANSITIONS.fade
+    : TRANSITIONS.fade;
   return builder(spd);
 }
 
@@ -4190,6 +4314,381 @@ function notesSlideXml(notesText: string, slideIndex: number): string {
 </p:sp>
 </p:spTree></p:cSld>
 </p:notes>`;
+}
+
+// ── Strict Validation Engine ─────────────────────────────────────────
+// Enforces structural correctness before build/export. All issues are
+// reported with machine-readable codes, slide indices, and LLM-actionable hints.
+
+/** Maximum notes length per slide in characters. */
+const MAX_NOTES_LENGTH = 12_000;
+
+/** Regex matching XML control characters that are invalid in OOXML text. */
+const INVALID_XML_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
+
+/** Allowed top-level shape node types in slide shapes XML. */
+const ALLOWED_SHAPE_NODES = new Set([
+  "p:sp",
+  "p:pic",
+  "p:graphicFrame",
+  "p:cxnSp",
+  "p:grpSp",
+]);
+
+/** Regex matching invalid XML chars as a global variant (for replacement). */
+const INVALID_XML_CHARS_G = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
+
+/**
+ * Sanitize speaker notes at input-stage: enforce type, strip invalid XML
+ * characters, and truncate to MAX_NOTES_LENGTH.
+ * Returns null if input is falsy, the sanitized string otherwise.
+ */
+function _sanitizeNotes(raw: unknown): string | null {
+  if (raw == null || raw === "") return null;
+  if (typeof raw !== "string") {
+    throw new Error(
+      `notes must be a string but got ${typeof raw}. ` +
+        `Pass plain text — no HTML, XML, or objects.`,
+    );
+  }
+  // Strip invalid XML control chars (keep \t, \n, \r)
+  let text = raw.replace(INVALID_XML_CHARS_G, "");
+  // Truncate to cap
+  if (text.length > MAX_NOTES_LENGTH) {
+    text = text.slice(0, MAX_NOTES_LENGTH);
+  }
+  return text || null;
+}
+
+export interface ValidationIssue {
+  code: string;
+  severity: "error" | "warn";
+  message: string;
+  part?: string;
+  slideIndex?: number;
+  hint?: string;
+}
+
+export interface ValidationResult {
+  ok: boolean;
+  errors: ValidationIssue[];
+  warnings: ValidationIssue[];
+}
+
+/**
+ * Validate the presentation structure for OOXML correctness.
+ * Called automatically by buildZip() and exportToFile() — cannot be bypassed.
+ *
+ * @param slides - Internal slide data array
+ * @param charts - Chart metadata array
+ * @param chartEntries - Chart ZIP entries
+ * @param images - Image entries
+ * @param links - Hyperlink entries
+ * @returns ValidationResult with any issues found
+ * @internal
+ */
+function _validatePresentation(
+  slides: SlideData[],
+  charts: ChartEntry[],
+  chartEntries: Array<{ name: string; data: string }>,
+  images: ImageEntry[],
+  _links: Array<{ slideIndex: number; relId: string; url: string }>,
+): ValidationResult {
+  const errors: ValidationIssue[] = [];
+  const warnings: ValidationIssue[] = [];
+
+  // ── A) Slide integrity ──────────────────────────────────────────────
+  const globalShapeIds = new Map<string, number[]>(); // track shape ID usage
+  for (let i = 0; i < slides.length; i++) {
+    const slide = slides[i];
+    const shapes = slide.shapes || "";
+
+    // A1: Check for nested/foreign document roots (e.g. chart XML pasted in)
+    if (shapes.includes("<?xml")) {
+      errors.push({
+        code: "PPTX_FOREIGN_ROOT",
+        severity: "error",
+        message: `Slide shapes contain an XML declaration — likely raw chart/document XML was concatenated.`,
+        slideIndex: i,
+        hint: "Use chartSlide() or embedChart().shape instead of inserting raw chart XML.",
+      });
+    }
+
+    // A2: Check for allowed shape node types only
+    // Extract all top-level opening tags that look like OOXML elements
+    const topTags = shapes.match(/<(p:\w+)[\s>]/g);
+    if (topTags) {
+      for (const tag of topTags) {
+        const nodeName = tag.match(/<(p:\w+)/)?.[1];
+        if (nodeName && !ALLOWED_SHAPE_NODES.has(nodeName) && nodeName !== "p:txBody") {
+          // Only warn for unexpected nodes (not errors, since some are legit internal use)
+          warnings.push({
+            code: "PPTX_UNEXPECTED_SHAPE_NODE",
+            severity: "warn",
+            message: `Unexpected shape node <${nodeName}> found.`,
+            slideIndex: i,
+            hint: `Only standard shapes (sp, pic, graphicFrame, cxnSp, grpSp) are expected.`,
+          });
+        }
+      }
+    }
+
+    // A3: Detect duplicate shape IDs within a slide
+    const idMatches = shapes.matchAll(/<p:cNvPr\s+id="(\d+)"/g);
+    const slideIds = new Set<string>();
+    for (const m of idMatches) {
+      const id = m[1];
+      if (slideIds.has(id)) {
+        errors.push({
+          code: "PPTX_DUPLICATE_SHAPE_ID",
+          severity: "error",
+          message: `Duplicate shape ID ${id} found on slide.`,
+          slideIndex: i,
+          hint: "Each shape must have a unique ID. This usually means shapes were copy-pasted incorrectly.",
+        });
+      }
+      slideIds.add(id);
+      // Track globally too
+      if (!globalShapeIds.has(id)) globalShapeIds.set(id, []);
+      globalShapeIds.get(id)!.push(i);
+    }
+
+    // A4: Check balanced required tags
+    for (const tag of ["p:sp", "p:pic", "p:graphicFrame", "p:cxnSp"]) {
+      const opens = (shapes.match(new RegExp(`<${tag}[\\s>]`, "g")) || []).length;
+      const closes = (shapes.match(new RegExp(`</${tag}>`, "g")) || []).length;
+      if (opens !== closes) {
+        errors.push({
+          code: "PPTX_UNBALANCED_TAGS",
+          severity: "error",
+          message: `Unbalanced <${tag}> tags: ${opens} opening vs ${closes} closing.`,
+          slideIndex: i,
+          hint: "Shape XML is malformed. Regenerate the slide using the high-level slide functions.",
+        });
+      }
+    }
+  }
+
+  // A5: Cross-slide duplicate shape ID check
+  for (const [id, slideIndices] of globalShapeIds) {
+    if (slideIndices.length > 1) {
+      warnings.push({
+        code: "PPTX_CROSS_SLIDE_DUPLICATE_ID",
+        severity: "warn",
+        message: `Shape ID ${id} appears on slides [${slideIndices.map((s) => s + 1).join(", ")}].`,
+        hint: "Cross-slide duplicate IDs can trigger PowerPoint repair. Ensure each shape has a unique ID.",
+      });
+    }
+  }
+
+  // ── B) Chart integrity ────────────────────────────────────────────────
+  // B1: Check total chart count
+  if (charts.length > MAX_CHARTS_PER_DECK) {
+    errors.push({
+      code: "PPTX_TOO_MANY_CHARTS",
+      severity: "error",
+      message: `Deck has ${charts.length} charts — max allowed is ${MAX_CHARTS_PER_DECK}.`,
+      hint: "Reduce the number of charts or split into multiple presentations.",
+    });
+  }
+
+  // B2: Check for duplicate chart relation IDs
+  const chartRelIds = new Set<string>();
+  for (const chart of charts) {
+    if (chart.relId) {
+      if (chartRelIds.has(chart.relId)) {
+        errors.push({
+          code: "PPTX_DUPLICATE_CHART_REL",
+          severity: "error",
+          message: `Duplicate chart relationship ID "${chart.relId}".`,
+          part: chart.chartPath,
+          hint: "Chart indexing is inconsistent. This is likely a bug — regenerate the deck.",
+        });
+      }
+      chartRelIds.add(chart.relId);
+    }
+  }
+
+  // B3: Validate chart XML entries
+  for (const entry of chartEntries) {
+    if (!entry.name.endsWith(".xml.rels") && entry.name.includes("chart")) {
+      const xml = entry.data;
+
+      // B3a: Check required chart nodes
+      if (!xml.includes("<c:chartSpace") && !xml.includes("<c:chart")) {
+        errors.push({
+          code: "PPTX_CHART_MISSING_ROOT",
+          severity: "error",
+          message: "Chart XML missing required <c:chartSpace> or <c:chart> elements.",
+          part: entry.name,
+          hint: "Regenerate the chart using barChart/pieChart/lineChart/comboChart.",
+        });
+      }
+
+      // B3b: Axis ID/crossAx consistency (for bar/line/combo charts)
+      const axIds = [...xml.matchAll(/<c:axId val="(\d+)"\/>/g)].map((m) =>
+        m[1],
+      );
+      const crossAxIds = [
+        ...xml.matchAll(/<c:crossAx val="(\d+)"\/>/g),
+      ].map((m) => m[1]);
+      for (const crossId of crossAxIds) {
+        if (!axIds.includes(crossId)) {
+          errors.push({
+            code: "PPTX_CHART_AXIS_MISMATCH",
+            severity: "error",
+            message: `crossAx ${crossId} not found in chart axis IDs [${axIds.join(", ")}].`,
+            part: entry.name,
+            hint: "Regenerate chart via comboChart/barChart with consistent axes.",
+          });
+        }
+      }
+
+      // B3c: Check for non-finite values in chart data
+      const valMatches = [...xml.matchAll(/<c:v>([^<]+)<\/c:v>/g)];
+      for (const vm of valMatches) {
+        const val = vm[1];
+        // Numeric values must be finite numbers
+        if (val === "NaN" || val === "Infinity" || val === "-Infinity") {
+          errors.push({
+            code: "PPTX_CHART_INVALID_VALUE",
+            severity: "error",
+            message: `Chart contains non-finite value "${val}".`,
+            part: entry.name,
+            hint: "All chart data values must be finite numbers. Check for NaN/Infinity in data.",
+          });
+        }
+      }
+    }
+  }
+
+  // B4: Chart parts have matching ZIP entries
+  for (const chart of charts) {
+    const expectedPath = `ppt/${chart.chartPath}`;
+    const found = chartEntries.some((e) => e.name === expectedPath);
+    if (!found) {
+      errors.push({
+        code: "PPTX_CHART_MISSING_PART",
+        severity: "error",
+        message: `Chart part "${chart.chartPath}" referenced but ZIP entry not found.`,
+        part: chart.chartPath,
+        hint: "Chart may have been orphaned. Regenerate the chart.",
+      });
+    }
+  }
+
+  // ── C) Notes integrity ────────────────────────────────────────────────
+  for (let i = 0; i < slides.length; i++) {
+    const notes = slides[i].notes;
+    if (notes == null) continue;
+
+    // C1: Notes must be a string
+    if (typeof notes !== "string") {
+      errors.push({
+        code: "PPTX_NOTES_TYPE",
+        severity: "error",
+        message: `Notes must be a string, got ${typeof notes}.`,
+        slideIndex: i,
+        hint: "Pass a plain text string as notes.",
+      });
+      continue;
+    }
+
+    // C2: Notes length cap (defence-in-depth — _sanitizeNotes truncates at input,
+    // but this catches any notes injected by restore/deserialization bypassing sanitization)
+    if (notes.length > MAX_NOTES_LENGTH) {
+      errors.push({
+        code: "PPTX_NOTES_TOO_LONG",
+        severity: "error",
+        message: `Notes are ${notes.length} chars — max ${MAX_NOTES_LENGTH}.`,
+        slideIndex: i,
+        hint: `Trim notes to ${MAX_NOTES_LENGTH} characters or split across slides.`,
+      });
+    }
+
+    // C3: Invalid XML characters
+    if (INVALID_XML_CHARS.test(notes)) {
+      const match = notes.match(INVALID_XML_CHARS);
+      const charCode = match ? match[0].charCodeAt(0) : 0;
+      errors.push({
+        code: "PPTX_NOTES_INVALID_CHARS",
+        severity: "error",
+        message: `Notes contain invalid XML control character (U+${charCode.toString(16).padStart(4, "0").toUpperCase()}).`,
+        slideIndex: i,
+        hint: "Remove control characters. Only printable UTF-8 text, tabs, and newlines are allowed.",
+      });
+    }
+  }
+
+  // ── D) Package integrity ──────────────────────────────────────────────
+  // D1: Check for orphan chart entries (charts in ZIP not referenced by any slide rels)
+  const usedChartPaths = new Set(charts.map((c) => `ppt/${c.chartPath}`));
+  for (const entry of chartEntries) {
+    if (entry.name.endsWith(".xml") && !entry.name.endsWith(".xml.rels")) {
+      if (!usedChartPaths.has(entry.name)) {
+        warnings.push({
+          code: "PPTX_ORPHAN_CHART",
+          severity: "warn",
+          message: `Chart ZIP entry "${entry.name}" not referenced by any slide.`,
+          part: entry.name,
+          hint: "This chart was created but never embedded in a slide.",
+        });
+      }
+    }
+  }
+
+  // D2: Check image slide index references are valid
+  for (const img of images) {
+    if (img.slideIndex < 1 || img.slideIndex > slides.length) {
+      warnings.push({
+        code: "PPTX_IMAGE_BAD_SLIDE_REF",
+        severity: "warn",
+        message: `Image "${img.id}" references slide ${img.slideIndex} but only ${slides.length} slides exist.`,
+        hint: "Image may have been orphaned by slide deletion.",
+      });
+    }
+  }
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    warnings,
+  };
+}
+
+/**
+ * Throw a structured validation error with machine-readable payload.
+ * Format: PPTX_VALIDATION_FAILED: X errors, Y warnings
+ * @internal
+ */
+function _throwValidationError(result: ValidationResult): never {
+  const maxIssues = 5; // Show first N issues in message
+  const lines: string[] = [
+    `PPTX_VALIDATION_FAILED: ${result.errors.length} error${result.errors.length !== 1 ? "s" : ""}, ${result.warnings.length} warning${result.warnings.length !== 1 ? "s" : ""}`,
+  ];
+
+  const allIssues = [...result.errors, ...result.warnings].slice(0, maxIssues);
+  for (const issue of allIssues) {
+    const severity = issue.severity === "error" ? "ERROR" : "WARN";
+    const slide = issue.slideIndex != null ? ` slide=${issue.slideIndex}` : "";
+    const part = issue.part ? ` part=${issue.part}` : "";
+    lines.push(`[${severity}] ${issue.code}${slide}${part}`);
+    lines.push(`  ${issue.message}`);
+    if (issue.hint) {
+      lines.push(`  Hint: ${issue.hint}`);
+    }
+  }
+
+  if (result.errors.length + result.warnings.length > maxIssues) {
+    lines.push(
+      `  ... and ${result.errors.length + result.warnings.length - maxIssues} more issue(s)`,
+    );
+  }
+
+  const error = new Error(lines.join("\n"));
+  // Attach machine-readable payload
+  (error as Error & { validation: ValidationResult }).validation = result;
+  throw error;
 }
 
 // ── Slide XML Assembly ───────────────────────────────────────────────
@@ -4214,7 +4713,8 @@ function slideXml(
   // not when the XML is assembled. The counter is managed globally and must
   // be preserved across handler boundaries via serialize()/restorePresentation().
   const transXml = transition || "";
-  const animXml = animations && animations.length > 0 ? animations.join("") : "";
+  const animXml =
+    animations && animations.length > 0 ? animations.join("") : "";
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sld xmlns:a="${NS_A}" xmlns:r="${NS_R}" xmlns:p="${NS_P}">
 <p:cSld>${bg}<p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>${shapes}</p:spTree></p:cSld>${transXml}${animXml}</p:sld>`;
@@ -4238,11 +4738,12 @@ function slideXml(
  * titleSlide(pres, { title: 'My Title' });
  * contentSlide(pres, { title: 'Content', bullets: ['Point 1', 'Point 2'] });
  *
- * // For CUSTOM layouts, use pres.addSlide() directly:
- * const bg = solidFill(pres.theme.bg);
- * const shapes = textBox({x: 1, y: 1, w: 8, h: 1, text: 'Custom text'}) +
- *                rect({x: 1, y: 3, w: 4, h: 2, fill: pres.theme.accent1});
- * pres.addSlide(bg, shapes, { transition: 'fade' });
+ * // For CUSTOM layouts, use customSlide():
+ * customSlide(pres, {
+ *   shapes: [textBox({x: 1, y: 1, w: 8, h: 1, text: 'Custom text'}),
+ *            rect({x: 1, y: 3, w: 4, h: 2, fill: pres.theme.accent1})],
+ *   transition: 'fade'
+ * });
  *
  * // Build final file
  * const zip = pres.buildZip();
@@ -4374,7 +4875,11 @@ export function createPresentation(opts?: CreatePresentationOptions) {
      * @param {number} [slideOpts.transitionDuration=500] - Transition duration in ms
      * @param {string} [slideOpts.notes] - Speaker notes text
      */
-    addSlide(bgXml: string, shapesXml: string | string[], slideOpts?: SlideOptions) {
+    addSlide(
+      bgXml: string,
+      shapesXml: string | string[],
+      slideOpts?: SlideOptions,
+    ) {
       // Defensively handle arrays - join them if accidentally passed
       const shapes = Array.isArray(shapesXml) ? shapesXml.join("") : shapesXml;
       slides.push({
@@ -4382,7 +4887,7 @@ export function createPresentation(opts?: CreatePresentationOptions) {
         shapes: shapes,
         transition: slideOpts?.transition || null,
         transitionDuration: slideOpts?.transitionDuration || 500,
-        notes: slideOpts?.notes || null,
+        notes: _sanitizeNotes(slideOpts?.notes),
       });
     },
 
@@ -4402,14 +4907,45 @@ export function createPresentation(opts?: CreatePresentationOptions) {
      * pres.addBody(textBox({x:1, y:1, w:8, h:1, text:'Hello'}));
      *
      * // With solid background:
-     * pres.addBody(shapes, { background: '0D1117', transition: 'fade' });
+     * pres.addBody([shape1, shape2], { background: '0D1117', transition: 'fade' });
      *
      * // With gradient background:
-     * pres.addBody(shapes, { background: {color1: '000000', color2: '1a1a2e', angle: 180} });
+     * pres.addBody([shape1], { background: {color1: '000000', color2: '1a1a2e', angle: 180} });
      */
-    addBody(shapesXml: string | string[], slideOpts?: SlideOptions) {
-      // Defensively handle arrays - join them if accidentally passed
-      const shapesStr = Array.isArray(shapesXml) ? shapesXml.join("") : shapesXml;
+    addBody(
+      shapesInput: ShapeFragment | ShapeFragment[] | string | string[],
+      slideOpts?: SlideOptions,
+    ) {
+      // Reject raw strings — LLMs must use shape builder functions
+      if (typeof shapesInput === "string") {
+        throw new Error(
+          "addBody: raw XML strings are no longer accepted. " +
+            "Pass ShapeFragment objects from builder functions (textBox, rect, bulletList, etc.). " +
+            "Example: pres.addBody(textBox({ x:1, y:1, w:8, h:1, text:'Hello' }))",
+        );
+      }
+      if (
+        Array.isArray(shapesInput) &&
+        shapesInput.length > 0 &&
+        typeof shapesInput[0] === "string"
+      ) {
+        throw new Error(
+          "addBody: raw XML string arrays are no longer accepted. " +
+            "Pass ShapeFragment objects from builder functions (textBox, rect, bulletList, etc.).",
+        );
+      }
+      // Validate and convert ShapeFragment(s) to XML, then delegate to internal method
+      const shapesStr = fragmentsToXml(shapesInput as ShapeFragment | ShapeFragment[]);
+      pres._addBodyRaw(shapesStr, slideOpts);
+    },
+
+    /**
+     * Internal: add shapes (as pre-validated XML string) to a new slide.
+     * Resolves background from per-slide > defaultBackground > theme.
+     * Not on the Presentation interface — internal use only.
+     * @internal
+     */
+    _addBodyRaw(shapesStr: string, slideOpts?: SlideOptions) {
       // Resolve background: per-slide > defaultBackground > theme.bg
       let bgXml: string;
       const bgSpec = slideOpts?.background;
@@ -4424,7 +4960,10 @@ export function createPresentation(opts?: CreatePresentationOptions) {
         }
       } else if (defaultBackground) {
         // Use presentation default
-        if (typeof defaultBackground === "object" && "color1" in defaultBackground) {
+        if (
+          typeof defaultBackground === "object" &&
+          "color1" in defaultBackground
+        ) {
           bgXml = gradientBg(
             defaultBackground.color1,
             defaultBackground.color2,
@@ -4442,7 +4981,7 @@ export function createPresentation(opts?: CreatePresentationOptions) {
         shapes: shapesStr,
         transition: slideOpts?.transition || null,
         transitionDuration: slideOpts?.transitionDuration || 500,
-        notes: slideOpts?.notes || null,
+        notes: _sanitizeNotes(slideOpts?.notes),
       });
     },
 
@@ -4453,13 +4992,18 @@ export function createPresentation(opts?: CreatePresentationOptions) {
      * @param {string} shapesXml - Concatenated shape XML fragments
      * @param {Object} [slideOpts] - Optional slide-level settings
      */
-    insertSlideAt(index: number, bgXml: string, shapesXml: string, slideOpts?: SlideOptions) {
+    insertSlideAt(
+      index: number,
+      bgXml: string,
+      shapesXml: string,
+      slideOpts?: SlideOptions,
+    ) {
       const slide: SlideData = {
         bg: bgXml,
         shapes: shapesXml,
         transition: slideOpts?.transition || null,
         transitionDuration: slideOpts?.transitionDuration || 500,
-        notes: slideOpts?.notes || null,
+        notes: _sanitizeNotes(slideOpts?.notes),
       };
       const clampedIndex = Math.max(0, Math.min(index, slides.length));
       slides.splice(clampedIndex, 0, slide);
@@ -4819,7 +5363,12 @@ ${notesMasterIdLst}<p:sldIdLst>${slideList}</p:sldIdLst>
         // Track sequential notes slide index (notes slides must be numbered 1, 2, 3... not matching slide numbers)
         // This is set after we check if slide.notes exists, so we can use it for the filename
         let notesSlideIndex: number | undefined;
-        const slideRels: Array<{ id: string; type: string; target: string; targetMode?: string }> = [
+        const slideRels: Array<{
+          id: string;
+          type: string;
+          target: string;
+          targetMode?: string;
+        }> = [
           {
             id: `rId${relIdCounter++}`,
             type: RT_SLIDE_LAYOUT,
@@ -4855,7 +5404,10 @@ ${notesMasterIdLst}<p:sldIdLst>${slideList}</p:sldIdLst>
         if (this._links) {
           const seenLinkRelIds = new Set<string>();
           for (const link of this._links) {
-            if (link.slideIndex === slideNum && !seenLinkRelIds.has(link.relId)) {
+            if (
+              link.slideIndex === slideNum &&
+              !seenLinkRelIds.has(link.relId)
+            ) {
               seenLinkRelIds.add(link.relId);
               slideRels.push({
                 id: link.relId,
@@ -4889,7 +5441,10 @@ ${notesMasterIdLst}<p:sldIdLst>${slideList}</p:sldIdLst>
 
         // Build transition XML
         const transXml = slide.transition
-          ? buildTransitionXml(slide.transition, slide.transitionDuration ?? 500)
+          ? buildTransitionXml(
+              slide.transition,
+              slide.transitionDuration ?? 500,
+            )
           : "";
 
         // Get animations for this slide (if any)
@@ -4969,7 +5524,8 @@ ${notesMasterIdLst}<p:sldIdLst>${slideList}</p:sldIdLst>
       const defaults = [
         {
           extension: "rels",
-          contentType: "application/vnd.openxmlformats-package.relationships+xml",
+          contentType:
+            "application/vnd.openxmlformats-package.relationships+xml",
         },
         { extension: "xml", contentType: "application/xml" },
       ];
@@ -5007,9 +5563,20 @@ ${notesMasterIdLst}<p:sldIdLst>${slideList}</p:sldIdLst>
      */
     buildZip() {
       // Clean up orphan charts (charts created but never used in a slide)
-      // This can happen when a handler fails mid-execution after embedChart()
-      // but before customSlide() — the chart is tracked but never added to slide XML
       this._cleanupOrphanCharts();
+
+      // ── Strict validation (mandatory, no bypass) ──────────────────────
+      const validationResult = _validatePresentation(
+        slides,
+        this._charts || [],
+        this._chartEntries || [],
+        this._images || [],
+        this._links || [],
+      );
+      if (!validationResult.ok) {
+        _throwValidationError(validationResult);
+      }
+
       // Insert warning slide at the beginning
       this._insertWarningSlide();
       return createZip(this.build());
@@ -5195,7 +5762,10 @@ ${notesMasterIdLst}<p:sldIdLst>${slideList}</p:sldIdLst>
       }
       // Cast to unknown to satisfy StorableValue type - the serialized state
       // contains nested objects that match StorableValue semantically but not structurally
-      sharedStateSet(key, this.serialize() as unknown as import("ha:shared-state").StorableValue);
+      sharedStateSet(
+        key,
+        this.serialize() as unknown as import("ha:shared-state").StorableValue,
+      );
     },
   };
 
@@ -5499,7 +6069,7 @@ export function titleSlide(pres: Pres, opts: TitleSlideOptions) {
       }),
     );
   }
-  pres.addSlide(bg, shapes.join(""), opts);
+  pres.addSlide(bg, shapes.map(_s).join(""), opts);
 }
 
 /**
@@ -5551,7 +6121,7 @@ export function sectionSlide(pres: Pres, opts: SectionSlideOptions) {
       }),
     );
   }
-  pres.addSlide(bg, shapes.join(""), opts);
+  pres.addSlide(bg, shapes.map(_s).join(""), opts);
 }
 
 /**
@@ -5601,22 +6171,34 @@ export function contentSlide(pres: Pres, opts: ContentSlideOptions) {
     bold: true,
     _skipBoundsCheck: true,
   });
-  const accentBar = rect({ x: 0.5, y: 1.05, w: 2, h: 0.05, fill: t.accent1, _skipBoundsCheck: true });
+  const accentBar = rect({
+    x: 0.5,
+    y: 1.05,
+    w: 2,
+    h: 0.05,
+    fill: t.accent1,
+    _skipBoundsCheck: true,
+  });
 
   const itemsArr = normalizeItems(opts.items);
-  const body = itemsArr.length > 0
-    ? bulletList({
-        x: 0.5,
-        y: 1.5,
-        w: 12,
-        h: 5.5,
-        items: itemsArr,
-        color: t.fg,
-        _skipBoundsCheck: true,
-      })
-    : "";
+  const body =
+    itemsArr.length > 0
+      ? bulletList({
+          x: 0.5,
+          y: 1.5,
+          w: 12,
+          h: 5.5,
+          items: itemsArr,
+          color: t.fg,
+          _skipBoundsCheck: true,
+        })
+      : "";
 
-  pres.addSlide(bg, titleShape + accentBar + body, opts);
+  pres.addSlide(
+    bg,
+    _s(titleShape) + _s(accentBar) + (body === "" ? "" : _s(body)),
+    opts,
+  );
 }
 
 /**
@@ -5664,54 +6246,79 @@ export function twoColumnSlide(pres: Pres, opts: TwoColumnSlideOptions) {
     bold: true,
     _skipBoundsCheck: true,
   });
-  const accentBar = rect({ x: 0.5, y: 1.05, w: 2, h: 0.05, fill: t.accent1, _skipBoundsCheck: true });
-  const divider = rect({ x: 6.5, y: 1.3, w: 0.03, h: 5.5, fill: t.subtle, _skipBoundsCheck: true });
+  const accentBar = rect({
+    x: 0.5,
+    y: 1.05,
+    w: 2,
+    h: 0.05,
+    fill: t.accent1,
+    _skipBoundsCheck: true,
+  });
+  const divider = rect({
+    x: 6.5,
+    y: 1.3,
+    w: 0.03,
+    h: 5.5,
+    fill: t.subtle,
+    _skipBoundsCheck: true,
+  });
 
   const leftItemsArr = normalizeItems(opts.leftItems);
   const rightItemsArr = normalizeItems(opts.rightItems);
 
-  const left = leftItemsArr.length > 0
-    ? bulletList({
-        x: 0.5,
-        y: 1.5,
-        w: 5.5,
-        h: 5.5,
-        items: leftItemsArr,
-        color: t.fg,
-        _skipBoundsCheck: true,
-      })
-    : "";
+  const left =
+    leftItemsArr.length > 0
+      ? bulletList({
+          x: 0.5,
+          y: 1.5,
+          w: 5.5,
+          h: 5.5,
+          items: leftItemsArr,
+          color: t.fg,
+          _skipBoundsCheck: true,
+        })
+      : "";
 
-  const right = rightItemsArr.length > 0
-    ? bulletList({
-        x: 7,
-        y: 1.5,
-        w: 5.5,
-        h: 5.5,
-        items: rightItemsArr,
-        color: t.fg,
-        _skipBoundsCheck: true,
-      })
-    : "";
+  const right =
+    rightItemsArr.length > 0
+      ? bulletList({
+          x: 7,
+          y: 1.5,
+          w: 5.5,
+          h: 5.5,
+          items: rightItemsArr,
+          color: t.fg,
+          _skipBoundsCheck: true,
+        })
+      : "";
 
-  pres.addSlide(bg, titleShape + accentBar + divider + left + right, opts);
+  pres.addSlide(
+    bg,
+    _s(titleShape) +
+      _s(accentBar) +
+      _s(divider) +
+      (left === "" ? "" : _s(left)) +
+      (right === "" ? "" : _s(right)),
+    opts,
+  );
 }
 
 /**
  * Add a blank slide with just the theme background (NO content).
  *
  * ⚠️ WARNING: This creates an EMPTY slide. You CANNOT add shapes to it later.
- * For custom layouts with shapes, use pres.addSlide() directly instead:
+ * For custom layouts with shapes, use customSlide() instead:
  *
  * @example
  * // DON'T do this — blankSlide creates empty slide with no way to add content:
  * blankSlide(pres);  // Creates empty slide, cannot add shapes after
  *
- * // DO this instead — use addSlide for custom layouts:
- * const bg = solidFill(pres.theme.bg);
- * const shapes = textBox({x: 1, y: 1, w: 8, h: 1, text: 'Custom slide'}) +
- *                rect({x: 1, y: 3, w: 4, h: 2, fill: pres.theme.accent1});
- * pres.addSlide(bg, shapes, { transition: 'fade' });
+ * // DO this instead — use customSlide for custom layouts:
+ * customSlide(pres, {
+ *   shapes: [textBox({x: 1, y: 1, w: 8, h: 1, text: 'Custom slide'}),
+ *            rect({x: 1, y: 3, w: 4, h: 2, fill: pres.theme.accent1})],
+ *   transition: 'fade'
+ * });
  *
  * @param {Object} pres - Presentation object from createPresentation(). REQUIRED as first param.
  * @returns {void}
@@ -5759,13 +6366,16 @@ export function blankSlide(pres: Pres): void {
  */
 export function customSlide(pres: Pres, opts: CustomSlideOptions) {
   _requirePres(pres, "customSlide");
-  if (!opts || typeof opts.shapes !== "string") {
+  if (!opts || opts.shapes == null) {
     throw new Error(
-      "customSlide: 'shapes' parameter is required and must be a string of shape XML. " +
-        "Example: customSlide(pres, { shapes: textBox({...}) + rect({...}) })",
+      "customSlide: 'shapes' parameter is required. " +
+        "Pass an array of ShapeFragment objects from shape builders: " +
+        "customSlide(pres, { shapes: [textBox({...}), rect({...})] })",
     );
   }
-  pres.addBody(opts.shapes, {
+  // Validate and convert ShapeFragment(s) to XML string
+  const shapesXml = fragmentsToXml(opts.shapes);
+  pres._addBodyRaw(shapesXml, {
     background: opts.background,
     transition: opts.transition,
     transitionDuration: opts.transitionDuration,
@@ -5945,20 +6555,25 @@ export function chartSlide(pres: Pres, opts: ChartSlideOptions) {
 
   // Handle extraItems
   const extraItemsArr = normalizeItems(opts.extraItems);
-  const extra = extraItemsArr.length > 0
-    ? bulletList({
-        x: 0.5,
-        y: 6.6,
-        w: 12,
-        h: 1,
-        items: extraItemsArr,
-        fontSize: 12,
-        color: t.fg,
-        _skipBoundsCheck: true,
-      })
-    : "";
+  const extra =
+    extraItemsArr.length > 0
+      ? bulletList({
+          x: 0.5,
+          y: 6.6,
+          w: 12,
+          h: 1,
+          items: extraItemsArr,
+          fontSize: 12,
+          color: t.fg,
+          _skipBoundsCheck: true,
+        })
+      : "";
 
-  pres.addSlide(bg, titleShape + accentBar + chartXml + extra, opts);
+  pres.addSlide(
+    bg,
+    _s(titleShape) + _s(accentBar) + chartXml + (extra === "" ? "" : _s(extra)),
+    opts,
+  );
 }
 
 /**
@@ -6061,35 +6676,43 @@ export function comparisonSlide(pres: Pres, opts: ComparisonSlideOptions) {
 
   // Build left column content
   const leftItemsArr = normalizeItems(opts.leftItems);
-  const left = leftItemsArr.length > 0
-    ? bulletList({
-        x: LEFT_COL.x,
-        y: BODY_Y,
-        w: LEFT_COL.w,
-        h: BODY_H,
-        items: leftItemsArr.slice(0, MAX_ITEMS),
-        color: t.bodyText,
-        bulletColor: t.accent1,
-      })
-    : "";
+  const left =
+    leftItemsArr.length > 0
+      ? bulletList({
+          x: LEFT_COL.x,
+          y: BODY_Y,
+          w: LEFT_COL.w,
+          h: BODY_H,
+          items: leftItemsArr.slice(0, MAX_ITEMS),
+          color: t.bodyText,
+          bulletColor: t.accent1,
+        })
+      : "";
 
   // Build right column content
   const rightItemsArr = normalizeItems(opts.rightItems);
-  const right = rightItemsArr.length > 0
-    ? bulletList({
-        x: RIGHT_COL.x,
-        y: BODY_Y,
-        w: RIGHT_COL.w,
-        h: BODY_H,
-        items: rightItemsArr.slice(0, MAX_ITEMS),
-        color: t.bodyText,
-        bulletColor: t.accent2,
-      })
-    : "";
+  const right =
+    rightItemsArr.length > 0
+      ? bulletList({
+          x: RIGHT_COL.x,
+          y: BODY_Y,
+          w: RIGHT_COL.w,
+          h: BODY_H,
+          items: rightItemsArr.slice(0, MAX_ITEMS),
+          color: t.bodyText,
+          bulletColor: t.accent2,
+        })
+      : "";
 
   pres.addSlide(
     bg,
-    titleShape + accentBar + leftHeader + rightHeader + divider + left + right,
+    _s(titleShape) +
+      _s(accentBar) +
+      _s(leftHeader) +
+      _s(rightHeader) +
+      _s(divider) +
+      (left === "" ? "" : _s(left)) +
+      (right === "" ? "" : _s(right)),
     opts,
   );
 }
@@ -6157,7 +6780,11 @@ export function heroSlide(pres: Pres, opts: HeroSlideOptions) {
 
   // Calculate positions based on alignment
   const xMap: Record<string, number> = { left: 0.8, center: 0.5, right: 0.5 };
-  const wMap: Record<string, number> = { left: 11.5, center: 12.333, right: 11.5 };
+  const wMap: Record<string, number> = {
+    left: 11.5,
+    center: 12.333,
+    right: 11.5,
+  };
   const textX = xMap[align] || 0.5;
   const textW = wMap[align] || 12.333;
 
@@ -6165,7 +6792,7 @@ export function heroSlide(pres: Pres, opts: HeroSlideOptions) {
   const bgImg = backgroundImage(pres, opts.image, format);
   const darkOverlay = overlay({ opacity: overlayOpacity, color: overlayColor });
 
-  let shapes = bgImg + darkOverlay;
+  let shapes = _s(bgImg) + _s(darkOverlay);
 
   // Only add title if provided
   if (opts.title) {
@@ -6182,7 +6809,7 @@ export function heroSlide(pres: Pres, opts: HeroSlideOptions) {
       align: align,
       forceColor: true,
     });
-    shapes += titleShape;
+    shapes += _s(titleShape);
 
     if (opts.subtitle) {
       const subtitleShape = textBox({
@@ -6196,12 +6823,11 @@ export function heroSlide(pres: Pres, opts: HeroSlideOptions) {
         align: align,
         forceColor: true,
       });
-      shapes += subtitleShape;
+      shapes += _s(subtitleShape);
     }
   }
 
-  customSlide(pres, {
-    shapes: shapes,
+  pres._addBodyRaw(shapes, {
     background: "000000", // Black bg in case image doesn't fully load
     transition: opts.transition,
     notes: opts.notes,
@@ -6329,7 +6955,7 @@ export function statGridSlide(pres: Pres, opts: StatGridSlideOptions) {
     }
   }
 
-  pres.addBody(shapes, {
+  pres._addBodyRaw(shapes, {
     transition: opts.transition,
     notes: opts.notes,
   });
@@ -6417,7 +7043,8 @@ export function imageGridSlide(pres: Pres, opts: ImageGridSlideOptions) {
   const margin = 0.5;
   const availW = SLIDE_WIDTH_INCHES - 2 * margin;
   const firstImg = opts.images[0];
-  const firstHasCaption = firstImg && !(firstImg instanceof Uint8Array) && firstImg.caption;
+  const firstHasCaption =
+    firstImg && !(firstImg instanceof Uint8Array) && firstImg.caption;
   const availH = (opts.title ? 6 : 6.5) - (firstHasCaption ? 0.5 : 0);
   const cellW = (availW - (cols - 1) * gap) / cols;
   const cellH = (availH - (rows - 1) * gap) / rows;
@@ -6432,7 +7059,9 @@ export function imageGridSlide(pres: Pres, opts: ImageGridSlideOptions) {
     const imgItem = opts.images[i];
     const isUint8Array = imgItem instanceof Uint8Array;
     const imgData = isUint8Array ? imgItem : imgItem.data;
-    const imgFormat = isUint8Array ? defaultFormat : (imgItem.format || defaultFormat);
+    const imgFormat = isUint8Array
+      ? defaultFormat
+      : imgItem.format || defaultFormat;
     const caption = isUint8Array ? undefined : imgItem.caption;
 
     if (!imgData || !(imgData instanceof Uint8Array)) {
@@ -6466,7 +7095,7 @@ export function imageGridSlide(pres: Pres, opts: ImageGridSlideOptions) {
     }
   }
 
-  pres.addBody(shapes, {
+  pres._addBodyRaw(shapes, {
     transition: opts.transition,
     notes: opts.notes,
   });
@@ -6572,7 +7201,7 @@ export function quoteSlide(pres: Pres, opts: QuoteSlideOptions) {
     fill: t.accent1,
   });
 
-  pres.addBody(shapes, {
+  pres._addBodyRaw(shapes, {
     transition: opts.transition,
     notes: opts.notes,
   });
@@ -6674,7 +7303,7 @@ export function bigNumberSlide(pres: Pres, opts: BigNumberSlideOptions) {
     });
   }
 
-  pres.addBody(shapes, {
+  pres._addBodyRaw(shapes, {
     background: opts.background,
     transition: opts.transition,
     notes: opts.notes,
@@ -6713,7 +7342,9 @@ export function architectureDiagramSlide(
 ) {
   _requirePres(pres, "architectureDiagramSlide");
   requireString(opts.title, "architectureDiagramSlide.title");
-  requireArray(opts.components, "architectureDiagramSlide.components", { nonEmpty: true });
+  requireArray(opts.components, "architectureDiagramSlide.components", {
+    nonEmpty: true,
+  });
 
   const t = pres.theme;
   const bg = solidBg(t.bg);
@@ -6722,14 +7353,28 @@ export function architectureDiagramSlide(
   const comps = opts.components.slice(0, 6); // Max 6 components
 
   // Title
-  let shapes = textBox({
-    x: 0.5, y: 0.3, w: 12, h: 0.8,
-    text: opts.title,
-    fontSize: 28, color: t.fg, bold: true,
-  });
-  shapes += rect({ x: 0.5, y: 1.05, w: 2, h: 0.05, fill: t.accent1 });
+  let shapes = _s(
+    textBox({
+      x: 0.5,
+      y: 0.3,
+      w: 12,
+      h: 0.8,
+      text: opts.title,
+      fontSize: 28,
+      color: t.fg,
+      bold: true,
+    }),
+  );
+  shapes += _s(rect({ x: 0.5, y: 1.05, w: 2, h: 0.05, fill: t.accent1 }));
 
-  const accentColors = [t.accent1, t.accent2, "00E676", "FFD700", "FF7043", "AB47BC"];
+  const accentColors = [
+    t.accent1,
+    t.accent2,
+    "00E676",
+    "FFD700",
+    "FF7043",
+    "AB47BC",
+  ];
 
   if (layout === "horizontal") {
     // Horizontal layout: components in a row
@@ -6745,28 +7390,49 @@ export function architectureDiagramSlide(
       const color = comp.color || accentColors[i % accentColors.length];
 
       // Component box
-      shapes += rect({
-        x, y, w: boxW, h: boxH,
-        fill: color, cornerRadius: 8,
-        text: comp.label,
-        fontSize: 12, color: autoTextColor(color), bold: true,
-      });
+      shapes += _s(
+        rect({
+          x,
+          y,
+          w: boxW,
+          h: boxH,
+          fill: color,
+          cornerRadius: 8,
+          text: comp.label,
+          fontSize: 12,
+          color: autoTextColor(color),
+          bold: true,
+        }),
+      );
 
       // Description below
       if (comp.description) {
-        shapes += textBox({
-          x, y: y + boxH + 0.1, w: boxW, h: 0.6,
-          text: comp.description,
-          fontSize: 9, color: t.subtle, align: "center",
-        });
+        shapes += _s(
+          textBox({
+            x,
+            y: y + boxH + 0.1,
+            w: boxW,
+            h: 0.6,
+            text: comp.description,
+            fontSize: 9,
+            color: t.subtle,
+            align: "center",
+          }),
+        );
       }
 
       // Arrow to next component
       if (showArrows && i < comps.length - 1) {
-        shapes += icon({
-          x: x + boxW + 0.2, y: y + boxH / 2 - 0.2,
-          w: 0.4, h: 0.4, shape: "right-arrow", fill: t.subtle,
-        });
+        shapes += _s(
+          icon({
+            x: x + boxW + 0.2,
+            y: y + boxH / 2 - 0.2,
+            w: 0.4,
+            h: 0.4,
+            shape: "right-arrow",
+            fill: t.subtle,
+          }),
+        );
       }
     });
   } else {
@@ -6792,19 +7458,33 @@ export function architectureDiagramSlide(
       const y = startY + i * (boxH + gap);
       const color = comp.color || accentColors[i % accentColors.length];
 
-      shapes += rect({
-        x: startX, y, w: boxW, h: boxH,
-        fill: color, cornerRadius: 6,
-        text: comp.label + (comp.description ? ` — ${comp.description}` : ""),
-        fontSize: 14, color: autoTextColor(color), bold: true,
-      });
+      shapes += _s(
+        rect({
+          x: startX,
+          y,
+          w: boxW,
+          h: boxH,
+          fill: color,
+          cornerRadius: 6,
+          text: comp.label + (comp.description ? ` — ${comp.description}` : ""),
+          fontSize: 14,
+          color: autoTextColor(color),
+          bold: true,
+        }),
+      );
 
       // Arrow down
       if (showArrows && i < comps.length - 1) {
-        shapes += icon({
-          x: startX + boxW / 2 - 0.2, y: y + boxH + 0.1,
-          w: 0.4, h: 0.4, shape: "down-arrow", fill: t.subtle,
-        });
+        shapes += _s(
+          icon({
+            x: startX + boxW / 2 - 0.2,
+            y: y + boxH + 0.1,
+            w: 0.4,
+            h: 0.4,
+            shape: "down-arrow",
+            fill: t.subtle,
+          }),
+        );
       }
     });
   }
@@ -6832,7 +7512,10 @@ export function architectureDiagramSlide(
  * @param {Array} [opts.bullets] - Explanation points beside the code
  * @param {string} [opts.language] - Language label (displayed, no highlighting)
  */
-export function codeWalkthroughSlide(pres: Pres, opts: CodeWalkthroughSlideOptions) {
+export function codeWalkthroughSlide(
+  pres: Pres,
+  opts: CodeWalkthroughSlideOptions,
+) {
   _requirePres(pres, "codeWalkthroughSlide");
   requireString(opts.title, "codeWalkthroughSlide.title");
   requireString(opts.code, "codeWalkthroughSlide.code");
@@ -6841,39 +7524,70 @@ export function codeWalkthroughSlide(pres: Pres, opts: CodeWalkthroughSlideOptio
   const bg = solidBg(t.bg);
 
   // Title
-  let shapes = textBox({
-    x: 0.5, y: 0.3, w: 12, h: 0.8,
-    text: opts.title,
-    fontSize: 28, color: t.fg, bold: true,
-  });
-  shapes += rect({ x: 0.5, y: 1.05, w: 2, h: 0.05, fill: t.accent1 });
+  let shapes = _s(
+    textBox({
+      x: 0.5,
+      y: 0.3,
+      w: 12,
+      h: 0.8,
+      text: opts.title,
+      fontSize: 28,
+      color: t.fg,
+      bold: true,
+    }),
+  );
+  shapes += _s(rect({ x: 0.5, y: 1.05, w: 2, h: 0.05, fill: t.accent1 }));
 
   // Code block (left side)
   const codeW = opts.bullets && opts.bullets.length > 0 ? 7.5 : 12;
-  shapes += codeBlock({
-    x: 0.5, y: 1.5, w: codeW, h: 5,
-    code: opts.code,
-    fontSize: opts.codeFontSize || 11,
-    title: opts.language,
-  });
+  shapes += _s(
+    codeBlock({
+      x: 0.5,
+      y: 1.5,
+      w: codeW,
+      h: 5,
+      code: opts.code,
+      fontSize: opts.codeFontSize || 11,
+      title: opts.language,
+    }),
+  );
 
   // Explanation bullets (right side)
   if (opts.bullets && opts.bullets.length > 0) {
-    shapes += rect({
-      x: 8.3, y: 1.5, w: 4.5, h: 5,
-      fill: isDark(t.bg) ? "1A1A2E" : "F5F5F5",
-      cornerRadius: 8,
-    });
-    shapes += textBox({
-      x: 8.5, y: 1.6, w: 4, h: 0.5,
-      text: "Key Points",
-      fontSize: 16, color: t.accent1, bold: true,
-    });
-    shapes += bulletList({
-      x: 8.5, y: 2.2, w: 4, h: 4,
-      items: opts.bullets,
-      fontSize: 12, color: t.fg, bulletColor: t.accent1,
-    });
+    shapes += _s(
+      rect({
+        x: 8.3,
+        y: 1.5,
+        w: 4.5,
+        h: 5,
+        fill: isDark(t.bg) ? "1A1A2E" : "F5F5F5",
+        cornerRadius: 8,
+      }),
+    );
+    shapes += _s(
+      textBox({
+        x: 8.5,
+        y: 1.6,
+        w: 4,
+        h: 0.5,
+        text: "Key Points",
+        fontSize: 16,
+        color: t.accent1,
+        bold: true,
+      }),
+    );
+    shapes += _s(
+      bulletList({
+        x: 8.5,
+        y: 2.2,
+        w: 4,
+        h: 4,
+        items: opts.bullets,
+        fontSize: 12,
+        color: t.fg,
+        bulletColor: t.accent1,
+      }),
+    );
   }
 
   pres.addSlide(bg, shapes, opts);
@@ -6909,7 +7623,10 @@ export function beforeAfterSlide(pres: Pres, opts: BeforeAfterSlideOptions) {
   // Normalize content
   const normalizeBullets = (input: string[] | string): string[] => {
     if (Array.isArray(input)) return input;
-    return input.split("\n").map(s => s.trim()).filter(s => s.length > 0);
+    return input
+      .split("\n")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
   };
   const beforeItems = normalizeBullets(opts.beforeContent);
   const afterItems = normalizeBullets(opts.afterContent);
@@ -6918,48 +7635,127 @@ export function beforeAfterSlide(pres: Pres, opts: BeforeAfterSlideOptions) {
   const afterColor = opts.afterColor || "00E676"; // Green
 
   // Title
-  let shapes = textBox({
-    x: 0.5, y: 0.3, w: 12, h: 0.8,
-    text: opts.title,
-    fontSize: 28, color: t.fg, bold: true,
-  });
-  shapes += rect({ x: 0.5, y: 1.05, w: 2, h: 0.05, fill: t.accent1 });
+  let shapes = _s(
+    textBox({
+      x: 0.5,
+      y: 0.3,
+      w: 12,
+      h: 0.8,
+      text: opts.title,
+      fontSize: 28,
+      color: t.fg,
+      bold: true,
+    }),
+  );
+  shapes += _s(rect({ x: 0.5, y: 1.05, w: 2, h: 0.05, fill: t.accent1 }));
 
   // Before column
-  shapes += rect({ x: 0.5, y: 1.4, w: 5.8, h: 5.3, fill: isDark(t.bg) ? "1F1F2E" : "FFF5F5", cornerRadius: 10 });
-  shapes += rect({ x: 0.5, y: 1.4, w: 5.8, h: 0.6, fill: beforeColor, cornerRadius: 10 });
-  shapes += rect({ x: 0.5, y: 1.7, w: 5.8, h: 0.3, fill: beforeColor }); // Cover bottom radius
-  shapes += textBox({
-    x: 0.7, y: 1.45, w: 5.4, h: 0.5,
-    text: opts.beforeTitle || "Before",
-    fontSize: 18, color: "FFFFFF", bold: true, align: "center",
-  });
-  shapes += bulletList({
-    x: 0.7, y: 2.2, w: 5.4, h: 4.3,
-    items: beforeItems,
-    fontSize: 13, color: t.fg, bulletColor: beforeColor,
-  });
+  shapes += _s(
+    rect({
+      x: 0.5,
+      y: 1.4,
+      w: 5.8,
+      h: 5.3,
+      fill: isDark(t.bg) ? "1F1F2E" : "FFF5F5",
+      cornerRadius: 10,
+    }),
+  );
+  shapes += _s(
+    rect({
+      x: 0.5,
+      y: 1.4,
+      w: 5.8,
+      h: 0.6,
+      fill: beforeColor,
+      cornerRadius: 10,
+    }),
+  );
+  shapes += _s(rect({ x: 0.5, y: 1.7, w: 5.8, h: 0.3, fill: beforeColor })); // Cover bottom radius
+  shapes += _s(
+    textBox({
+      x: 0.7,
+      y: 1.45,
+      w: 5.4,
+      h: 0.5,
+      text: opts.beforeTitle || "Before",
+      fontSize: 18,
+      color: "FFFFFF",
+      bold: true,
+      align: "center",
+    }),
+  );
+  shapes += _s(
+    bulletList({
+      x: 0.7,
+      y: 2.2,
+      w: 5.4,
+      h: 4.3,
+      items: beforeItems,
+      fontSize: 13,
+      color: t.fg,
+      bulletColor: beforeColor,
+    }),
+  );
 
   // Arrow in center
-  shapes += icon({
-    x: 6.4, y: 3.5, w: 0.6, h: 0.6,
-    shape: "right-arrow", fill: t.subtle,
-  });
+  shapes += _s(
+    icon({
+      x: 6.4,
+      y: 3.5,
+      w: 0.6,
+      h: 0.6,
+      shape: "right-arrow",
+      fill: t.subtle,
+    }),
+  );
 
   // After column
-  shapes += rect({ x: 7.1, y: 1.4, w: 5.8, h: 5.3, fill: isDark(t.bg) ? "1F2E1F" : "F5FFF5", cornerRadius: 10 });
-  shapes += rect({ x: 7.1, y: 1.4, w: 5.8, h: 0.6, fill: afterColor, cornerRadius: 10 });
-  shapes += rect({ x: 7.1, y: 1.7, w: 5.8, h: 0.3, fill: afterColor }); // Cover bottom radius
-  shapes += textBox({
-    x: 7.3, y: 1.45, w: 5.4, h: 0.5,
-    text: opts.afterTitle || "After",
-    fontSize: 18, color: "FFFFFF", bold: true, align: "center",
-  });
-  shapes += bulletList({
-    x: 7.3, y: 2.2, w: 5.4, h: 4.3,
-    items: afterItems,
-    fontSize: 13, color: t.fg, bulletColor: afterColor,
-  });
+  shapes += _s(
+    rect({
+      x: 7.1,
+      y: 1.4,
+      w: 5.8,
+      h: 5.3,
+      fill: isDark(t.bg) ? "1F2E1F" : "F5FFF5",
+      cornerRadius: 10,
+    }),
+  );
+  shapes += _s(
+    rect({
+      x: 7.1,
+      y: 1.4,
+      w: 5.8,
+      h: 0.6,
+      fill: afterColor,
+      cornerRadius: 10,
+    }),
+  );
+  shapes += _s(rect({ x: 7.1, y: 1.7, w: 5.8, h: 0.3, fill: afterColor })); // Cover bottom radius
+  shapes += _s(
+    textBox({
+      x: 7.3,
+      y: 1.45,
+      w: 5.4,
+      h: 0.5,
+      text: opts.afterTitle || "After",
+      fontSize: 18,
+      color: "FFFFFF",
+      bold: true,
+      align: "center",
+    }),
+  );
+  shapes += _s(
+    bulletList({
+      x: 7.3,
+      y: 2.2,
+      w: 5.4,
+      h: 4.3,
+      items: afterItems,
+      fontSize: 13,
+      color: t.fg,
+      bulletColor: afterColor,
+    }),
+  );
 
   pres.addSlide(bg, shapes, opts);
 }
@@ -6997,15 +7793,29 @@ export function processFlowSlide(pres: Pres, opts: ProcessFlowSlideOptions) {
   const layout = opts.layout || "horizontal";
   const showNumbers = opts.showNumbers !== false;
   const steps = opts.steps.slice(0, 6); // Max 6 steps
-  const accentColors = [t.accent1, t.accent2, "00E676", "FFD700", "FF7043", "AB47BC"];
+  const accentColors = [
+    t.accent1,
+    t.accent2,
+    "00E676",
+    "FFD700",
+    "FF7043",
+    "AB47BC",
+  ];
 
   // Title
-  let shapes = textBox({
-    x: 0.5, y: 0.3, w: 12, h: 0.8,
-    text: opts.title,
-    fontSize: 28, color: t.fg, bold: true,
-  });
-  shapes += rect({ x: 0.5, y: 1.05, w: 2, h: 0.05, fill: t.accent1 });
+  let shapes = _s(
+    textBox({
+      x: 0.5,
+      y: 0.3,
+      w: 12,
+      h: 0.8,
+      text: opts.title,
+      fontSize: 28,
+      color: t.fg,
+      bold: true,
+    }),
+  );
+  shapes += _s(rect({ x: 0.5, y: 1.05, w: 2, h: 0.05, fill: t.accent1 }));
 
   if (layout === "horizontal") {
     // Adaptive sizing: reduce box width as step count increases
@@ -7025,50 +7835,90 @@ export function processFlowSlide(pres: Pres, opts: ProcessFlowSlideOptions) {
 
       // Step number circle
       if (showNumbers) {
-        shapes += icon({
-          x: x + boxW / 2 - 0.25, y: y - 0.6,
-          w: 0.5, h: 0.5, shape: "circle", fill: color,
-          text: String(i + 1), fontSize: 14, color: autoTextColor(color),
-        });
+        shapes += _s(
+          icon({
+            x: x + boxW / 2 - 0.25,
+            y: y - 0.6,
+            w: 0.5,
+            h: 0.5,
+            shape: "circle",
+            fill: color,
+            text: String(i + 1),
+            fontSize: 14,
+            color: autoTextColor(color),
+          }),
+        );
       }
 
       // Step box
-      shapes += rect({
-        x, y, w: boxW, h: boxH,
-        fill: isDark(t.bg) ? "1A1A2E" : "F5F5F5",
-        cornerRadius: 8,
-      });
+      shapes += _s(
+        rect({
+          x,
+          y,
+          w: boxW,
+          h: boxH,
+          fill: isDark(t.bg) ? "1A1A2E" : "F5F5F5",
+          cornerRadius: 8,
+        }),
+      );
 
       // Icon (if provided)
       if (step.icon) {
-        shapes += icon({
-          x: x + boxW / 2 - 0.3, y: y + 0.2,
-          w: 0.6, h: 0.6, shape: step.icon, fill: color,
-        });
+        shapes += _s(
+          icon({
+            x: x + boxW / 2 - 0.3,
+            y: y + 0.2,
+            w: 0.6,
+            h: 0.6,
+            shape: step.icon,
+            fill: color,
+          }),
+        );
       }
 
       // Label
-      shapes += textBox({
-        x, y: step.icon ? y + 0.9 : y + 0.3, w: boxW, h: 0.5,
-        text: step.label,
-        fontSize: 12, color: t.fg, bold: true, align: "center",
-      });
+      shapes += _s(
+        textBox({
+          x,
+          y: step.icon ? y + 0.9 : y + 0.3,
+          w: boxW,
+          h: 0.5,
+          text: step.label,
+          fontSize: 12,
+          color: t.fg,
+          bold: true,
+          align: "center",
+        }),
+      );
 
       // Description
       if (step.description) {
-        shapes += textBox({
-          x, y: y + boxH + 0.1, w: boxW, h: 0.8,
-          text: step.description,
-          fontSize: 9, color: t.subtle, align: "center",
-        });
+        shapes += _s(
+          textBox({
+            x,
+            y: y + boxH + 0.1,
+            w: boxW,
+            h: 0.8,
+            text: step.description,
+            fontSize: 9,
+            color: t.subtle,
+            align: "center",
+          }),
+        );
       }
 
       // Arrow to next
       if (i < steps.length - 1) {
-        shapes += icon({
-          x: x + boxW + 0.15, y: y + boxH / 2 - 0.15,
-          w: 0.3, h: 0.3, shape: "right-arrow", fill: t.subtle,
-        });
+        shapes += _s(
+          icon({
+            x: x + boxW + 0.15,
+            y: y + boxH / 2 - 0.15,
+            w: 0.3,
+            h: 0.3,
+            shape: "right-arrow",
+            fill: t.subtle,
+          }),
+        );
       }
     });
   } else {
@@ -7085,35 +7935,62 @@ export function processFlowSlide(pres: Pres, opts: ProcessFlowSlideOptions) {
 
       // Number circle
       if (showNumbers) {
-        shapes += icon({
-          x: startX - 0.6, y: y + 0.2,
-          w: 0.5, h: 0.5, shape: "circle", fill: color,
-          text: String(i + 1), fontSize: 12, color: autoTextColor(color),
-        });
+        shapes += _s(
+          icon({
+            x: startX - 0.6,
+            y: y + 0.2,
+            w: 0.5,
+            h: 0.5,
+            shape: "circle",
+            fill: color,
+            text: String(i + 1),
+            fontSize: 12,
+            color: autoTextColor(color),
+          }),
+        );
       }
 
       // Step bar
-      shapes += rect({
-        x: startX, y, w: boxW, h: boxH,
-        fill: color, cornerRadius: 6,
-      });
+      shapes += _s(
+        rect({
+          x: startX,
+          y,
+          w: boxW,
+          h: boxH,
+          fill: color,
+          cornerRadius: 6,
+        }),
+      );
 
       const labelText = step.description
         ? `${step.label} — ${step.description}`
         : step.label;
 
-      shapes += textBox({
-        x: startX + 0.3, y: y + 0.15, w: boxW - 0.6, h: 0.6,
-        text: labelText,
-        fontSize: 14, color: autoTextColor(color), bold: true,
-      });
+      shapes += _s(
+        textBox({
+          x: startX + 0.3,
+          y: y + 0.15,
+          w: boxW - 0.6,
+          h: 0.6,
+          text: labelText,
+          fontSize: 14,
+          color: autoTextColor(color),
+          bold: true,
+        }),
+      );
 
       // Arrow down
       if (i < steps.length - 1) {
-        shapes += icon({
-          x: startX + boxW / 2 - 0.15, y: y + boxH + 0.1,
-          w: 0.3, h: 0.3, shape: "down-arrow", fill: t.subtle,
-        });
+        shapes += _s(
+          icon({
+            x: startX + boxW / 2 - 0.15,
+            y: y + boxH + 0.1,
+            w: 0.3,
+            h: 0.3,
+            shape: "down-arrow",
+            fill: t.subtle,
+          }),
+        );
       }
     });
   }
@@ -7350,18 +8227,19 @@ function buildAnimationXml(
   const dur = opts.duration || 500;
 
   // Map animation types to OOXML preset IDs
-  const entrancePresets: Record<string, { preset: number; subtype?: string }> = {
-    appear: { preset: 1 },
-    fadeIn: { preset: 10 },
-    flyInLeft: { preset: 2, subtype: "l" },
-    flyInRight: { preset: 2, subtype: "r" },
-    flyInTop: { preset: 2, subtype: "t" },
-    flyInBottom: { preset: 2, subtype: "b" },
-    zoomIn: { preset: 23, subtype: "in" },
-    bounceIn: { preset: 26 },
-    wipeRight: { preset: 22, subtype: "r" },
-    wipeDown: { preset: 22, subtype: "d" },
-  };
+  const entrancePresets: Record<string, { preset: number; subtype?: string }> =
+    {
+      appear: { preset: 1 },
+      fadeIn: { preset: 10 },
+      flyInLeft: { preset: 2, subtype: "l" },
+      flyInRight: { preset: 2, subtype: "r" },
+      flyInTop: { preset: 2, subtype: "t" },
+      flyInBottom: { preset: 2, subtype: "b" },
+      zoomIn: { preset: 23, subtype: "in" },
+      bounceIn: { preset: 26 },
+      wipeRight: { preset: 22, subtype: "r" },
+      wipeDown: { preset: 22, subtype: "d" },
+    };
 
   const emphasisPresets: Record<string, { preset: number }> = {
     pulse: { preset: 32 },
@@ -7385,11 +8263,14 @@ function buildAnimationXml(
   const animations: string[] = [];
 
   // Determine trigger
-  let triggerNode = '<p:cTn id="1" dur="indefinite" restart="never" nodeType="clickEffect">';
+  let triggerNode =
+    '<p:cTn id="1" dur="indefinite" restart="never" nodeType="clickEffect">';
   if (opts.trigger === "withPrevious") {
-    triggerNode = '<p:cTn id="1" dur="indefinite" restart="never" nodeType="withEffect">';
+    triggerNode =
+      '<p:cTn id="1" dur="indefinite" restart="never" nodeType="withEffect">';
   } else if (opts.trigger === "afterPrevious") {
-    triggerNode = '<p:cTn id="1" dur="indefinite" restart="never" nodeType="afterEffect">';
+    triggerNode =
+      '<p:cTn id="1" dur="indefinite" restart="never" nodeType="afterEffect">';
   }
 
   // Build entrance animation
@@ -7446,10 +8327,12 @@ function buildAnimationXml(
 
   if (animations.length === 0) return "";
 
-  return `<p:timing><p:tnLst><p:par>${triggerNode}<p:childTnLst>` +
+  return (
+    `<p:timing><p:tnLst><p:par>${triggerNode}<p:childTnLst>` +
     `<p:seq concurrent="1" nextAc="seek"><p:cTn id="2" dur="indefinite" nodeType="mainSeq">` +
     `<p:childTnLst>${animations.join("")}</p:childTnLst></p:cTn></p:seq>` +
-    `</p:childTnLst></p:cTn></p:par></p:tnLst></p:timing>`;
+    `</p:childTnLst></p:cTn></p:par></p:tnLst></p:timing>`
+  );
 }
 
 /**
@@ -7554,16 +8437,19 @@ export function addStaggeredAnimation(
 
   for (let i = 0; i < shapeCount; i++) {
     const shapeId = String(i + 2); // Shape IDs start at 2 after container
-    const delay = (baseAnimation.delay || 0) + (i * staggerDelay);
+    const delay = (baseAnimation.delay || 0) + i * staggerDelay;
     const seqNum = 3 + i;
 
     const animOpts: AnimationOptions = {
       ...baseAnimation,
       delay,
       // In sequential mode, first shape is onClick, rest are afterPrevious
-      trigger: mode === "sequential"
-        ? (i === 0 ? "onClick" : "afterPrevious")
-        : "withPrevious",
+      trigger:
+        mode === "sequential"
+          ? i === 0
+            ? "onClick"
+            : "afterPrevious"
+          : "withPrevious",
     };
 
     const animXml = buildAnimationXml(shapeId, animOpts, seqNum);
@@ -7609,9 +8495,9 @@ export function addStaggeredAnimation(
  * @param {string} [opts.titleColor='8B949E'] - Title color
  * @param {boolean} [opts.lineNumbers=false] - Show line numbers
  * @param {number} [opts.cornerRadius=4] - Corner radius in points
- * @returns {string} Shape XML fragment
+ * @returns {ShapeFragment} Branded shape fragment
  */
-export function codeBlock(opts: CodeBlockOptions): string {
+export function codeBlock(opts: CodeBlockOptions): ShapeFragment {
   // ── Input validation ──────────────────────────────────────────────
   _validateOptionalNumber(opts.fontSize, "codeBlock.fontSize", {
     min: 1,
@@ -7635,13 +8521,15 @@ export function codeBlock(opts: CodeBlockOptions): string {
   if (opts.lineNumbers) {
     const pad = String(lines.length).length;
     displayText = lines
-      .map((line: string, i: number) => `${String(i + 1).padStart(pad)}  ${line}`)
+      .map(
+        (line: string, i: number) => `${String(i + 1).padStart(pad)}  ${line}`,
+      )
       .join("\n");
   } else {
     displayText = code;
   }
 
-  const shapes: string[] = [];
+  const shapes: ShapeFragment[] = [];
 
   // Optional title bar
   if (opts.title) {
@@ -7681,7 +8569,7 @@ export function codeBlock(opts: CodeBlockOptions): string {
     }),
   );
 
-  return shapes.join("");
+  return _createShapeFragment(shapes.join(""));
 }
 
 // ── Batch & Quick APIs ──────────────────────────────────────────────────
@@ -7727,7 +8615,9 @@ export interface SlideConfig {
 export function addSlidesFromConfig(pres: Pres, configs: SlideConfig[]): void {
   _requirePres(pres, "addSlidesFromConfig");
   if (!Array.isArray(configs)) {
-    throw new Error("addSlidesFromConfig: 'configs' must be an array of slide configurations");
+    throw new Error(
+      "addSlidesFromConfig: 'configs' must be an array of slide configurations",
+    );
   }
 
   for (const config of configs) {
@@ -7790,11 +8680,28 @@ export interface QuickSection {
   /** Slides in this section */
   slides: Array<
     | { type: "content"; title: string; items: string[] | string }
-    | { type: "stats"; title: string; stats: Array<{ value: string; label: string }> }
+    | {
+        type: "stats";
+        title: string;
+        stats: Array<{ value: string; label: string }>;
+      }
     | { type: "quote"; quote: string; author?: string; role?: string }
-    | { type: "comparison"; title: string; leftTitle: string; rightTitle: string; leftItems: string[] | string; rightItems: string[] | string }
+    | {
+        type: "comparison";
+        title: string;
+        leftTitle: string;
+        rightTitle: string;
+        leftItems: string[] | string;
+        rightItems: string[] | string;
+      }
     | { type: "bigNumber"; number: string; unit?: string; label?: string }
-    | { type: "hero"; title: string; subtitle?: string; image: Uint8Array; imageFormat?: string }
+    | {
+        type: "hero";
+        title: string;
+        subtitle?: string;
+        image: Uint8Array;
+        imageFormat?: string;
+      }
   >;
 }
 
@@ -7931,20 +8838,21 @@ export function quickDeck(config: QuickDeckConfig): Pres {
  *
  * @example
  * // Single image
- * const imgXml = await fetchAndEmbed(pres, {
+ * const img = fetchAndEmbed(pres, {
  *   url: "https://example.com/photo.jpg",
- *   x: 1, y: 1, w: 4, h: 3
+ *   x: 1, y: 1, w: 4, h: 3,
+ *   fetchFn: fetchBinary
  * });
- * customSlide(pres, { shapes: imgXml + textBox({...}) });
+ * customSlide(pres, { shapes: [img, textBox({...})] });
  *
  * @example
  * // With fetch plugin
  * import { fetchBinary } from "host:fetch";
- * const imgXml = await fetchAndEmbed(pres, {
+ * const img = fetchAndEmbed(pres, {
  *   url: "https://cdn.example.com/hero.jpg",
  *   x: 0, y: 0, w: 13.333, h: 7.5,
  *   fit: "cover",
- *   fetchFn: fetchBinary  // Pass the fetch function
+ *   fetchFn: fetchBinary
  * });
  *
  * @param {Object} pres - Presentation object
@@ -7957,7 +8865,7 @@ export function quickDeck(config: QuickDeckConfig): Pres {
  * @param {string} [opts.format] - Image format (auto-detected from URL if omitted)
  * @param {string} [opts.fit] - Fit mode: 'stretch', 'contain', 'cover'
  * @param {Function} opts.fetchFn - Fetch function (e.g., fetchBinary from host:fetch)
- * @returns {string} Image XML fragment for use in shapes
+ * @returns {ShapeFragment} Branded image shape fragment
  */
 export function fetchAndEmbed(
   pres: Pres,
@@ -7971,7 +8879,7 @@ export function fetchAndEmbed(
     fit?: "stretch" | "contain" | "cover";
     fetchFn: (url: string) => Uint8Array;
   },
-): string {
+): ShapeFragment {
   _requirePres(pres, "fetchAndEmbed");
   if (!opts.url) {
     throw new Error("fetchAndEmbed: 'url' is required");
@@ -8001,7 +8909,7 @@ export function fetchAndEmbed(
     );
   }
 
-  // Embed it
+  // Embed it — return ShapeFragment directly (embedImage returns ShapeFragment)
   return embedImage(pres, {
     data,
     x: opts.x,
@@ -8027,13 +8935,13 @@ export function fetchAndEmbed(
  *   ],
  *   fetchBatchFn: fetchBinaryBatch
  * });
- * // images = [{ url, xml }, { url, xml }, { url, xml }] or [{ url, error }, ...]
+ * // images = [{ url, shape }, { url, shape }, { url, shape }] or [{ url, error }, ...]
  *
  * @param {Object} pres - Presentation object
  * @param {Object} opts - Options
  * @param {Array} opts.items - Array of {url, x, y, w, h, format?, fit?}
  * @param {Function} opts.fetchBatchFn - Batch fetch function (fetchBinaryBatch from host:fetch)
- * @returns {Array} Array of {url, xml} or {url, error} for each item
+ * @returns {Array} Array of {url, shape: ShapeFragment} or {url, error} for each item
  */
 export function fetchAndEmbedBatch(
   pres: Pres,
@@ -8047,9 +8955,11 @@ export function fetchAndEmbedBatch(
       format?: string;
       fit?: "stretch" | "contain" | "cover";
     }>;
-    fetchBatchFn: (urls: string[]) => Array<{ url: string; data?: Uint8Array; error?: string }>;
+    fetchBatchFn: (
+      urls: string[],
+    ) => Array<{ url: string; data?: Uint8Array; error?: string }>;
   },
-): Array<{ url: string; xml?: string; error?: string }> {
+): Array<{ url: string; shape?: ShapeFragment; error?: string }> {
   _requirePres(pres, "fetchAndEmbedBatch");
   if (!Array.isArray(opts.items) || opts.items.length === 0) {
     throw new Error("fetchAndEmbedBatch: 'items' must be a non-empty array");
@@ -8089,7 +8999,7 @@ export function fetchAndEmbedBatch(
     }
 
     try {
-      const xml = embedImage(pres, {
+      const shape = embedImage(pres, {
         data: result.data,
         x: item.x,
         y: item.y,
@@ -8098,7 +9008,7 @@ export function fetchAndEmbedBatch(
         format,
         fit: item.fit,
       });
-      return { url: result.url, xml };
+      return { url: result.url, shape };
     } catch (e) {
       return { url: result.url, error: String(e) };
     }

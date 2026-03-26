@@ -652,6 +652,93 @@ export function isDark(hex: string): boolean {
   return luminance(hex) < 0.5;
 }
 
+// ── ShapeFragment (Opaque Branded Type) ──────────────────────────────
+// All shape builders (textBox, rect, table, etc.) return ShapeFragment.
+// Only code that holds the private SHAPE_BRAND symbol can forge one.
+// This prevents LLMs from injecting arbitrary XML strings into slides.
+//
+// SECURITY MODEL:
+// The sandbox architecture shares all ha:* module exports at runtime.
+// We cannot make _createShapeFragment truly unexportable for cross-module
+// use (pptx.ts, pptx-charts.ts, pptx-tables.ts all need it).
+// Defence layers:
+//   1. Underscore prefix → excluded from module_info / hints by convention
+//   2. Filtered from ha-modules.d.ts → invisible to LLM type discovery
+//      (generate-ha-modules-dts.ts skips _-prefixed exports)
+//   3. SKILL.md documents only builder functions, not the factory
+//   4. Code-validator + sandbox provide the hard security boundary
+// The threat model is LLM hallucinations, not adversarial humans.
+
+/** Private brand symbol — never exported by module boundary. */
+const SHAPE_BRAND: unique symbol = Symbol("ShapeFragment");
+
+/**
+ * Opaque shape fragment produced by official shape builders.
+ * Cannot be constructed from raw strings by LLM code.
+ *
+ * Internal code can read `._xml`; external (LLM) code treats this as opaque.
+ */
+export interface ShapeFragment {
+  /** @internal Raw OOXML XML for this shape element. */
+  readonly _xml: string;
+  /** Returns the internal XML (for string concatenation in internal code). */
+  toString(): string;
+}
+
+/**
+ * Create a branded ShapeFragment wrapping validated XML.
+ * Called internally by shape builder functions (textBox, rect, table, etc.).
+ * Underscore-prefixed to signal internal-only — LLMs should use builder
+ * functions (textBox, rect, etc.) not this directly.
+ * @internal
+ */
+export function _createShapeFragment(xml: string): ShapeFragment {
+  const obj = {
+    _xml: xml,
+    toString(): string {
+      return xml;
+    },
+  } as ShapeFragment;
+  // Brand the object with the private symbol (runtime check)
+  (obj as unknown as Record<symbol, boolean>)[SHAPE_BRAND] = true;
+  return Object.freeze(obj);
+}
+
+/**
+ * Check whether a value is a genuine ShapeFragment from a builder function.
+ * Uses the private symbol brand — cannot be forged by LLM code.
+ */
+export function isShapeFragment(x: unknown): x is ShapeFragment {
+  return (
+    x != null &&
+    typeof x === "object" &&
+    (x as Record<symbol, unknown>)[SHAPE_BRAND] === true
+  );
+}
+
+/**
+ * Convert an array of ShapeFragments to a single XML string.
+ * Validates that every element is a genuine branded ShapeFragment.
+ * @throws If any element is not a ShapeFragment
+ */
+export function fragmentsToXml(
+  fragments: ShapeFragment | ShapeFragment[],
+): string {
+  const arr = Array.isArray(fragments) ? fragments : [fragments];
+  const parts: string[] = [];
+  for (let i = 0; i < arr.length; i++) {
+    const f = arr[i];
+    if (!isShapeFragment(f)) {
+      throw new Error(
+        `shapes[${i}]: expected a ShapeFragment from textBox/rect/table/bulletList/etc, ` +
+          `but got ${typeof f}. Do NOT pass raw XML strings — use the shape builder functions.`,
+      );
+    }
+    parts.push(f._xml);
+  }
+  return parts.join("");
+}
+
 // ── Shape ID Counter ─────────────────────────────────────────────────
 // OOXML requires each shape in a presentation to have a unique positive integer ID.
 // PowerPoint will show a "found a problem with content" error if multiple

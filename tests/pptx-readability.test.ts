@@ -16,6 +16,9 @@ import { describe, it, expect } from "vitest";
 
 const core: any = await import("../builtin-modules/ooxml-core.js");
 
+/** Convert ShapeFragment or string to XML string for test assertions */
+const toXml = (v: unknown): string => (typeof v === "string" ? v : String(v));
+
 describe("ooxml-core contrast utilities", () => {
   describe("luminance", () => {
     it("should return ~0 for black", () => {
@@ -218,80 +221,92 @@ const pptx: any = await import("../builtin-modules/pptx.js");
 describe("pptx theme-aware shape defaults", () => {
   describe("rect", () => {
     it("should auto-select white text on dark fill", () => {
-      const xml = pptx.rect({
-        x: 0,
-        y: 0,
-        w: 2,
-        h: 1,
-        fill: "0D1117",
-        text: "Hello",
-      });
+      const xml = toXml(
+        pptx.rect({
+          x: 0,
+          y: 0,
+          w: 2,
+          h: 1,
+          fill: "0D1117",
+          text: "Hello",
+        }),
+      );
       // Should contain FFFFFF (white) not 333333 (dark)
       expect(xml).toContain("FFFFFF");
       expect(xml).not.toContain("333333");
     });
 
     it("should auto-select dark text on light fill", () => {
-      const xml = pptx.rect({
-        x: 0,
-        y: 0,
-        w: 2,
-        h: 1,
-        fill: "FFFFFF",
-        text: "Hello",
-      });
+      const xml = toXml(
+        pptx.rect({
+          x: 0,
+          y: 0,
+          w: 2,
+          h: 1,
+          fill: "FFFFFF",
+          text: "Hello",
+        }),
+      );
       expect(xml).toContain("333333");
     });
 
     it("should respect explicitly set color", () => {
-      const xml = pptx.rect({
-        x: 0,
-        y: 0,
-        w: 2,
-        h: 1,
-        fill: "000000",
-        text: "Hello",
-        color: "FF0000",
-      });
+      const xml = toXml(
+        pptx.rect({
+          x: 0,
+          y: 0,
+          w: 2,
+          h: 1,
+          fill: "000000",
+          text: "Hello",
+          color: "FF0000",
+        }),
+      );
       expect(xml).toContain("FF0000");
     });
   });
 
   describe("callout", () => {
     it("should auto-select dark text on default light background", () => {
-      const xml = pptx.callout({
-        x: 0,
-        y: 0,
-        w: 8,
-        h: 1,
-        text: "Insight",
-      });
+      const xml = toXml(
+        pptx.callout({
+          x: 0,
+          y: 0,
+          w: 8,
+          h: 1,
+          text: "Insight",
+        }),
+      );
       // Default bg is F5F5F5 (light) — text should be dark
       expect(xml).toContain("333333");
     });
 
     it("should auto-select white text on dark background", () => {
-      const xml = pptx.callout({
-        x: 0,
-        y: 0,
-        w: 8,
-        h: 1,
-        text: "Insight",
-        background: "0D1117",
-      });
+      const xml = toXml(
+        pptx.callout({
+          x: 0,
+          y: 0,
+          w: 8,
+          h: 1,
+          text: "Insight",
+          background: "0D1117",
+        }),
+      );
       expect(xml).toContain("FFFFFF");
     });
   });
 
   describe("circle", () => {
     it("should auto-select readable text on default blue fill", () => {
-      const xml = pptx.circle({
-        x: 2,
-        y: 2,
-        w: 1,
-        fill: "2196F3",
-        text: "1",
-      });
+      const xml = toXml(
+        pptx.circle({
+          x: 2,
+          y: 2,
+          w: 1,
+          fill: "2196F3",
+          text: "1",
+        }),
+      );
       // 2196F3 (Material Blue) has luminance ~0.29 — dark text (333333) has
       // higher contrast (4.1:1) than white (3.1:1), so autoTextColor is correct
       // to pick dark. Verify the auto-selection works (not hardcoded FFFFFF).
@@ -299,39 +314,45 @@ describe("pptx theme-aware shape defaults", () => {
     });
 
     it("should auto-select white text on very dark fill", () => {
-      const xml = pptx.circle({
-        x: 2,
-        y: 2,
-        w: 1,
-        fill: "0D1117",
-        text: "1",
-      });
+      const xml = toXml(
+        pptx.circle({
+          x: 2,
+          y: 2,
+          w: 1,
+          fill: "0D1117",
+          text: "1",
+        }),
+      );
       expect(xml).toContain("FFFFFF");
     });
 
     it("should auto-select dark text on light fill", () => {
-      const xml = pptx.circle({
-        x: 2,
-        y: 2,
-        w: 1,
-        fill: "FFFFFF",
-        text: "1",
-      });
+      const xml = toXml(
+        pptx.circle({
+          x: 2,
+          y: 2,
+          w: 1,
+          fill: "FFFFFF",
+          text: "1",
+        }),
+      );
       expect(xml).toContain("333333");
     });
   });
 
   describe("statBox", () => {
     it("should auto-select readable text when background is set", () => {
-      const xml = pptx.statBox({
-        x: 0,
-        y: 0,
-        w: 3,
-        h: 2,
-        value: "42",
-        label: "Items",
-        background: "0D1117",
-      });
+      const xml = toXml(
+        pptx.statBox({
+          x: 0,
+          y: 0,
+          w: 3,
+          h: 2,
+          value: "42",
+          label: "Items",
+          background: "0D1117",
+        }),
+      );
       // Dark bg — text should be white
       expect(xml).toContain("FFFFFF");
     });
@@ -340,14 +361,16 @@ describe("pptx theme-aware shape defaults", () => {
       // When _activeTheme is set (post-createPresentation), statBox without
       // a background fill picks up the theme foreground automatically.
       pptx.createPresentation({ theme: "dark-gradient" });
-      const xml = pptx.statBox({
-        x: 0,
-        y: 0,
-        w: 3,
-        h: 2,
-        value: "42",
-        label: "Items",
-      });
+      const xml = toXml(
+        pptx.statBox({
+          x: 0,
+          y: 0,
+          w: 3,
+          h: 2,
+          value: "42",
+          label: "Items",
+        }),
+      );
       // dark-gradient fg = E6EDF3 — should be used for value + label text
       expect(xml).toContain("E6EDF3");
     });
@@ -355,59 +378,67 @@ describe("pptx theme-aware shape defaults", () => {
 
   describe("icon", () => {
     it("should use theme accent for fill when _theme is passed", () => {
-      const xml = pptx.icon({
-        x: 0,
-        y: 0,
-        w: 0.5,
-        shape: "star",
-        _theme: { accent1: "58A6FF", subtle: "8B949E" },
-      });
+      const xml = toXml(
+        pptx.icon({
+          x: 0,
+          y: 0,
+          w: 0.5,
+          shape: "star",
+          _theme: { accent1: "58A6FF", subtle: "8B949E" },
+        }),
+      );
       expect(xml).toContain("58A6FF");
     });
 
     it("should fall back to 2196F3 when no theme provided", () => {
-      const xml = pptx.icon({
-        x: 0,
-        y: 0,
-        w: 0.5,
-        shape: "star",
-      });
+      const xml = toXml(
+        pptx.icon({
+          x: 0,
+          y: 0,
+          w: 0.5,
+          shape: "star",
+        }),
+      );
       expect(xml).toContain("2196F3");
     });
   });
 
   describe("line", () => {
     it("should use theme subtle colour when _theme is passed", () => {
-      const xml = pptx.line({
-        x1: 0,
-        y1: 0,
-        x2: 5,
-        y2: 0,
-        _theme: { subtle: "8B949E" },
-      });
+      const xml = toXml(
+        pptx.line({
+          x1: 0,
+          y1: 0,
+          x2: 5,
+          y2: 0,
+          _theme: { subtle: "8B949E" },
+        }),
+      );
       expect(xml).toContain("8B949E");
     });
 
     it("should fall back to 666666 when no theme provided", () => {
-      const xml = pptx.line({ x1: 0, y1: 0, x2: 5, y2: 0 });
+      const xml = toXml(pptx.line({ x1: 0, y1: 0, x2: 5, y2: 0 }));
       expect(xml).toContain("666666");
     });
   });
 
   describe("arrow", () => {
     it("should use theme subtle colour when _theme is passed", () => {
-      const xml = pptx.arrow({
-        x1: 0,
-        y1: 0,
-        x2: 5,
-        y2: 0,
-        _theme: { subtle: "8B949E" },
-      });
+      const xml = toXml(
+        pptx.arrow({
+          x1: 0,
+          y1: 0,
+          x2: 5,
+          y2: 0,
+          _theme: { subtle: "8B949E" },
+        }),
+      );
       expect(xml).toContain("8B949E");
     });
 
     it("should fall back to 666666 when no theme provided", () => {
-      const xml = pptx.arrow({ x1: 0, y1: 0, x2: 5, y2: 0 });
+      const xml = toXml(pptx.arrow({ x1: 0, y1: 0, x2: 5, y2: 0 }));
       expect(xml).toContain("666666");
     });
   });
@@ -419,29 +450,35 @@ const tables: any = await import("../builtin-modules/pptx-tables.js");
 
 describe("pptx-tables theme text colour", () => {
   it("should use themeTextColor fallback when textColor not set", () => {
-    const xml = tables.table({
-      headers: ["Name", "Value"],
-      rows: [["A", "1"]],
-      style: { themeTextColor: "E6EDF3" },
-    });
+    const xml = toXml(
+      tables.table({
+        headers: ["Name", "Value"],
+        rows: [["A", "1"]],
+        style: { themeTextColor: "E6EDF3" },
+      }),
+    );
     // The text colour E6EDF3 should appear in the output
     expect(xml).toContain("E6EDF3");
   });
 
   it("should prefer explicit textColor over themeTextColor", () => {
-    const xml = tables.table({
-      headers: ["Name", "Value"],
-      rows: [["A", "1"]],
-      style: { textColor: "FF0000", themeTextColor: "E6EDF3" },
-    });
+    const xml = toXml(
+      tables.table({
+        headers: ["Name", "Value"],
+        rows: [["A", "1"]],
+        style: { textColor: "FF0000", themeTextColor: "E6EDF3" },
+      }),
+    );
     expect(xml).toContain("FF0000");
   });
 
   it("should fall back to 333333 when neither is set", () => {
-    const xml = tables.table({
-      headers: ["Name", "Value"],
-      rows: [["A", "1"]],
-    });
+    const xml = toXml(
+      tables.table({
+        headers: ["Name", "Value"],
+        rows: [["A", "1"]],
+      }),
+    );
     expect(xml).toContain("333333");
   });
 });
@@ -485,21 +522,23 @@ describe("active theme auto text colour", () => {
 
   it("textBox should use theme fg when no colour specified", () => {
     pptx.createPresentation({ theme: "dark-gradient" });
-    const xml = pptx.textBox({ x: 0, y: 0, w: 4, h: 1, text: "Hello" });
+    const xml = toXml(pptx.textBox({ x: 0, y: 0, w: 4, h: 1, text: "Hello" }));
     // dark-gradient fg = E6EDF3
     expect(xml).toContain("E6EDF3");
   });
 
   it("textBox with explicit colour should use that colour", () => {
     pptx.createPresentation({ theme: "dark-gradient" });
-    const xml = pptx.textBox({
-      x: 0,
-      y: 0,
-      w: 4,
-      h: 1,
-      text: "Hello",
-      color: "FF0000",
-    });
+    const xml = toXml(
+      pptx.textBox({
+        x: 0,
+        y: 0,
+        w: 4,
+        h: 1,
+        text: "Hello",
+        color: "FF0000",
+      }),
+    );
     expect(xml).toContain("FF0000");
     // Should NOT contain theme fg since explicit colour overrides
     expect(xml).not.toContain("E6EDF3");
@@ -507,52 +546,60 @@ describe("active theme auto text colour", () => {
 
   it("bulletList should use theme fg when no colour specified", () => {
     pptx.createPresentation({ theme: "dark-gradient" });
-    const xml = pptx.bulletList({
-      x: 0,
-      y: 0,
-      w: 8,
-      h: 4,
-      items: ["item1", "item2"],
-    });
+    const xml = toXml(
+      pptx.bulletList({
+        x: 0,
+        y: 0,
+        w: 8,
+        h: 4,
+        items: ["item1", "item2"],
+      }),
+    );
     expect(xml).toContain("E6EDF3");
   });
 
   it("numberedList should use theme fg when no colour specified", () => {
     pptx.createPresentation({ theme: "dark-gradient" });
-    const xml = pptx.numberedList({
-      x: 0,
-      y: 0,
-      w: 8,
-      h: 4,
-      items: ["first", "second"],
-    });
+    const xml = toXml(
+      pptx.numberedList({
+        x: 0,
+        y: 0,
+        w: 8,
+        h: 4,
+        items: ["first", "second"],
+      }),
+    );
     expect(xml).toContain("E6EDF3");
   });
 
   it("statBox without background should use theme fg", () => {
     pptx.createPresentation({ theme: "dark-gradient" });
-    const xml = pptx.statBox({
-      x: 0,
-      y: 0,
-      w: 3,
-      h: 2,
-      value: "42",
-      label: "Score",
-    });
+    const xml = toXml(
+      pptx.statBox({
+        x: 0,
+        y: 0,
+        w: 3,
+        h: 2,
+        value: "42",
+        label: "Score",
+      }),
+    );
     expect(xml).toContain("E6EDF3");
   });
 
   it("statBox WITH background should use autoTextColor not theme fg", () => {
     pptx.createPresentation({ theme: "dark-gradient" });
-    const xml = pptx.statBox({
-      x: 0,
-      y: 0,
-      w: 3,
-      h: 2,
-      value: "42",
-      label: "Score",
-      background: "FFFFFF",
-    });
+    const xml = toXml(
+      pptx.statBox({
+        x: 0,
+        y: 0,
+        w: 3,
+        h: 2,
+        value: "42",
+        label: "Score",
+        background: "FFFFFF",
+      }),
+    );
     // White background → dark text (333333), not theme fg
     expect(xml).toContain("333333");
     expect(xml).not.toContain("E6EDF3");
@@ -560,19 +607,21 @@ describe("active theme auto text colour", () => {
 
   it("richText should use theme fg for runs without explicit colour", () => {
     pptx.createPresentation({ theme: "dark-gradient" });
-    const xml = pptx.richText({
-      x: 0,
-      y: 0,
-      w: 8,
-      h: 2,
-      paragraphs: [[{ text: "Hello" }]],
-    });
+    const xml = toXml(
+      pptx.richText({
+        x: 0,
+        y: 0,
+        w: 8,
+        h: 2,
+        paragraphs: [[{ text: "Hello" }]],
+      }),
+    );
     expect(xml).toContain("E6EDF3");
   });
 
   it("textBox on light-clean theme should use light theme fg", () => {
     pptx.createPresentation({ theme: "light-clean" });
-    const xml = pptx.textBox({ x: 0, y: 0, w: 4, h: 1, text: "Hello" });
+    const xml = toXml(pptx.textBox({ x: 0, y: 0, w: 4, h: 1, text: "Hello" }));
     // light-clean fg = 333333
     expect(xml).toContain("333333");
   });
