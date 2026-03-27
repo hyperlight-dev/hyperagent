@@ -142,11 +142,17 @@ describe("validatePath", () => {
 
   // ── Symlinks ──────────────────────────────────────────────
 
+  // Symlink tests — skip on Windows when symlink creation requires admin
   it("should reject symlinks", () => {
     const target = join(baseDir, "real-file.txt");
     const link = join(baseDir, "link-file.txt");
     writeFileSync(target, "content");
-    symlinkSync(target, link);
+    try {
+      symlinkSync(target, link);
+    } catch (e: any) {
+      if (e.code === "EPERM") return; // Skip — no symlink privileges on Windows
+      throw e;
+    }
 
     const result = validatePath("link-file.txt", baseDir);
     expect(result.valid).toBe(false);

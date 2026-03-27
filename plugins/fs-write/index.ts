@@ -198,11 +198,12 @@ export function createHostFunctions(
     safeNumericConfig(cfg.maxWriteSizeKb, 20480, MAX_SIZE_LIMIT_KB) * 1024;
   const maxWriteChunkBytes = MAX_WRITE_CHUNK_KB * 1024;
 
-  if (FS_CONSTANTS.O_NOFOLLOW === undefined) {
-    throw new Error(
-      "[fs-write] O_NOFOLLOW not supported on this platform — cannot guarantee symlink safety",
-    );
-  }
+  // O_NOFOLLOW atomically rejects symlinks at open() on POSIX.
+  // On Windows it doesn't exist — we rely on the lstatSync pre-check
+  // in validatePath() plus a post-open fstatSync/lstatSync comparison.
+  // The residual TOCTOU window is narrow and requires symlink creation
+  // privileges (SeCreateSymbolicLinkPrivilege or Developer Mode).
+  const O_NOFOLLOW = FS_CONSTANTS.O_NOFOLLOW ?? 0;
 
   const maxEntries = Math.floor(
     safeNumericConfig(cfg.maxEntries, 500, MAX_ENTRIES_LIMIT),

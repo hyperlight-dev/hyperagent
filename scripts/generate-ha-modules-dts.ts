@@ -85,7 +85,10 @@ function generateDeclareBlock(moduleName: string, content: string): string {
   }
 
   // Remove trailing empty lines
-  while (outputLines.length > 0 && outputLines[outputLines.length - 1].trim() === "") {
+  while (
+    outputLines.length > 0 &&
+    outputLines[outputLines.length - 1].trim() === ""
+  ) {
     outputLines.pop();
   }
 

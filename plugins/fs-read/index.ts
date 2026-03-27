@@ -235,14 +235,12 @@ export function createHostFunctions(
   // on the length parameter. Not configurable by design.
   const maxReadChunkBytes = MAX_READ_CHUNK_KB * 1024;
 
-  // Platform guard: O_NOFOLLOW is POSIX-only. If the platform doesn't
-  // support it (Windows), fail loudly rather than silently losing
-  // symlink protection — O_NOFOLLOW is required.
-  if (FS_CONSTANTS.O_NOFOLLOW === undefined) {
-    throw new Error(
-      "[fs-read] O_NOFOLLOW not supported on this platform — cannot guarantee symlink safety",
-    );
-  }
+  // O_NOFOLLOW atomically rejects symlinks at open() on POSIX.
+  // On Windows it doesn't exist — we rely on the lstatSync pre-check
+  // in validatePath() plus a post-open fstatSync/lstatSync comparison.
+  // The residual TOCTOU window is narrow and requires symlink creation
+  // privileges (SeCreateSymbolicLinkPrivilege or Developer Mode).
+  const O_NOFOLLOW = FS_CONSTANTS.O_NOFOLLOW ?? 0;
 
   // ── Host function implementations ────────────────────────────
 

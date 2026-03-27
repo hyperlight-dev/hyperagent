@@ -127,7 +127,7 @@ fn build_runtime() -> PathBuf {
 
     let stubs_inc = runtime_dir.join("include");
     let cflags = format!("-I{} -D__wasi__=1", stubs_inc.display());
-    let cflags = cflags.replace("\\", "\\\\");
+    let cflags = cflags.replace('\\', "/");
 
     let mut cargo_cmd = cargo_hyperlight::cargo().unwrap();
     let cmd = cargo_cmd

@@ -9,11 +9,11 @@
  * .js and .d.ts file contents.
  */
 
-import { createHash } from 'crypto';
-import { readdirSync, readFileSync, writeFileSync, existsSync } from 'fs';
-import { join } from 'path';
+import { createHash } from "crypto";
+import { readdirSync, readFileSync, writeFileSync, existsSync } from "fs";
+import { join } from "path";
 
-const BUILTIN_DIR = join(import.meta.dirname, '..', 'builtin-modules');
+const BUILTIN_DIR = join(import.meta.dirname, "..", "builtin-modules");
 
 interface ModuleJson {
   name: string;
@@ -28,24 +28,24 @@ interface ModuleJson {
 }
 
 function hash(content: Buffer | string): string {
-  const h = createHash('sha256').update(content).digest('hex');
-  return 'sha256:' + h.slice(0, 16);
+  const h = createHash("sha256").update(content).digest("hex");
+  return "sha256:" + h.slice(0, 16);
 }
 
 let updated = 0;
 let unchanged = 0;
 
 for (const file of readdirSync(BUILTIN_DIR)) {
-  if (!file.endsWith('.json')) continue;
+  if (!file.endsWith(".json")) continue;
   // Skip _restore.json and other internal modules that don't have .js files
-  const name = file.replace('.json', '');
+  const name = file.replace(".json", "");
   const jsPath = join(BUILTIN_DIR, `${name}.js`);
   const dtsPath = join(BUILTIN_DIR, `${name}.d.ts`);
   const jsonPath = join(BUILTIN_DIR, file);
 
   if (!existsSync(jsPath)) {
     // Native module (no .js file) — still update dtsHash if .d.ts exists
-    const meta: ModuleJson = JSON.parse(readFileSync(jsonPath, 'utf-8'));
+    const meta: ModuleJson = JSON.parse(readFileSync(jsonPath, "utf-8"));
     if (existsSync(dtsPath)) {
       const dtsContent = readFileSync(dtsPath);
       const newDtsHash = hash(dtsContent);
@@ -53,7 +53,7 @@ for (const file of readdirSync(BUILTIN_DIR)) {
         meta.dtsHash = newDtsHash;
         // Remove sourceHash if present (native modules have no .js)
         delete meta.sourceHash;
-        writeFileSync(jsonPath, JSON.stringify(meta, null, 2) + '\n');
+        writeFileSync(jsonPath, JSON.stringify(meta, null, 2) + "\n");
         console.log(`Updated: ${file} (native module)`);
         updated++;
       } else {
@@ -65,7 +65,7 @@ for (const file of readdirSync(BUILTIN_DIR)) {
     continue;
   }
 
-  const meta: ModuleJson = JSON.parse(readFileSync(jsonPath, 'utf-8'));
+  const meta: ModuleJson = JSON.parse(readFileSync(jsonPath, "utf-8"));
 
   const jsContent = readFileSync(jsPath);
   const newSourceHash = hash(jsContent);
@@ -91,7 +91,7 @@ for (const file of readdirSync(BUILTIN_DIR)) {
   }
 
   if (changed) {
-    writeFileSync(jsonPath, JSON.stringify(meta, null, 2) + '\n');
+    writeFileSync(jsonPath, JSON.stringify(meta, null, 2) + "\n");
     console.log(`Updated: ${file}`);
     updated++;
   } else {

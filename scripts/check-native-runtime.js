@@ -8,12 +8,18 @@
  *
  * Runs as postinstall hook. Fails loudly if the wrong runtime is embedded.
  */
-import { readFileSync, existsSync, readdirSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { readFileSync, existsSync, readdirSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const NAPI_DIR = join(__dirname, '..', 'node_modules', '@hyperlight', 'js-host-api');
+const NAPI_DIR = join(
+  __dirname,
+  "..",
+  "node_modules",
+  "@hyperlight",
+  "js-host-api",
+);
 
 if (!existsSync(NAPI_DIR)) {
   // First time setup — addon not built yet. just build/setup will handle it.
@@ -21,7 +27,7 @@ if (!existsSync(NAPI_DIR)) {
 }
 
 // Find the .node binary (name varies by platform)
-const nodeFile = readdirSync(NAPI_DIR).find(f => f.endsWith('.node'));
+const nodeFile = readdirSync(NAPI_DIR).find((f) => f.endsWith(".node"));
 if (!nodeFile) {
   // No .node file yet — first time setup
   process.exit(0);
@@ -30,9 +36,11 @@ if (!nodeFile) {
 const NAPI_PATH = join(NAPI_DIR, nodeFile);
 const binary = readFileSync(NAPI_PATH);
 
-if (!binary.includes(Buffer.from('init_native_modules'))) {
-  console.error('\n❌ NAPI addon does not have the custom runtime embedded.');
-  console.error('   The sandbox runtime was built without native module support.');
-  console.error('   Fix: just build\n');
+if (!binary.includes(Buffer.from("init_native_modules"))) {
+  console.error("\n❌ NAPI addon does not have the custom runtime embedded.");
+  console.error(
+    "   The sandbox runtime was built without native module support.",
+  );
+  console.error("   Fix: just build\n");
   process.exit(1);
 }

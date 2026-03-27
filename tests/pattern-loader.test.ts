@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
+import { tmpdir } from "os";
+import { randomBytes } from "crypto";
 import { loadPatterns } from "../src/agent/pattern-loader.js";
 
-const TMP_DIR = join(import.meta.dirname, "..", ".tmp-pattern-test");
+let TMP_DIR: string;
 
 function createPattern(name: string, content: string) {
   const dir = join(TMP_DIR, name);
@@ -13,11 +15,17 @@ function createPattern(name: string, content: string) {
 
 describe("pattern-loader", () => {
   beforeEach(() => {
+    // Use a unique dir under os.tmpdir() per test to avoid Windows EBUSY locks
+    TMP_DIR = join(tmpdir(), `pattern-test-${randomBytes(8).toString("hex")}`);
     mkdirSync(TMP_DIR, { recursive: true });
   });
 
   afterEach(() => {
-    rmSync(TMP_DIR, { recursive: true, force: true });
+    try {
+      rmSync(TMP_DIR, { recursive: true, force: true });
+    } catch {
+      // Windows: Defender/indexer may hold a lock — not worth failing the test
+    }
   });
 
   it("should load a valid pattern with all fields", () => {

@@ -1,0 +1,23 @@
+# Force LF line endings everywhere — no platform-specific CRLF nonsense.
+# This ensures consistent diffs across Linux, macOS, and Windows.
+* text=auto eol=lf
+
+# Explicitly mark binary files so git doesn't try to normalize them
+*.node binary
+*.wasm binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pptx binary
+*.xlsx binary
+*.docx binary
+*.zip binary
+*.tar binary
+*.gz binary
+*.tgz binary
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary

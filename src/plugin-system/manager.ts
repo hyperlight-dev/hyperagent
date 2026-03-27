@@ -324,12 +324,7 @@ export function resolvePluginSource(pluginDir: string): string {
   const underNodeModules =
     /[\\/]node_modules[\\/]/.test(pluginDir) ||
     pluginDir.startsWith("node_modules/");
-  if (underNodeModules) {
-    return jsPath;
-  }
-
-  // Dev mode: prefer .ts for live editing, fall back to .js
-  return existsSync(tsPath) ? tsPath : jsPath;
+  return underNodeModules ? jsPath : existsSync(tsPath) ? tsPath : jsPath;
 }
 
 /**

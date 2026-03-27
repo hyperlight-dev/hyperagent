@@ -35,7 +35,7 @@ import {
 import * as readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { randomUUID } from "node:crypto";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 
@@ -184,6 +184,15 @@ process.env.HYPERLIGHT_SCRATCH_SIZE_MB = cli.scratchSize;
 process.env.HYPERAGENT_OUTPUT_THRESHOLD_BYTES = cli.outputThreshold;
 process.env.COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES = cli.outputThreshold;
 process.env.COPILOT_LARGE_OUTPUT_MAX_BYTES = cli.outputThreshold;
+
+// ── Windows WHP surrogate pool sizing ────────────────────────────────
+// On Windows, two independent SurrogateProcessManagers (hyperlight-js +
+// code-validator) each pre-create a pool of surrogate processes. Keep the
+// initial pool small and let on-demand growth handle spikes.
+if (process.platform === "win32") {
+  process.env.HYPERLIGHT_INITIAL_SURROGATES ??= "2";
+  process.env.HYPERLIGHT_MAX_SURROGATES ??= "24";
+}
 
 // ── Cleanup on exit ──────────────────────────────────────────────────
 // Remove auto-saved large output files from the results/ subdirectory
@@ -735,7 +744,9 @@ async function syncPluginsToSandbox(): Promise<void> {
 
     try {
       // Dynamic import — each plugin exports createHostFunctions(config)
-      const mod = await import(indexPath);
+      // Use pathToFileURL for Windows compatibility (raw paths like C:\...
+      // are rejected by the ESM loader which expects file:// URLs).
+      const mod = await import(pathToFileURL(indexPath).href);
       if (typeof mod.createHostFunctions !== "function") {
         const msg = `"${plugin.manifest.name}" has no createHostFunctions() export`;
         console.error(`[plugins] ${msg}`);

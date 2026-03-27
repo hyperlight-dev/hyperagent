@@ -227,7 +227,12 @@ describe("validatePath", () => {
       const realFile = join(baseDir, "real.txt");
       writeFileSync(realFile, "real content");
       const link = join(baseDir, "link.txt");
-      symlinkSync(realFile, link);
+      try {
+        symlinkSync(realFile, link);
+      } catch (e: any) {
+        if (e.code === "EPERM") return; // Skip — no symlink privileges on Windows
+        throw e;
+      }
 
       const result = validatePath("link.txt", baseDir);
       expect(result.valid).toBe(false);
@@ -240,7 +245,12 @@ describe("validatePath", () => {
       writeFileSync(join(realDir, "file.txt"), "content");
 
       const linkDir = join(baseDir, "linkdir");
-      symlinkSync(realDir, linkDir);
+      try {
+        symlinkSync(realDir, linkDir);
+      } catch (e: any) {
+        if (e.code === "EPERM") return; // Skip — no symlink privileges on Windows
+        throw e;
+      }
 
       const result = validatePath("linkdir/file.txt", baseDir);
       expect(result.valid).toBe(false);
@@ -333,7 +343,12 @@ describe("createHostFunctions", () => {
     it("should reject symlinks", () => {
       const real = join(baseDir, "real.txt");
       writeFileSync(real, "real");
-      symlinkSync(real, join(baseDir, "link.txt"));
+      try {
+        symlinkSync(real, join(baseDir, "link.txt"));
+      } catch (e: any) {
+        if (e.code === "EPERM") return; // Skip — no symlink privileges on Windows
+        throw e;
+      }
 
       const result = fns.readFile("link.txt");
       expect(result.error).toContain("symlinks");
@@ -453,7 +468,12 @@ describe("createHostFunctions", () => {
     it("should reject symlinks", () => {
       const real = join(baseDir, "real-chunk.txt");
       writeFileSync(real, "real content");
-      symlinkSync(real, join(baseDir, "link-chunk.txt"));
+      try {
+        symlinkSync(real, join(baseDir, "link-chunk.txt"));
+      } catch (e: any) {
+        if (e.code === "EPERM") return; // Skip — no symlink privileges on Windows
+        throw e;
+      }
       const result = fns.readFileChunk("link-chunk.txt", 0, 10);
       expect(result.error).toContain("symlinks");
     });
@@ -615,7 +635,12 @@ describe("createHostFunctions", () => {
 
     it("should filter symlinks from listing", () => {
       writeFileSync(join(baseDir, "real.txt"), "real");
-      symlinkSync(join(baseDir, "real.txt"), join(baseDir, "link.txt"));
+      try {
+        symlinkSync(join(baseDir, "real.txt"), join(baseDir, "link.txt"));
+      } catch (e: any) {
+        if (e.code === "EPERM") return; // Skip — no symlink privileges on Windows
+        throw e;
+      }
 
       const result = fns.listDir(".");
       expect(Array.isArray(result)).toBe(true);
@@ -660,7 +685,12 @@ describe("createHostFunctions", () => {
 
     it("should reject symlinks", () => {
       writeFileSync(join(baseDir, "real.txt"), "real");
-      symlinkSync(join(baseDir, "real.txt"), join(baseDir, "link.txt"));
+      try {
+        symlinkSync(join(baseDir, "real.txt"), join(baseDir, "link.txt"));
+      } catch (e: any) {
+        if (e.code === "EPERM") return; // Skip — no symlink privileges on Windows
+        throw e;
+      }
       const result = fns.stat("link.txt");
       expect(result.error).toContain("symlinks");
     });
@@ -704,6 +734,14 @@ describe("createHostFunctions", () => {
       );
       try {
         symlinkSync(realDir, symlinkDir);
+      } catch (e: any) {
+        if (e.code === "EPERM") {
+          rmSync(realDir, { recursive: true, force: true });
+          return; // Skip — no symlink privileges on Windows
+        }
+        throw e;
+      }
+      try {
         expect(() => {
           createHostFunctions({ baseDir: symlinkDir });
         }).toThrow("symlink");
