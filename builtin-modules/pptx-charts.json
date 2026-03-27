@@ -3,8 +3,8 @@
   "description": "OOXML DrawingML chart generation - bar, pie, line charts for PPTX presentations",
   "author": "system",
   "mutable": false,
-  "sourceHash": "sha256:5c521ce93ff39626",
-  "dtsHash": "sha256:5f653830226c3554",
+  "sourceHash": "sha256:4174b6f03be2e0fb",
+  "dtsHash": "sha256:4353b8263dc99405",
   "importStyle": "named",
   "hints": {
     "overview": "Chart generation for PPTX. Always used with ha:pptx.",
