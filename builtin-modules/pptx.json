@@ -3,8 +3,8 @@
   "description": "PowerPoint PPTX presentation builder - slides, text, shapes, themes, layouts",
   "author": "system",
   "mutable": false,
-  "sourceHash": "sha256:093b19522e994756",
-  "dtsHash": "sha256:2107e369816b4bd5",
+  "sourceHash": "sha256:23569540a0f8622f",
+  "dtsHash": "sha256:27520514e4401465",
   "importStyle": "named",
   "hints": {
     "overview": "Core PPTX slide building. Charts in ha:pptx-charts, tables in ha:pptx-tables.",

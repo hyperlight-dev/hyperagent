@@ -23,8 +23,16 @@ describe("pattern-loader", () => {
   afterEach(() => {
     try {
       rmSync(TMP_DIR, { recursive: true, force: true });
-    } catch {
-      // Windows: Defender/indexer may hold a lock — not worth failing the test
+    } catch (err: unknown) {
+      // Windows Defender/indexer can hold file locks — only swallow those
+      const code = (err as NodeJS.ErrnoException).code;
+      if (
+        process.platform === "win32" &&
+        (code === "EBUSY" || code === "EPERM")
+      ) {
+        return;
+      }
+      throw err;
     }
   });
 

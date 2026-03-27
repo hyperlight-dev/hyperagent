@@ -426,10 +426,10 @@ writeFileSync(launcherCjsPath, launcherCjs);
 // Node.js launcher (works everywhere, used as npm bin entry)
 const nodeLauncher = `#!/usr/bin/env node
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const cjs = join(__dirname, '..', 'lib', 'hyperagent-launcher.cjs');
-await import('file://' + cjs.replace(/\\\\/g, '/'));
+await import(pathToFileURL(cjs).href);
 `;
 const nodeLauncherPath = join(BIN_DIR, "hyperagent");
 writeFileSync(nodeLauncherPath, nodeLauncher);
@@ -494,7 +494,7 @@ To run (option 3 - add to PATH permanently via System Properties):
   ${launcherPath}
 
 To run (option 2 - add to PATH):
-  export PATH="${BIN_DIR}:\\$PATH"
+  export PATH="${BIN_DIR}:$PATH"
   hyperagent
 
 To run (option 3 - symlink):
