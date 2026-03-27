@@ -4,6 +4,43 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.1.5] - 2026-03-27
+
+### Added
+
+- **Windows WHP support** — HyperAgent now runs on Windows with hardware-isolated Hyperlight micro-VMs via Windows Hypervisor Platform (WHP)
+  - Justfile: `[windows]` recipes for `build-hyperlight`, `resolve-hyperlight-dir`, `start-debug`
+  - Justfile: `runtime-cflags` forward-slash fix for clang cross-compilation on Windows
+  - `build-binary.js`: `.cmd` launcher and platform-aware post-build output with PowerShell instructions
+  - `agent/index.ts`: `pathToFileURL()` for ESM plugin imports on Windows
+  - `build.rs`: forward-slash CFLAGS for clang on Windows
+  - `code-validator/guest`: `win32-x64-msvc` NAPI build target
+  - `.gitattributes`: enforce LF line endings across platforms
+  - `README.md`: document Windows WHP as supported prerequisite
+- **CI Windows matrix** — `pr-validate.yml` now includes Windows WHP build/test entries; `publish.yml` updated for Windows builds
+- **Deterministic VM dispose** — `invalidateSandbox()` now calls `dispose()` on `LoadedJSSandbox` and `JSSandbox` for deterministic VM resource cleanup instead of relying on V8 GC
+- **PPTX ShapeFragment safety system** — Branded opaque type for shape builders with validation engine (#14)
+
+### Fixed
+
+- **Duplicate error messages** — `event-handler.ts` now suppresses duplicate "Tool execution failed" output when the handler has already displayed the error
+- **MMIO error detection** — `sandbox/tool.js` detects MMIO unmapped-address errors in both compilation and runtime paths, providing clearer error messages
+- **Plugin O_NOFOLLOW on Windows** — `fs-read` and `fs-write` plugins fall back gracefully when `O_NOFOLLOW` is unavailable (Windows), relying on `lstatSync` pre-check for symlink safety
+- **Test Windows compatibility** — Symlink tests skip with EPERM on Windows (`path-jail`, `fs-read`, `fs-write`); `dts-sync` uses `rmSync` instead of shell `rm -rf`; `pattern-loader` uses unique `os.tmpdir()` paths to avoid Windows Defender EBUSY locks
+- **CI docs-only job** — Added missing checkout step to docs-pr CI job (#12)
+- **postinstall script** — Fixed missing closing brace in `package.json` postinstall `node -e` snippet
+
+### Changed
+
+- **Surrogate pool env vars** — `agent/index.ts` sets `HYPERLIGHT_INITIAL_SURROGATES=2` and `HYPERLIGHT_MAX_SURROGATES=24` on Windows
+- **hyperlight-js dependency** — Updated to include `dispose()` API and npm audit fixes
+- **Build system** — Eliminated `deps/hyperlight-js` git clone; Cargo dep now resolves hyperlight-js checkout via Cargo's git cache (#13)
+- **npm scripts** — `prepare` and `postinstall` use `node -e` instead of POSIX shell for cross-platform compatibility
+
+### Security
+
+- **npm audit fixes** — Updated `picomatch` and `brace-expansion` across all workspaces (root, `code-validator/guest`, `deps/js-host-api`)
+
 ## [v0.1.4] - 2026-03-24
 
 ### Fixed
