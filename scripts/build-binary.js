@@ -432,9 +432,35 @@ Module._load = function(request, parent, isMain) {
     return originalLoad.call(this, join(LIB_DIR, 'js-host-api', 'lib.cjs'), parent, isMain);
   }
   if (request === 'hyperlight-analysis') {
-    // The hyperlight-analysis index.js already has full napi-rs platform detection.
-    // It's copied into the node_modules structure, so just load it from there.
-    return originalLoad.call(this, join(LIB_DIR, 'node_modules', 'hyperlight-analysis', 'index.js'), parent, isMain);
+    // Load the correct platform-specific .node directly, with musl detection.
+    // The index.js loader doesn't distinguish musl vs glibc, so we handle it here.
+    const fs = require('fs');
+    const hyperlightDir = join(LIB_DIR, 'node_modules', 'hyperlight-analysis');
+    const platformArch = process.platform + '-' + process.arch;
+    const candidates = [];
+    if (platformArch === 'linux-x64') {
+      // Detect musl vs glibc — try musl first on musl systems, then glibc
+      let isMusl = false;
+      try {
+        const r = require('child_process').spawnSync('ldd', ['--version'],
+          { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+        isMusl = ((r.stdout || '') + (r.stderr || '')).includes('musl');
+      } catch {}
+      if (isMusl) {
+        candidates.push(join(hyperlightDir, 'hyperlight-analysis.linux-x64-musl.node'));
+      }
+      candidates.push(join(hyperlightDir, 'hyperlight-analysis.linux-x64-gnu.node'));
+    } else if (platformArch === 'win32-x64') {
+      candidates.push(join(hyperlightDir, 'hyperlight-analysis.win32-x64-msvc.node'));
+    }
+    // Fall back to index.js loader
+    candidates.push(join(hyperlightDir, 'index.js'));
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        return originalLoad.call(this, candidate, parent, isMain);
+      }
+    }
+    return originalLoad.apply(this, arguments);
   }
   return originalLoad.apply(this, arguments);
 };

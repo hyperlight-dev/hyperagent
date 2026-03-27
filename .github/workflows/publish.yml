@@ -23,6 +23,9 @@ env:
 jobs:
   # Build native addons on each platform and upload as artifacts.
   # These are combined in the publish-npm job to create a cross-platform package.
+  #
+  # gnu and win32 builds run tests natively on their platform.
+  # musl is cross-compiled from the glibc runner (can't run tests on glibc host).
   build-native:
     name: Build (${{ matrix.build }})
     strategy:
@@ -33,12 +36,15 @@ jobs:
           - build: linux-kvm
             os: [self-hosted, Linux, X64, "1ES.Pool=hld-kvm-amd"]
             hypervisor: kvm
+            run_tests: true
           - build: linux-musl
             os: [self-hosted, Linux, X64, "1ES.Pool=hld-kvm-amd"]
             hypervisor: kvm
+            run_tests: false  # musl .node can't run on glibc host
           - build: windows-whp
             os: [self-hosted, Windows, X64, "1ES.Pool=hld-win2022-amd"]
             hypervisor: whp
+            run_tests: true
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
@@ -56,18 +62,34 @@ jobs:
       - name: Setup
         run: just setup
 
-      - name: Install musl tools
+      - name: Install musl tools and rebuild for musl target
         if: matrix.build == 'linux-musl'
         run: |
           sudo apt-get update && sudo apt-get install -y musl-tools
           rustup target add x86_64-unknown-linux-musl
 
+          # Rebuild hyperlight-js NAPI addon targeting musl
+          hl_dir=$(just resolve-hyperlight-dir)
+          cd "${hl_dir}/src/js-host-api"
+          npx napi build --platform --target x86_64-unknown-linux-musl
+
+          # Rebuild hyperlight-analysis NAPI addon targeting musl
+          cd "$GITHUB_WORKSPACE/src/code-validator/guest"
+          npx napi build --platform --target x86_64-unknown-linux-musl --manifest-path host/Cargo.toml
+          node -e "require('fs').readdirSync('host').filter(f=>f.endsWith('.node')).forEach(f=>require('fs').copyFileSync('host/'+f,f))"
+
+          # Verify musl .node files were actually produced
+          ls -la "${hl_dir}/src/js-host-api/"*.linux-x64-musl.node
+          ls -la "$GITHUB_WORKSPACE/src/code-validator/guest/"*linux-x64-musl* || ls -la "$GITHUB_WORKSPACE/src/code-validator/guest/host/"*linux-x64-musl*
+
       - name: Build release binary
+        if: matrix.run_tests
         run: node scripts/build-binary.js --release
         env:
           VERSION: ${{ github.event.release.tag_name || inputs.version }}
 
       - name: Run tests
+        if: matrix.run_tests
         run: just test
 
       # Upload the native .node addons so the publish job can combine them
@@ -82,11 +104,13 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # Combine native addons from all platforms and publish a single npm package
+  # Combine native addons from all platforms and publish a single npm package.
+  # Runs on a self-hosted Linux runner (not ubuntu-latest) because just setup
+  # needs to build the Rust runtime which requires hyperlight toolchain.
   publish-npm:
     name: Publish to npmjs.org
     needs: [build-native]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, "1ES.Pool=hld-kvm-amd"]
     steps:
       - uses: actions/checkout@v6
 
