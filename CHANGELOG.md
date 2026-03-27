@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.1.6] - 2026-03-27
+
+### Added
+
+- **Cross-platform npm publishing** — Publish workflow now builds native addons on Linux (glibc + musl) and Windows in parallel, uploads artifacts, and combines them into a single cross-platform npm package
+- **musl/Alpine support** — Added `x86_64-unknown-linux-musl` NAPI build target for `hyperlight-analysis`; CI cross-compiles musl from glibc runner with `musl-tools`
+- **Runtime NAPI platform detection** — Binary launcher uses napi-rs generated `index.js` for `js-host-api` (full musl/glibc/win32 detection) and probes `ldd` for `hyperlight-analysis` musl vs glibc resolution
+- **ha-modules.d.ts sync test** — New test in `dts-sync.test.ts` regenerates `ha-modules.d.ts` and compares to committed version, catching drift when module exports/types change without re-running the generator
+
+### Fixed
+
+- **Cross-platform .node loading** — `build-binary.js` no longer hardcodes the NAPI triple at build time; copies all available platform `.node` files and uses runtime detection to load the correct one
+- **postinstall script** — Fixed missing closing brace in `package.json` `node -e` snippet that caused SyntaxError during `npm install`
+- **Publish artifact ordering** — Download artifacts AFTER `just setup` to avoid symlink/junction clobber when `build-hyperlight` re-creates `deps/js-host-api`
+- **ha-modules.d.ts stale types** — Regenerated with `ShapeFragment` return types (was `string`) to match upstream ShapeFragment safety system
+- **Node.js launcher URL** — Use `pathToFileURL(cjs).href` instead of manual `file://` concatenation (fixes invalid URLs on Windows)
+- **Unix PATH instructions** — Removed backslash escaping of `$PATH` in post-build output
+- **pattern-loader test cleanup** — `afterEach` only swallows `EBUSY`/`EPERM` on Windows; rethrows real errors on other platforms
+
+### Changed
+
+- **Publish workflow** — Replaced single-platform `ubuntu-latest` publish with multi-platform matrix build (Linux KVM, Linux musl, Windows WHP) followed by artifact-combining publish job on self-hosted runner
+- **Publish runner** — `publish-npm` job now runs on self-hosted `hld-kvm-amd` runner (needs Rust toolchain for `just setup`)
+
 ## [v0.1.5] - 2026-03-27
 
 ### Added
