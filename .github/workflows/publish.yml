@@ -28,9 +28,12 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        build: [linux-kvm, windows-whp]
+        build: [linux-kvm, linux-musl, windows-whp]
         include:
           - build: linux-kvm
+            os: [self-hosted, Linux, X64, "1ES.Pool=hld-kvm-amd"]
+            hypervisor: kvm
+          - build: linux-musl
             os: [self-hosted, Linux, X64, "1ES.Pool=hld-kvm-amd"]
             hypervisor: kvm
           - build: windows-whp
@@ -52,6 +55,12 @@ jobs:
 
       - name: Setup
         run: just setup
+
+      - name: Install musl tools
+        if: matrix.build == 'linux-musl'
+        run: |
+          sudo apt-get update && sudo apt-get install -y musl-tools
+          rustup target add x86_64-unknown-linux-musl
 
       - name: Build release binary
         run: node scripts/build-binary.js --release
