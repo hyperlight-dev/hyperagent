@@ -7,7 +7,13 @@
 
 import { describe, it, expect } from "vitest";
 import { createHash } from "crypto";
-import { readdirSync, readFileSync, existsSync, rmSync } from "fs";
+import {
+  readdirSync,
+  readFileSync,
+  existsSync,
+  rmSync,
+  writeFileSync,
+} from "fs";
 import { join } from "path";
 import { execSync } from "child_process";
 
@@ -229,6 +235,34 @@ describe("TypeScript source consistency", () => {
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+
+  it("ha-modules.d.ts matches regenerated output", () => {
+    // Regenerate ha-modules.d.ts and compare with the committed version.
+    // Catches drift where a module's exports/types changed but the generator wasn't re-run.
+    const haModulesPath = join(SRC_DIR, "types", "ha-modules.d.ts");
+    if (!existsSync(haModulesPath)) return;
+
+    const committed = readFileSync(haModulesPath, "utf-8");
+
+    // Regenerate in-place (the script always writes to the same path)
+    execSync("npx tsx scripts/generate-ha-modules-dts.ts", {
+      cwd: join(import.meta.dirname, ".."),
+      stdio: "pipe",
+    });
+
+    const regenerated = readFileSync(haModulesPath, "utf-8");
+
+    // Restore the committed version so the test doesn't have side effects
+    if (regenerated !== committed) {
+      writeFileSync(haModulesPath, committed);
+    }
+
+    expect(
+      regenerated,
+      "ha-modules.d.ts is out of date with compiled .d.ts files. " +
+        "Run: npx tsx scripts/generate-ha-modules-dts.ts",
+    ).toBe(committed);
   });
 });
 
