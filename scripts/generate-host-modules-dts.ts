@@ -101,11 +101,11 @@ function extractHostModules(pluginName: string, content: string): string[] {
   // Find the HostFunctions interface (e.g., FetchHostFunctions)
   // This tells us which module name maps to which interface
   const hostFunctionsMatch = content.match(
-    /export\s+interface\s+(\w+HostFunctions)\s*\{/
+    /export\s+interface\s+(\w+HostFunctions)\s*\{/,
   );
   if (!hostFunctionsMatch) {
     console.warn(
-      `  Warning: No HostFunctions interface found in ${pluginName}`
+      `  Warning: No HostFunctions interface found in ${pluginName}`,
     );
     return blocks;
   }
@@ -114,24 +114,24 @@ function extractHostModules(pluginName: string, content: string): string[] {
   const hostFunctionsBlock = extractBraceBlock(content, hostFunctionsStart);
   const hostFunctionsBody = hostFunctionsBlock.slice(
     hostFunctionsBlock.indexOf("{") + 1,
-    hostFunctionsBlock.lastIndexOf("}")
+    hostFunctionsBlock.lastIndexOf("}"),
   );
 
   // Extract module name -> interface name mappings
   // e.g., 'fetch: FetchFunctions' or '"fs-read": FsReadFunctions'
   const moduleMatches = hostFunctionsBody.matchAll(
-    /["']?([^"'\s:]+)["']?\s*:\s*(\w+)/g
+    /["']?([^"'\s:]+)["']?\s*:\s*(\w+)/g,
   );
 
   for (const [, moduleName, interfaceName] of moduleMatches) {
     // Find the interface definition
     const interfaceRegex = new RegExp(
-      `export\\s+interface\\s+${interfaceName}\\s*\\{`
+      `export\\s+interface\\s+${interfaceName}\\s*\\{`,
     );
     const interfaceMatch = content.match(interfaceRegex);
     if (!interfaceMatch) {
       console.warn(
-        `  Warning: Interface ${interfaceName} not found in ${pluginName}`
+        `  Warning: Interface ${interfaceName} not found in ${pluginName}`,
       );
       continue;
     }
@@ -290,8 +290,12 @@ function convertToExportFunctions(interfaceBody: string): string[] {
           }
           if (parenEnd !== -1) {
             const params = rest.slice(parenStart, parenEnd + 1);
-            const returnType = unwrapPromise(rest.slice(rest.indexOf("=>") + 2).trim());
-            outputLines.push(`  export declare function ${name}${params}: ${returnType};`);
+            const returnType = unwrapPromise(
+              rest.slice(rest.indexOf("=>") + 2).trim(),
+            );
+            outputLines.push(
+              `  export declare function ${name}${params}: ${returnType};`,
+            );
             continue;
           }
         }
@@ -323,7 +327,9 @@ function convertToExportFunctions(interfaceBody: string): string[] {
         const afterParams = sig.slice(parenEnd + 1).trim();
         if (afterParams.startsWith(":")) {
           const returnType = unwrapPromise(afterParams.slice(1).trim());
-          outputLines.push(`  export declare function ${name}${params}: ${returnType};`);
+          outputLines.push(
+            `  export declare function ${name}${params}: ${returnType};`,
+          );
         }
       }
     }

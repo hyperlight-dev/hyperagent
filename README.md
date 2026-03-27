@@ -10,13 +10,13 @@ Ask the agent to compute things, and it writes & runs JavaScript in a hardware-i
 
 ### Prerequisites
 
-- **Linux with KVM**, **Azure Linux with MSHV**, or **WSL2 with KVM** (hardware virtualization required)
+- **Linux with KVM**, **Azure Linux with MSHV**, **Windows with WHP**, or **WSL2 with KVM** (hardware virtualization required)
 - **GitHub authentication** (see [below](#github-authentication))
 - **Docker** (for containerized option)
 - **Node.js 22+** (for npm install / source builds only)
 - **Rust + just** (for source builds only — see [Contributing](#contributing))
 
-**NOTE:** HyperAgent does not currently run on macOS [due to this issue](https://github.com/hyperlight-dev/hyperlight/issues/45). Native Windows support (WHP) is planned — for now, use [WSL2 with KVM](https://learn.microsoft.com/en-us/windows/wsl/install) on Windows.
+**NOTE:** HyperAgent does not currently run on macOS [due to this issue](https://github.com/hyperlight-dev/hyperlight/issues/45).
 
 ### GitHub Authentication
 

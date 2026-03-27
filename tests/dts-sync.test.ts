@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from "vitest";
 import { createHash } from "crypto";
-import { readdirSync, readFileSync, existsSync } from "fs";
+import { readdirSync, readFileSync, existsSync, rmSync } from "fs";
 import { join } from "path";
 import { execSync } from "child_process";
 
@@ -148,7 +148,7 @@ describe("TypeScript source consistency", () => {
     const tmpDir = join(import.meta.dirname, "..", ".tmp-ts-check");
     try {
       // Clean up any previous temp dir
-      execSync(`rm -rf ${tmpDir}`, { stdio: "ignore" });
+      rmSync(tmpDir, { recursive: true, force: true });
 
       // Compile TypeScript to temp directory
       execSync(
@@ -188,14 +188,14 @@ describe("TypeScript source consistency", () => {
       }
     } finally {
       // Clean up temp directory
-      execSync(`rm -rf ${tmpDir}`, { stdio: "ignore" });
+      rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 
   it("compiled .d.ts matches committed .d.ts files", () => {
     const tmpDir = join(import.meta.dirname, "..", ".tmp-ts-check");
     try {
-      execSync(`rm -rf ${tmpDir}`, { stdio: "ignore" });
+      rmSync(tmpDir, { recursive: true, force: true });
       execSync(
         `cd ${BUILTIN_DIR} && npx tsc --project tsconfig.json --outDir ${tmpDir}`,
         { stdio: "pipe" },
@@ -227,7 +227,7 @@ describe("TypeScript source consistency", () => {
         ).toBe(committed);
       }
     } finally {
-      execSync(`rm -rf ${tmpDir}`, { stdio: "ignore" });
+      rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 });

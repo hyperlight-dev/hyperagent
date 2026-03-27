@@ -45,7 +45,8 @@ function mapRustType(rustType: string): string {
 
   // rquickjs container types (after lifetime stripping)
   if (/^(rquickjs::)?Array(<'[a-z_]+>)?$/.test(t)) return "any[]";
-  if (/^(rquickjs::)?Object(<'[a-z_]+>)?$/.test(t)) return "Record<string, any>";
+  if (/^(rquickjs::)?Object(<'[a-z_]+>)?$/.test(t))
+    return "Record<string, any>";
 
   // QjsResult<T> / Result<T> → unwrap to T (error handling is invisible to JS)
   const resultMatch = t.match(/^(?:Qjs)?Result<(.+)>$/);
@@ -56,7 +57,22 @@ function mapRustType(rustType: string): string {
   if (optionMatch) return `${mapRustType(optionMatch[1])} | undefined`;
 
   // Numeric types
-  if (["f64", "f32", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "usize", "isize"].includes(t)) {
+  if (
+    [
+      "f64",
+      "f32",
+      "i8",
+      "i16",
+      "i32",
+      "i64",
+      "u8",
+      "u16",
+      "u32",
+      "u64",
+      "usize",
+      "isize",
+    ].includes(t)
+  ) {
     return "number";
   }
 
@@ -184,9 +200,7 @@ function generateDts(functions: ParsedFunction[]): string {
     }
 
     // Function declaration
-    const params = fn.params
-      .map((p) => `${p.name}: ${p.type}`)
-      .join(", ");
+    const params = fn.params.map((p) => `${p.name}: ${p.type}`).join(", ");
     parts.push(
       `export declare function ${fn.name}(${params}): ${fn.returnType};`,
     );
@@ -233,7 +247,9 @@ function main() {
     // First try exact match (native-image → image.json)
     const exactMatch = jsonFiles.find((f) => f === `${dirBaseName}.json`);
     if (exactMatch) {
-      const meta = JSON.parse(readFileSync(join(OUTPUT_DIR, exactMatch), "utf-8"));
+      const meta = JSON.parse(
+        readFileSync(join(OUTPUT_DIR, exactMatch), "utf-8"),
+      );
       if (meta.type === "native") {
         moduleName = meta.name;
       }
@@ -242,9 +258,12 @@ function main() {
       // This handles renames (native-deflate → ziplib.json)
       for (const jf of jsonFiles) {
         const meta = JSON.parse(readFileSync(join(OUTPUT_DIR, jf), "utf-8"));
-        if (meta.type === "native" && !moduleDirs.some(
-          (d) => d.replace(/^native-/, "") === jf.replace(".json", "")
-        )) {
+        if (
+          meta.type === "native" &&
+          !moduleDirs.some(
+            (d) => d.replace(/^native-/, "") === jf.replace(".json", ""),
+          )
+        ) {
           moduleName = meta.name;
           break;
         }
@@ -255,11 +274,15 @@ function main() {
     const dts = generateDts(functions);
 
     writeFileSync(outputPath, dts);
-    console.log(`  📝 ${moduleName}.d.ts (${functions.length} function${functions.length > 1 ? "s" : ""})`);
+    console.log(
+      `  📝 ${moduleName}.d.ts (${functions.length} function${functions.length > 1 ? "s" : ""})`,
+    );
     generated++;
   }
 
-  console.log(`Generated ${generated} native module .d.ts file${generated !== 1 ? "s" : ""}`);
+  console.log(
+    `Generated ${generated} native module .d.ts file${generated !== 1 ? "s" : ""}`,
+  );
 }
 
 main();

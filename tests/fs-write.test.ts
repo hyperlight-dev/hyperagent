@@ -128,7 +128,12 @@ describe("createHostFunctions", () => {
     it("should reject symlinks", () => {
       const real = join(baseDir, "real.txt");
       writeFileSync(real, "real");
-      symlinkSync(real, join(baseDir, "link.txt"));
+      try {
+        symlinkSync(real, join(baseDir, "link.txt"));
+      } catch (e: any) {
+        if (e.code === "EPERM") return; // Skip — no symlink privileges on Windows
+        throw e;
+      }
 
       const result = fns.writeFile("link.txt", "overwrite via symlink");
       expect(result.error).toContain("symlinks");
@@ -492,6 +497,14 @@ describe("createHostFunctions", () => {
       );
       try {
         symlinkSync(realDir, symlinkDir);
+      } catch (e: any) {
+        if (e.code === "EPERM") {
+          rmSync(realDir, { recursive: true, force: true });
+          return; // Skip — no symlink privileges on Windows
+        }
+        throw e;
+      }
+      try {
         expect(() => {
           createHostFunctions({ baseDir: symlinkDir });
         }).toThrow("symlink");

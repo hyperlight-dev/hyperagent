@@ -26,8 +26,8 @@
     "fmt": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"plugins/**/*.ts\" \"builtin-modules/**/*.js\"",
     "fmt:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"plugins/**/*.ts\" \"builtin-modules/**/*.js\"",
     "check": "npm run fmt:check && npm run typecheck && npm run test",
-    "prepare": "[ ! -f scripts/build-modules.js ] || npm run build:modules",
-    "postinstall": "[ ! -f scripts/patch-vscode-jsonrpc.js ] || (node scripts/patch-vscode-jsonrpc.js && node scripts/check-native-runtime.js)"
+    "prepare": "node -e \"if(require('fs').existsSync('scripts/build-modules.js'))require('child_process').execSync('npm run build:modules',{stdio:'inherit'})\"",
+    "postinstall": "node -e \"var fs=require('fs'),cp=require('child_process');if(fs.existsSync('scripts/patch-vscode-jsonrpc.js')){cp.execSync('node scripts/patch-vscode-jsonrpc.js',{stdio:'inherit'});cp.execSync('node scripts/check-native-runtime.js',{stdio:'inherit'})}\""
   },
   "dependencies": {
     "@github/copilot-sdk": "^0.1.32",

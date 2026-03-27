@@ -83,11 +83,8 @@ jobs:
         run: just test-all
 
   # Build and test on all hypervisor configurations (1ES runners have Rust + just)
-  # NOTE: Windows WHP support is temporarily disabled pending upstream
-  # hyperlight fix for multiple SurrogateProcessManager instances.
-  # See: https://github.com/hyperlight-dev/hyperagent/issues/1
   build-and-test:
-    name: Build & Test (${{ matrix.hypervisor }}-${{ matrix.config }})
+    name: Build & Test (${{ matrix.build }})
     needs: [docs-pr]
     if: needs.docs-pr.outputs.docs-only != 'true'
     strategy:
@@ -98,6 +95,8 @@ jobs:
           - linux-kvm-release
           - linux-mshv-debug
           - linux-mshv-release
+          - windows-whp-debug
+          - windows-whp-release
         include:
           - build: linux-kvm-debug
             os: [self-hosted, Linux, X64, "1ES.Pool=hld-kvm-amd"]
@@ -114,6 +113,14 @@ jobs:
           - build: linux-mshv-release
             os: [self-hosted, Linux, X64, "1ES.Pool=hld-azlinux3-mshv-amd"]
             hypervisor: mshv
+            config: release
+          - build: windows-whp-debug
+            os: [self-hosted, Windows, X64, "1ES.Pool=hld-win2022-amd"]
+            hypervisor: whp
+            config: debug
+          - build: windows-whp-release
+            os: [self-hosted, Windows, X64, "1ES.Pool=hld-win2022-amd"]
+            hypervisor: whp
             config: release
     runs-on: ${{ matrix.os }}
     steps:
@@ -142,7 +149,7 @@ jobs:
         if: matrix.config == 'release'
         uses: actions/upload-artifact@v7
         with:
-          name: hyperagent-linux-x64-${{ matrix.hypervisor }}
+          name: hyperagent-${{ matrix.build }}
           path: dist/
           retention-days: 7
 

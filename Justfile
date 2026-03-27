@@ -37,7 +37,7 @@ runtime-dir := justfile_dir() / "src" / "sandbox" / "runtime"
 # -D__wasi__=1 to disable pthreads. Uses cargo metadata to find the
 # include/ dir from the hyperlight-js-runtime dependency.
 # Fails loudly if resolution fails — empty CFLAGS causes cryptic build errors.
-runtime-cflags := `node -e "var m=JSON.parse(require('child_process').execSync('cargo +1.89 metadata --format-version 1 --manifest-path src/sandbox/runtime/Cargo.toml',{encoding:'utf8',stdio:['pipe','pipe','inherit'],maxBuffer:20*1024*1024}));var p=m.packages.find(function(p){return p.name==='hyperlight-js-runtime'});if(!p){process.stderr.write('ERROR: hyperlight-js-runtime not found in cargo metadata\n');process.exit(1)}console.log('-I'+require('path').join(require('path').dirname(p.manifest_path),'include')+' -D__wasi__=1')"`
+runtime-cflags := `node -e "var m=JSON.parse(require('child_process').execSync('cargo +1.89 metadata --format-version 1 --manifest-path src/sandbox/runtime/Cargo.toml',{encoding:'utf8',stdio:['pipe','pipe','inherit'],maxBuffer:20*1024*1024}));var p=m.packages.find(function(p){return p.name==='hyperlight-js-runtime'});if(!p){process.stderr.write('ERROR: hyperlight-js-runtime not found in cargo metadata\n');process.exit(1)}var inc=require('path').join(require('path').dirname(p.manifest_path),'include').split(require('path').sep).join('/');console.log('-I'+inc+' -D__wasi__=1')"`
 
 # Export HYPERLIGHT_CFLAGS so cargo-hyperlight picks them up when building runtimes
 export HYPERLIGHT_CFLAGS := runtime-cflags
@@ -71,6 +71,12 @@ resolve-hyperlight-dir:
     fi
     echo "$dir"
 
+# Resolve hyperlight-js workspace root (Windows variant).
+[private]
+[windows]
+resolve-hyperlight-dir:
+    node -e "var m=JSON.parse(require('child_process').execSync('cargo +1.89 metadata --format-version 1 --manifest-path src/sandbox/runtime/Cargo.toml',{encoding:'utf8',stdio:['pipe','pipe','pipe'],maxBuffer:20*1024*1024}));var p=m.packages.find(function(p){return p.name==='hyperlight-js-runtime'});if(p)console.log(require('path').resolve(require('path').dirname(p.manifest_path),'..','..'));else{process.stderr.write('hyperlight-js-runtime not found');process.exit(1)}"
+
 # Install required Rust toolchains and cargo subcommands.
 # Cross-platform (Linux/macOS/Windows) — no bash required.
 [private]
@@ -84,8 +90,7 @@ ensure-tools:
 # 2. Discovers the hyperlight-js workspace from Cargo's checkout
 # 3. Builds the NAPI addon with our custom runtime embedded
 # 4. Symlinks deps/js-host-api → checkout/src/js-host-api for npm file: dep
-# NOTE: [unix] only — Windows support is disabled pending upstream fix (issue #1).
-# When Windows lands, add [windows] variants using mklink /J for junctions.
+# NOTE: [unix] only — add [windows] variant below for Windows WHP support.
 [private]
 [unix]
 build-hyperlight target="debug": (build-runtime-release)
@@ -100,6 +105,13 @@ build-hyperlight target="debug": (build-runtime-release)
     mkdir -p "{{justfile_dir()}}/deps"
     ln -sfn "${hl_dir}/src/js-host-api" "{{hyperlight-link}}"
     echo "🔗 deps/js-host-api → ${hl_dir}/src/js-host-api"
+
+# Build hyperlight-js NAPI addon (Windows variant — PowerShell + junction link).
+# All statements on one line because just runs each line as a separate pwsh -Command.
+[private]
+[windows]
+build-hyperlight target="debug": (build-runtime-release)
+    $hl_dir = just resolve-hyperlight-dir; Push-Location (Join-Path $hl_dir "src" "hyperlight-js"); cargo clean -p hyperlight-js 2>$null; Pop-Location; Push-Location $hl_dir; just build {{ if target == "debug" { "" } else { target } }}; Pop-Location; $linkPath = [IO.Path]::GetFullPath("{{hyperlight-link}}"); $targetPath = Join-Path $hl_dir "src" "js-host-api"; New-Item -ItemType Directory -Path (Split-Path $linkPath) -Force | Out-Null; if (Test-Path $linkPath) { cmd /c rmdir /q $linkPath 2>$null }; cmd /c mklink /J $linkPath $targetPath; Write-Output "🔗 deps/js-host-api → $targetPath"
 
 # Build the hyperlight-analysis-guest NAPI addon (debug)
 [private]
@@ -165,8 +177,14 @@ start *ARGS: install
     npx tsx src/agent/index.ts {{ARGS}}
 
 # Run with crash diagnostics (generates crash report .json files on SIGSEGV)
+[unix]
 start-debug *ARGS: install
     NODE_OPTIONS="--report-on-signal --report-on-fatalerror --report-directory=$HOME/.hyperagent/logs" npx tsx src/agent/index.ts {{ARGS}}
+
+# Run with crash diagnostics (Windows variant)
+[windows]
+start-debug *ARGS: install
+    $env:NODE_OPTIONS="--report-on-signal --report-on-fatalerror --report-directory=$env:USERPROFILE/.hyperagent/logs"; npx tsx src/agent/index.ts {{ARGS}}
 
 # Run the agent with release-built native addon (faster sandbox execution)
 start-release *ARGS: install-release

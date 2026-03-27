@@ -707,6 +707,22 @@ export function createSandboxTool(options = {}) {
    * setMemorySizes), use invalidateSandboxWithSave() instead.
    */
   function invalidateSandbox() {
+    // Deterministically release VM resources instead of relying on V8 GC.
+    // dispose() on a consumed sandbox is a safe no-op, so order doesn't matter.
+    if (loadedSandbox) {
+      try {
+        loadedSandbox.dispose();
+      } catch {
+        // Already consumed or errored — swallow silently
+      }
+    }
+    if (jsSandbox) {
+      try {
+        jsSandbox.dispose();
+      } catch {
+        // Already consumed or errored — swallow silently
+      }
+    }
     loadedSandbox = null;
     compiledHandlersHash = null;
     currentSnapshot = null;
@@ -1755,6 +1771,24 @@ export function createSandboxTool(options = {}) {
               `with pluginConfig to set the missing fields.`,
           };
         }
+        // Detect MMIO / unmapped address errors — these indicate VM memory
+        // exhaustion at the hypervisor level (e.g. too many handlers for the
+        // configured scratch size). Give the LLM clear stop-and-reduce guidance.
+        if (
+          /mmio|unmapped address|physical memory|dispatch guest call/i.test(msg)
+        ) {
+          return {
+            success: false,
+            error:
+              `VM memory exhaustion during compilation: ${msg}\n` +
+              `The ${handlerCache.size} registered handlers exceed the VM's memory capacity.`,
+            llmInstruction:
+              "STOP. The VM ran out of physical memory while compiling handlers. " +
+              "Do NOT retry. Reduce the number of handlers by deleting unused ones " +
+              "(delete_handler), or increase scratch memory (/set scratch <mb>). " +
+              "Present the user with these options and WAIT for their choice.",
+          };
+        }
         return { success: false, error: `Compilation error: ${msg}` };
       }
       timing.compileMs = Math.round(performance.now() - t1);
@@ -1857,7 +1891,7 @@ export function createSandboxTool(options = {}) {
           "Do NOT pick an option yourself.";
       } else if (
         err.message &&
-        /out of memory|out of physical memory|heap|stack overflow|guest aborted/i.test(
+        /out of memory|out of physical memory|heap|stack overflow|guest aborted|mmio|unmapped address/i.test(
           err.message,
         )
       ) {

@@ -24,7 +24,7 @@ jobs:
   # Test on all hypervisor configurations before publishing
   # NOTE: Windows WHP temporarily disabled (see pr-validate.yml)
   test:
-    name: Test (${{ matrix.hypervisor }})
+    name: Test (${{ matrix.build }})
     strategy:
       fail-fast: true
       matrix:

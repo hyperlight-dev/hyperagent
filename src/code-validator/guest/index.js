@@ -2,8 +2,8 @@
 //
 // Copyright 2026  The Hyperlight Authors. Licensed under Apache-2.0.
 
-const { existsSync } = require('node:fs');
-const { join } = require('node:path');
+const { existsSync } = require("node:fs");
+const { join } = require("node:path");
 
 let nativeBinding = null;
 let loadError = null;
@@ -14,11 +14,11 @@ const arch = process.arch;
 
 // Map to napi-rs triple names
 const tripleMap = {
-  'linux-x64': 'linux-x64-gnu',
-  'linux-arm64': 'linux-arm64-gnu',
-  'darwin-x64': 'darwin-x64',
-  'darwin-arm64': 'darwin-arm64',
-  'win32-x64': 'win32-x64-msvc',
+  "linux-x64": "linux-x64-gnu",
+  "linux-arm64": "linux-arm64-gnu",
+  "darwin-x64": "darwin-x64",
+  "darwin-arm64": "darwin-arm64",
+  "win32-x64": "win32-x64-msvc",
 };
 
 const platformArch = `${platform}-${arch}`;
@@ -33,8 +33,8 @@ const possiblePaths = [
   join(__dirname, `hyperlight_analysis.${triple}.node`),
   join(__dirname, `hyperlight_analysis.${platformArch}.node`),
   // Generic fallback
-  join(__dirname, 'hyperlight-analysis.node'),
-  join(__dirname, 'hyperlight_analysis.node'),
+  join(__dirname, "hyperlight-analysis.node"),
+  join(__dirname, "hyperlight_analysis.node"),
 ];
 
 for (const bindingPath of possiblePaths) {

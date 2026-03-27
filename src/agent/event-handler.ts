@@ -383,13 +383,28 @@ export function registerEventHandler(
             }
           }
         } else {
-          const errMsg = event.data?.error?.message ?? "unknown error";
-          const errCode = event.data?.error?.code;
-          if (errCode === "denied") {
-            console.log(`  ${C.warn("🚫 Tool denied by policy")}`);
-          } else {
-            console.log(`  ${C.err("❌ Error:")} ${errMsg}`);
-            suggestBufferIncreaseIfNeeded(errMsg);
+          // Check if the tool handler already displayed the error to the user
+          // (indicated by _userDisplayed flag in the result content). If so,
+          // suppress the generic SDK error to avoid duplicate error messages.
+          let alreadyDisplayed = false;
+          try {
+            const content = event.data?.result?.content;
+            if (content) {
+              const parsed = JSON.parse(content);
+              alreadyDisplayed = !!parsed?._userDisplayed;
+            }
+          } catch {
+            // Content isn't JSON or missing — that's fine
+          }
+          if (!alreadyDisplayed) {
+            const errMsg = event.data?.error?.message ?? "unknown error";
+            const errCode = event.data?.error?.code;
+            if (errCode === "denied") {
+              console.log(`  ${C.warn("🚫 Tool denied by policy")}`);
+            } else {
+              console.log(`  ${C.err("❌ Error:")} ${errMsg}`);
+              suggestBufferIncreaseIfNeeded(errMsg);
+            }
           }
         }
         console.log();
