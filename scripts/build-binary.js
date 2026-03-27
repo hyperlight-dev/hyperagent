@@ -217,20 +217,43 @@ if (!existsSync(analysisNode)) {
   process.exit(1);
 }
 
-copyFileSync(hyperlightNode, join(LIB_DIR, `js-host-api.${napiTriple}.node`));
-copyFileSync(
-  analysisNode,
-  join(LIB_DIR, `hyperlight-analysis.${napiTriple}.node`),
-);
+// Copy .node files for ALL available platforms so the package is cross-platform.
+// The current platform's .node is guaranteed to exist (checked above).
+// Additional platform .node files are copied if present (e.g. from CI matrix builds).
+const ALL_TRIPLES = ["linux-x64-gnu", "linux-x64-musl", "win32-x64-msvc"];
+for (const triple of ALL_TRIPLES) {
+  const hlNode = join(ROOT, `deps/js-host-api/js-host-api.${triple}.node`);
+  const anNode = join(
+    ROOT,
+    `src/code-validator/guest/host/hyperlight-analysis.${triple}.node`,
+  );
+  if (existsSync(hlNode)) {
+    copyFileSync(hlNode, join(LIB_DIR, `js-host-api.${triple}.node`));
+    console.log(`  ✓ js-host-api.${triple}.node`);
+  }
+  if (existsSync(anNode)) {
+    copyFileSync(anNode, join(LIB_DIR, `hyperlight-analysis.${triple}.node`));
+    console.log(`  ✓ hyperlight-analysis.${triple}.node`);
+  }
+}
 
 // Create a proper node_modules package structure for hyperlight-analysis
 // so both require() and import() can resolve it in the bundled binary.
 const analysisPkgDir = join(LIB_DIR, "node_modules", "hyperlight-analysis");
 mkdirSync(analysisPkgDir, { recursive: true });
-copyFileSync(
-  analysisNode,
-  join(analysisPkgDir, `hyperlight-analysis.${napiTriple}.node`),
-);
+// Copy all available platform .node files into the package dir
+for (const triple of ALL_TRIPLES) {
+  const anNode = join(
+    ROOT,
+    `src/code-validator/guest/host/hyperlight-analysis.${triple}.node`,
+  );
+  if (existsSync(anNode)) {
+    copyFileSync(
+      anNode,
+      join(analysisPkgDir, `hyperlight-analysis.${triple}.node`),
+    );
+  }
+}
 // Copy the index.js and index.d.ts from the source package
 const analysisIndex = join(ROOT, "src/code-validator/guest/index.js");
 const analysisTypes = join(ROOT, "src/code-validator/guest/index.d.ts");
@@ -250,24 +273,30 @@ if (existsSync(analysisPkg))
 // Files are renamed to .cjs because the host package.json has "type": "module"
 // which makes Node.js treat .js as ESM — but lib.js uses require().
 const hyperlightLibJs = join(ROOT, "deps/js-host-api/lib.js");
+const hyperlightIndexJs = join(ROOT, "deps/js-host-api/index.js");
 const hyperlightHostApiDir = join(LIB_DIR, "js-host-api");
 mkdirSync(hyperlightHostApiDir, { recursive: true });
-copyFileSync(
-  hyperlightNode,
-  join(hyperlightHostApiDir, `js-host-api.${napiTriple}.node`),
-);
+// Copy all available platform .node files
+for (const triple of ALL_TRIPLES) {
+  const hlNode = join(ROOT, `deps/js-host-api/js-host-api.${triple}.node`);
+  if (existsSync(hlNode)) {
+    copyFileSync(
+      hlNode,
+      join(hyperlightHostApiDir, `js-host-api.${triple}.node`),
+    );
+  }
+}
 // Copy lib.js as lib.cjs, patching the require('./index.js') to './index.cjs'
 const libJsContent = readFileSync(hyperlightLibJs, "utf-8").replace(
   "require('./index.js')",
   "require('./index.cjs')",
 );
 writeFileSync(join(hyperlightHostApiDir, "lib.cjs"), libJsContent);
-// Create a minimal index.cjs shim that loads the .node addon from the
-// same directory. Platform-specific .node file is resolved at build time.
-writeFileSync(
-  join(hyperlightHostApiDir, "index.cjs"),
-  `'use strict';\nmodule.exports = require('./js-host-api.${napiTriple}.node');\n`,
-);
+// Copy the napi-rs generated index.js as index.cjs — it already has full
+// platform detection (musl vs glibc, win32, darwin) and tries local .node
+// files first, then falls back to optional @hyperlight/ scoped packages.
+const indexJsContent = readFileSync(hyperlightIndexJs, "utf-8");
+writeFileSync(join(hyperlightHostApiDir, "index.cjs"), indexJsContent);
 
 // ── Step 5: Copy runtime resources ─────────────────────────────────────
 console.log("📁 Copying runtime resources...");
@@ -403,7 +432,35 @@ Module._load = function(request, parent, isMain) {
     return originalLoad.call(this, join(LIB_DIR, 'js-host-api', 'lib.cjs'), parent, isMain);
   }
   if (request === 'hyperlight-analysis') {
-    return originalLoad.call(this, join(LIB_DIR, 'hyperlight-analysis.${napiTriple}.node'), parent, isMain);
+    // Load the correct platform-specific .node directly, with musl detection.
+    // The index.js loader doesn't distinguish musl vs glibc, so we handle it here.
+    const fs = require('fs');
+    const hyperlightDir = join(LIB_DIR, 'node_modules', 'hyperlight-analysis');
+    const platformArch = process.platform + '-' + process.arch;
+    const candidates = [];
+    if (platformArch === 'linux-x64') {
+      // Detect musl vs glibc — try musl first on musl systems, then glibc
+      let isMusl = false;
+      try {
+        const r = require('child_process').spawnSync('ldd', ['--version'],
+          { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+        isMusl = ((r.stdout || '') + (r.stderr || '')).includes('musl');
+      } catch {}
+      if (isMusl) {
+        candidates.push(join(hyperlightDir, 'hyperlight-analysis.linux-x64-musl.node'));
+      }
+      candidates.push(join(hyperlightDir, 'hyperlight-analysis.linux-x64-gnu.node'));
+    } else if (platformArch === 'win32-x64') {
+      candidates.push(join(hyperlightDir, 'hyperlight-analysis.win32-x64-msvc.node'));
+    }
+    // Fall back to index.js loader
+    candidates.push(join(hyperlightDir, 'index.js'));
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        return originalLoad.call(this, candidate, parent, isMain);
+      }
+    }
+    return originalLoad.apply(this, arguments);
   }
   return originalLoad.apply(this, arguments);
 };
