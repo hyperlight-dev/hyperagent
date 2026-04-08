@@ -94,7 +94,7 @@ jobs:
 
       # Upload the native .node addons so the publish job can combine them
       - name: Upload native addons
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: native-addons-${{ matrix.build }}
           path: |
