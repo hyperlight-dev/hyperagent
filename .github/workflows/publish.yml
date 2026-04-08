@@ -132,7 +132,7 @@ jobs:
       # that build-hyperlight creates (deps/js-host-api → Cargo checkout).
       # Downloading before setup would be clobbered when setup re-creates the link.
       - name: Download all native addons
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: native-addons-*
           merge-multiple: true
