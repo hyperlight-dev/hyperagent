@@ -130,19 +130,28 @@ echo "$dependabot_prs" | jq -c '.[]' | while read -r pr; do
         # Check if PR is up-to-date with base branch
         merge_status=$(gh pr view "$pr_number" -R "$REPO" --json mergeStateStatus -q '.mergeStateStatus')
         
-        if [ "$merge_status" != "CLEAN" ]; then
-            echo "  ⚠️ PR #$pr_number is not up to date (status: $merge_status)"
-            # Enable auto-merge to merge once branch is up to date
-            echo "  ✅ Enabling auto-merge (squash strategy) for PR #$pr_number"
-            gh pr merge "$pr_number" -R "$REPO" --auto --squash
-            echo "  ✅ Auto-merge enabled for PR #$pr_number"
-        else
-            echo "  ✅ PR #$pr_number is up to date with base branch"
-            # PR is already clean/mergeable and checks have passed - merge directly
-            echo "  ✅ Merging PR #$pr_number directly (squash strategy)"
-            gh pr merge "$pr_number" -R "$REPO" --squash
-            echo "  ✅ PR #$pr_number merged successfully"
-        fi
+        case "$merge_status" in
+            CLEAN)
+                echo "  ✅ PR #$pr_number is up to date with base branch"
+                # PR is already clean/mergeable - merge directly instead of enabling auto-merge
+                echo "  ✅ Merging PR #$pr_number directly (squash strategy)"
+                gh pr merge "$pr_number" -R "$REPO" --squash
+                echo "  ✅ PR #$pr_number merged successfully"
+                ;;
+            BEHIND)
+                echo "  ⚠️ PR #$pr_number is behind the base branch"
+                # Enable auto-merge to merge once the branch is updated and checks pass
+                echo "  ✅ Enabling auto-merge (squash strategy) for PR #$pr_number"
+                gh pr merge "$pr_number" -R "$REPO" --auto --squash
+                echo "  ✅ Auto-merge enabled for PR #$pr_number"
+                ;;
+            DIRTY|BLOCKED)
+                echo "  ⚠️ Skipping PR #$pr_number because it cannot be auto-merged (status: $merge_status)"
+                ;;
+            *)
+                echo "  ⚠️ Skipping PR #$pr_number due to unsupported merge status: $merge_status"
+                ;;
+        esac
     fi
     
 done
