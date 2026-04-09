@@ -27,7 +27,7 @@ nom = { version = "8.0", default-features = false, features = ["alloc"] }
 spin = "0.10"
 rquickjs = { version = "0.11", default-features = false, features = ["bindgen", "loader"] }
 hashbrown = "0.16"
-sha2 = { version = "0.10", default-features = false }
+sha2 = { version = "0.11", default-features = false }
 
 [target.'cfg(hyperlight)'.dependencies]
 hyperlight-common = { workspace = true, default-features = false }
