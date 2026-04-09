@@ -45,7 +45,7 @@ jobs:
     runs-on: ${{ fromJson(
       format('["self-hosted", "{0}", "X64", "1ES.Pool=hld-{1}-amd", "JobId={2}-{3}-{4}-{5}"]',
         matrix.hypervisor == 'whp' && 'Windows' || 'Linux',
-        matrix.hypervisor == 'whp' && 'win2022' || 'kvm',
+        matrix.hypervisor == 'whp' && 'win2025' || 'kvm',
         matrix.build,
         github.run_id,
         github.run_number,
