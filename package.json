@@ -34,7 +34,7 @@
     "@hyperlight/js-host-api": "file:deps/js-host-api",
     "boxen": "^8.0.1",
     "hyperlight-analysis": "file:src/code-validator/guest",
-    "zod": "^3.25.0"
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^25.3.3",
