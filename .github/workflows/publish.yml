@@ -136,7 +136,7 @@ jobs:
       # that build-hyperlight creates (deps/js-host-api → Cargo checkout).
       # Downloading before setup would be clobbered when setup re-creates the link.
       - name: Download all native addons
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: native-addons-*
           merge-multiple: true
@@ -187,7 +187,7 @@ jobs:
           fi
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -208,7 +208,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
