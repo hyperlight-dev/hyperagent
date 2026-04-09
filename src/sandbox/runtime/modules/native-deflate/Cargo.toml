@@ -10,7 +10,7 @@ path = "src/lib.rs"
 
 [dependencies]
 rquickjs = { version = "0.11", default-features = false, features = ["bindgen", "futures", "macro", "loader"] }
-miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
+miniz_oxide = { version = "0.9", default-features = false, features = ["with-alloc"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = ['cfg(hyperlight)'] }
