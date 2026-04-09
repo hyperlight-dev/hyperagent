@@ -34,18 +34,22 @@ jobs:
         build: [linux-kvm, linux-musl, windows-whp]
         include:
           - build: linux-kvm
-            os: [self-hosted, Linux, X64, "1ES.Pool=hld-kvm-amd"]
             hypervisor: kvm
             run_tests: true
           - build: linux-musl
-            os: [self-hosted, Linux, X64, "1ES.Pool=hld-kvm-amd"]
             hypervisor: kvm
             run_tests: false  # musl .node can't run on glibc host
           - build: windows-whp
-            os: [self-hosted, Windows, X64, "1ES.Pool=hld-win2022-amd"]
             hypervisor: whp
             run_tests: true
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ fromJson(
+      format('["self-hosted", "{0}", "X64", "1ES.Pool=hld-{1}-amd", "JobId={2}-{3}-{4}-{5}"]',
+        matrix.hypervisor == 'whp' && 'Windows' || 'Linux',
+        matrix.hypervisor == 'whp' && 'win2022' || 'kvm',
+        matrix.build,
+        github.run_id,
+        github.run_number,
+        github.run_attempt)) }}
     steps:
       - uses: actions/checkout@v6
 
@@ -110,7 +114,7 @@ jobs:
   publish-npm:
     name: Publish to npmjs.org
     needs: [build-native]
-    runs-on: [self-hosted, Linux, X64, "1ES.Pool=hld-kvm-amd"]
+    runs-on: [self-hosted, Linux, X64, "1ES.Pool=hld-kvm-amd","JobId=hyperagent-publish-npm-${{ github.run_id }}-${{ github.run_number }}-${{ github.run_attempt }}"]
     steps:
       - uses: actions/checkout@v6
 
