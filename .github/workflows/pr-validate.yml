@@ -59,7 +59,7 @@ jobs:
     name: Lint & Test
     needs: [docs-pr]
     if: needs.docs-pr.outputs.docs-only != 'true'
-    runs-on: [self-hosted, Linux, X64, "1ES.Pool=hld-kvm-amd"]
+    runs-on: [self-hosted, Linux, X64, "1ES.Pool=hld-kvm-amd","JobId=hyperagent-pr-validate-${{ github.run_id }}-${{ github.run_number }}-${{ github.run_attempt }}"]
     steps:
       - uses: actions/checkout@v6
 
@@ -99,30 +99,31 @@ jobs:
           - windows-whp-release
         include:
           - build: linux-kvm-debug
-            os: [self-hosted, Linux, X64, "1ES.Pool=hld-kvm-amd"]
             hypervisor: kvm
             config: debug
           - build: linux-kvm-release
-            os: [self-hosted, Linux, X64, "1ES.Pool=hld-kvm-amd"]
             hypervisor: kvm
             config: release
           - build: linux-mshv-debug
-            os: [self-hosted, Linux, X64, "1ES.Pool=hld-azlinux3-mshv-amd"]
             hypervisor: mshv
             config: debug
           - build: linux-mshv-release
-            os: [self-hosted, Linux, X64, "1ES.Pool=hld-azlinux3-mshv-amd"]
             hypervisor: mshv
             config: release
           - build: windows-whp-debug
-            os: [self-hosted, Windows, X64, "1ES.Pool=hld-win2022-amd"]
             hypervisor: whp
             config: debug
           - build: windows-whp-release
-            os: [self-hosted, Windows, X64, "1ES.Pool=hld-win2022-amd"]
             hypervisor: whp
             config: release
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ fromJson(
+      format('["self-hosted", "{0}", "X64", "1ES.Pool=hld-{1}-amd", "JobId={2}-{3}-{4}-{5}"]',
+        matrix.hypervisor == 'whp' && 'Windows' || 'Linux',
+        matrix.hypervisor == 'whp' && 'win2025' || matrix.hypervisor == 'mshv' && 'azlinux3-mshv' || 'kvm',
+        matrix.build,
+        github.run_id,
+        github.run_number,
+        github.run_attempt)) }}
     steps:
       - uses: actions/checkout@v6
 
@@ -184,10 +185,10 @@ jobs:
           fi
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: false

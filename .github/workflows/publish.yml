@@ -34,18 +34,22 @@ jobs:
         build: [linux-kvm, linux-musl, windows-whp]
         include:
           - build: linux-kvm
-            os: [self-hosted, Linux, X64, "1ES.Pool=hld-kvm-amd"]
             hypervisor: kvm
             run_tests: true
           - build: linux-musl
-            os: [self-hosted, Linux, X64, "1ES.Pool=hld-kvm-amd"]
             hypervisor: kvm
             run_tests: false  # musl .node can't run on glibc host
           - build: windows-whp
-            os: [self-hosted, Windows, X64, "1ES.Pool=hld-win2022-amd"]
             hypervisor: whp
             run_tests: true
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ fromJson(
+      format('["self-hosted", "{0}", "X64", "1ES.Pool=hld-{1}-amd", "JobId={2}-{3}-{4}-{5}"]',
+        matrix.hypervisor == 'whp' && 'Windows' || 'Linux',
+        matrix.hypervisor == 'whp' && 'win2025' || 'kvm',
+        matrix.build,
+        github.run_id,
+        github.run_number,
+        github.run_attempt)) }}
     steps:
       - uses: actions/checkout@v6
 
@@ -110,7 +114,7 @@ jobs:
   publish-npm:
     name: Publish to npmjs.org
     needs: [build-native]
-    runs-on: [self-hosted, Linux, X64, "1ES.Pool=hld-kvm-amd"]
+    runs-on: [self-hosted, Linux, X64, "1ES.Pool=hld-kvm-amd","JobId=hyperagent-publish-npm-${{ github.run_id }}-${{ github.run_number }}-${{ github.run_attempt }}"]
     steps:
       - uses: actions/checkout@v6
 
@@ -132,7 +136,7 @@ jobs:
       # that build-hyperlight creates (deps/js-host-api → Cargo checkout).
       # Downloading before setup would be clobbered when setup re-creates the link.
       - name: Download all native addons
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: native-addons-*
           merge-multiple: true
@@ -183,10 +187,10 @@ jobs:
           fi
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -204,7 +208,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
