@@ -30,7 +30,7 @@
     "postinstall": "node -e \"var fs=require('fs'),cp=require('child_process');if(fs.existsSync('scripts/patch-vscode-jsonrpc.js')){cp.execSync('node scripts/patch-vscode-jsonrpc.js',{stdio:'inherit'});cp.execSync('node scripts/check-native-runtime.js',{stdio:'inherit'});}\""
   },
   "dependencies": {
-    "@github/copilot-sdk": "^0.1.32",
+    "@github/copilot-sdk": "^0.2.1",
     "@hyperlight/js-host-api": "file:deps/js-host-api",
     "boxen": "^8.0.1",
     "hyperlight-analysis": "file:src/code-validator/guest",
