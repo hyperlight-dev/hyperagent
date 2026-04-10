@@ -1,0 +1,40 @@
+# Multi-page report with charts and tables — synthetic data
+name: quarterly-report
+description: Multi-page quarterly business report with charts, tables, executive summary
+skill: pdf-expert
+profiles: file-builder
+timeout: 240
+expected_file: quarterly-report.pdf
+expected_min_pages: 3
+expected_content:
+  - Quarterly Report
+  - Executive Summary
+  - Revenue
+prompt: |
+  Create a professional multi-page quarterly business report PDF for "NovaTech Industries" covering Q1 2026.
+
+  Structure:
+  1. Title page: "Q1 2026 Quarterly Report", subtitle "NovaTech Industries", author "Finance Team", date "April 2026"
+  2. Executive Summary page: 2-3 paragraphs summarising key metrics
+  3. Financial Performance page with:
+     - A bar chart showing monthly revenue: Jan=$1.2M, Feb=$1.4M, Mar=$1.8M
+     - A table with key metrics: Revenue ($4.4M), Expenses ($3.1M), Net Income ($1.3M), Margin (29.5%)
+  4. Operational Highlights page with:
+     - A numbered list of 5 key achievements
+     - A comparison table: Q1 2026 vs Q1 2025 for Revenue, Headcount, Customer NPS
+  5. Add page numbers (skip title page) and footer "Confidential — Internal Use Only"
+
+  Save as quarterly-report.pdf. Use "corporate-blue" theme.
+
+  IMPORTANT: After generating the PDF, return a JSON object with these fields:
+  {
+    "file": "quarterly-report.pdf",
+    "feedback": {
+      "what_worked": ["list of things that went well"],
+      "what_was_hard": ["list of difficulties or friction points"],
+      "api_improvements": ["suggested improvements to ha:pdf module API"],
+      "skill_improvements": ["suggested improvements to SKILL.md instructions"],
+      "missing_features": ["features you wished existed but didn't"],
+      "generation_notes": "any other observations"
+    }
+  }

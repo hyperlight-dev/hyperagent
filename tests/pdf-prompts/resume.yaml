@@ -1,0 +1,34 @@
+# Resume/CV — tests multi-column, personal branding, typography
+name: resume
+description: Professional CV with skills grid, experience, education
+skill: pdf-expert
+profiles: file-builder
+timeout: 180
+expected_file: resume.pdf
+expected_min_pages: 1
+expected_content:
+  - Experience
+  - Education
+  - Skills
+prompt: |
+  Create a professional one-page resume/CV PDF for a senior software engineer.
+
+  Details:
+  - Name: Sarah Chen
+  - Title: Senior Software Engineer
+  - Email: sarah.chen@email.com | Phone: (415) 555-0142 | Location: San Francisco, CA
+  - Summary: 8+ years building distributed systems, specialising in cloud-native architectures and real-time data platforms.
+
+  Experience (use a clean layout with dates on the right):
+  - Senior Software Engineer, Stripe (2022-Present): Led payment processing redesign, reduced latency 40%
+  - Software Engineer, Airbnb (2019-2022): Built real-time pricing engine, 99.99% uptime
+  - Software Engineer, Google (2017-2019): Contributed to Cloud Spanner query optimiser
+
+  Education:
+  - MS Computer Science, Stanford University (2017)
+  - BS Computer Science, UC Berkeley (2015)
+
+  Skills: Python, Go, Rust, TypeScript, Kubernetes, AWS, GCP, PostgreSQL, Kafka, gRPC
+
+  Save as resume.pdf. Use "light-clean" theme. Keep it to one page — compact but readable.
+

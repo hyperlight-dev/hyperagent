@@ -36,6 +36,7 @@ Detailed instructions for the LLM when this skill is active.
 | Skill | Purpose |
 |-------|---------|
 | `pptx-expert` | PowerPoint presentation building |
+| `pdf-expert` | PDF document building |
 | `research-synthesiser` | Research and synthesis |
 | `data-processor` | Data processing workflows |
 | `web-scraper` | Web scraping |

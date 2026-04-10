@@ -14,7 +14,10 @@ export default defineConfig({
     alias: {
       // Map ha:* module imports to builtin-modules/ for standalone testing.
       // In the sandbox these are resolved by the hyperlight-js UserModuleLoader.
+      "ha:doc-core": resolve(__dirname, "builtin-modules/doc-core.js"),
       "ha:ooxml-core": resolve(__dirname, "builtin-modules/ooxml-core.js"),
+      "ha:pdf": resolve(__dirname, "builtin-modules/pdf.js"),
+      "ha:pdf-charts": resolve(__dirname, "builtin-modules/pdf-charts.js"),
       "ha:xml-escape": resolve(__dirname, "builtin-modules/xml-escape.js"),
       "ha:str-bytes": resolve(__dirname, "builtin-modules/str-bytes.js"),
       "ha:crc32": resolve(__dirname, "builtin-modules/crc32.js"),

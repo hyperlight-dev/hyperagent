@@ -9,12 +9,14 @@
 //   • Chart colours are auto-assigned from the theme palette — omit unless needed.
 
 import {
-  inches,
   hexColor,
   requireHex,
   requireString,
   requireArray,
   requireNumber,
+} from "ha:doc-core";
+import {
+  inches,
   nextShapeId,
   _createShapeFragment,
   type ShapeFragment,

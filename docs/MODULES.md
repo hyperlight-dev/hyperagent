@@ -53,6 +53,12 @@ const allKeys = keys();
 clear();
 ```
 
+### Shared Infrastructure
+
+| Module | Description |
+|--------|-------------|
+| `ha:doc-core` | Themes, colours, WCAG contrast, input validation (shared by all format modules) |
+
 ### File Formats
 
 | Module | Description |
@@ -62,6 +68,8 @@ clear();
 | `ha:pptx` | PowerPoint builder - layouts, shapes, notes |
 | `ha:pptx-charts` | Bar, pie/donut, line, area, combo charts |
 | `ha:pptx-tables` | Styled tables, key-value lists, comparisons |
+| `ha:pdf` | PDF 1.7 document builder - flow layout, tables, images |
+| `ha:pdf-charts` | PDF chart rendering - bar, line, pie, combo |
 
 ### Media Processing
 

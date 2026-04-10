@@ -1,0 +1,36 @@
+# Technical manual — tests headings, code blocks, structured content
+name: manual
+description: Technical manual with TOC-style headings, code examples, structured sections
+skill: pdf-expert
+profiles: file-builder
+timeout: 240
+expected_file: api-manual.pdf
+expected_min_pages: 3
+expected_content:
+  - API Reference
+  - Authentication
+  - Endpoints
+prompt: |
+  Create a technical API reference manual PDF for a fictional REST API called "DataFlow API v2".
+
+  Structure (use headings and subheadings):
+  1. Title page: "DataFlow API v2 — Developer Guide"
+  2. Introduction: paragraph explaining the API purpose (real-time data streaming and analytics)
+  3. Authentication section:
+     - Paragraph explaining API key auth
+     - Code block showing example: Authorization: Bearer <api_key>
+  4. Endpoints section with a table:
+     | Method | Path | Description |
+     | GET | /api/v2/streams | List all data streams |
+     | POST | /api/v2/streams | Create new stream |
+     | GET | /api/v2/streams/:id | Get stream details |
+     | DELETE | /api/v2/streams/:id | Delete stream |
+     | GET | /api/v2/analytics/summary | Get analytics summary |
+  5. Example Requests section:
+     - Code block with a curl POST example
+     - Code block with a JSON response example
+  6. Error Codes section with a table: 400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found, 429 Rate Limited, 500 Server Error
+  7. Rate Limits section: paragraph about rate limiting (100 req/min per key)
+
+  Add page numbers (skip title page). Save as api-manual.pdf. Use "light-clean" theme.
+

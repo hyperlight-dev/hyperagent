@@ -78,12 +78,13 @@ describe("ooxml-core", () => {
 
     it("each theme should have all required fields", () => {
       for (const [name, theme] of Object.entries(core.THEMES)) {
-        expect(theme.bg, `${name}.bg`).toBeTruthy();
-        expect(theme.fg, `${name}.fg`).toBeTruthy();
-        expect(theme.accent1, `${name}.accent1`).toBeTruthy();
-        expect(theme.accent2, `${name}.accent2`).toBeTruthy();
-        expect(theme.titleFont, `${name}.titleFont`).toBeTruthy();
-        expect(theme.bodyFont, `${name}.bodyFont`).toBeTruthy();
+        const t = theme as Record<string, unknown>;
+        expect(t.bg, `${name}.bg`).toBeTruthy();
+        expect(t.fg, `${name}.fg`).toBeTruthy();
+        expect(t.accent1, `${name}.accent1`).toBeTruthy();
+        expect(t.accent2, `${name}.accent2`).toBeTruthy();
+        expect(t.titleFont, `${name}.titleFont`).toBeTruthy();
+        expect(t.bodyFont, `${name}.bodyFont`).toBeTruthy();
       }
     });
   });

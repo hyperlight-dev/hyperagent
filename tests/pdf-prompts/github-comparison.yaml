@@ -1,0 +1,30 @@
+# Research-based comparison — requires internet for real data
+name: github-comparison
+description: Fetch real GitHub repo data and create a comparison report
+skill: pdf-expert
+profiles: web-research file-builder
+timeout: 300
+allowed_domains: api.github.com
+expected_file: github-comparison.pdf
+expected_min_pages: 2
+expected_content:
+  - Stars
+  - Repository
+prompt: |
+  Research and compare 3 popular JavaScript runtime projects using the GitHub API, then create a PDF comparison report.
+
+  Steps:
+  1. Fetch repo data from GitHub API for these 3 repos:
+     - https://api.github.com/repos/nodejs/node
+     - https://api.github.com/repos/denoland/deno
+     - https://api.github.com/repos/oven-sh/bun
+  2. Extract: name, description, stars, forks, open issues, language, license, created date
+  3. Create a PDF report:
+     - Title page: "JavaScript Runtimes Comparison — 2026"
+     - Overview section: brief paragraph about each runtime based on their descriptions
+     - Comparison table with all the extracted metrics
+     - A bar chart comparing star counts across the three repos
+     - Summary section with observations about the data
+
+  Save as github-comparison.pdf. Use "light-clean" theme.
+

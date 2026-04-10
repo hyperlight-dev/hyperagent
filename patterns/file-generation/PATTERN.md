@@ -1,7 +1,7 @@
 ---
 name: file-generation
-description: Build binary files (ZIP, PPTX, DOCX) and write to disk
-modules: [zip-format, ziplib, pptx]
+description: Build binary files (ZIP, PPTX, PDF, DOCX) and write to disk
+modules: [zip-format, ziplib, pptx, pdf, pdf-charts]
 plugins: [fs-write]
 profiles: [file-builder]
 heapMb: 128
@@ -17,4 +17,5 @@ wallTimeoutMs: 60000
 5. No base64 encoding needed — pass binary data throughout
 6. Maximum 1MB per write call, up to 10MB per file via multiple calls
 7. For PPTX: use ha:pptx to build slides, then build the ZIP output
-8. Binary data (images, charts) should be Uint8Array throughout — no string conversion
+8. For PDF: use ha:pdf to build pages with addContent(), then exportToFile()
+9. Binary data (images, charts) should be Uint8Array throughout — no string conversion

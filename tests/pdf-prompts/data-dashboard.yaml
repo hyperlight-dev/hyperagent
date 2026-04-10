@@ -1,0 +1,27 @@
+# Data dashboard — tests charts heavily
+name: data-dashboard
+description: Data-heavy document with multiple chart types and KPIs
+skill: pdf-expert
+profiles: file-builder
+timeout: 240
+expected_file: data-dashboard.pdf
+expected_min_pages: 2
+expected_content:
+  - Dashboard
+  - Revenue
+prompt: |
+  Create a data dashboard PDF for an e-commerce company "ShopWave" with Q1 2026 metrics.
+
+  Page 1 — KPI Overview:
+  - Title: "ShopWave Q1 2026 Dashboard"
+  - Key metrics in a table: Total Revenue ($8.2M), Orders (142K), Avg Order Value ($57.75), Customer Retention (73%)
+  - A bar chart: Monthly revenue — Jan $2.4M, Feb $2.7M, Mar $3.1M
+
+  Page 2 — Breakdown:
+  - A pie chart: Revenue by category — Electronics 42%, Clothing 28%, Home & Garden 18%, Other 12%
+  - A line chart: Daily active users trend — Week 1: 45K, Week 2: 48K, Week 3: 52K, Week 4: 55K, Week 5: 51K, Week 6: 58K, Week 7: 62K, Week 8: 60K, Week 9: 65K, Week 10: 68K, Week 11: 72K, Week 12: 75K
+  - A comparison table: This Quarter vs Last Quarter for Revenue, Orders, Returns, NPS Score
+
+  Add page numbers and footer "ShopWave Analytics — Confidential".
+  Save as data-dashboard.pdf. Use "corporate-blue" theme.
+

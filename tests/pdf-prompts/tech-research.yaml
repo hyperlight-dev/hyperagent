@@ -1,0 +1,26 @@
+# Research-based report — requires internet access via fetch plugin
+name: tech-research
+description: Research a real topic from the web and produce a summary report
+skill: pdf-expert
+profiles: web-research file-builder
+timeout: 300
+allowed_domains: en.wikipedia.org api.github.com
+expected_file: tech-research.pdf
+expected_min_pages: 2
+expected_content:
+  - References
+prompt: |
+  Research the Rust programming language using Wikipedia and create a 2-3 page PDF report.
+
+  Steps:
+  1. Fetch the Wikipedia article about Rust from: https://en.wikipedia.org/api/rest_v1/page/summary/Rust_(programming_language)
+  2. Extract key information: description, history highlights, key features
+  3. Create a professional report with:
+     - Title page: "Rust Programming Language — Technical Overview"
+     - Introduction section with 2-3 paragraphs based on the fetched data
+     - Key Features section with a bulleted list (memory safety, zero-cost abstractions, etc.)
+     - A comparison table: Rust vs C++ vs Go for key attributes (memory safety, speed, learning curve, concurrency model)
+     - References section citing the Wikipedia source
+
+  Save as tech-research.pdf. Use "light-clean" theme.
+

@@ -1,0 +1,34 @@
+# Newsletter — tests multi-section layout with varied content
+name: newsletter
+description: Company newsletter with multiple sections, pull quotes, varied content
+skill: pdf-expert
+profiles: file-builder
+timeout: 240
+expected_file: newsletter.pdf
+expected_min_pages: 2
+expected_content:
+  - Newsletter
+  - Highlights
+prompt: |
+  Create a company newsletter PDF for "Velocity Labs" — April 2026 edition.
+
+  Structure:
+  1. Header: "Velocity Labs Monthly" with subtitle "April 2026 Edition"
+  2. CEO Quote section: A blockquote from CEO Maria Santos: "This quarter proved that our investment in AI-first development is paying dividends. Our team shipped more features in Q1 than all of 2025 combined."
+  3. Company Highlights section with a bulleted list:
+     - Launched v3.0 of the analytics platform with real-time dashboards
+     - Expanded to 250 employees across 12 countries
+     - Secured $45M Series C funding led by Sequoia Capital
+     - Won "Best Developer Tools" at TechCrunch Disrupt
+  4. Team Spotlight section: paragraph about the new head of engineering, Dr. Alex Kim, former VP at Databricks
+  5. By The Numbers section with a key metrics table:
+     | Metric | This Month | Last Month | Change |
+     | Active Users | 125K | 108K | +15.7% |
+     | API Calls/Day | 8.2M | 6.9M | +18.8% |
+     | Uptime | 99.97% | 99.94% | +0.03% |
+     | NPS Score | 72 | 68 | +4 |
+  6. Upcoming Events: numbered list of 3 upcoming company events with dates
+
+  Add page numbers and footer "Velocity Labs — Internal Newsletter".
+  Save as newsletter.pdf. Use "corporate-blue" theme.
+

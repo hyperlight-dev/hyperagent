@@ -97,6 +97,8 @@ import {
   formatExports,
   formatSignatures,
   formatCompact,
+  extractInterfaces,
+  expandType,
 } from "./format-exports.js";
 import { loadPatterns } from "./pattern-loader.js";
 import { loadSkills } from "./skill-loader.js";
@@ -1146,6 +1148,7 @@ const registerHandlerTool = defineTool("register_handler", {
           success: false,
           error: `Validation failed:\n  • ${errorMessages}`,
           validationErrors: validation.errors,
+          hint: "This handler was NOT registered. Fix the errors and call register_handler again with the corrected code.",
         };
         console.error(`  ${C.err("❌ " + errorResult.error)}`);
         return errorResult;
@@ -3479,6 +3482,23 @@ const moduleInfoTool = defineTool("module_info", {
           };
         }
 
+        // Load .d.ts for interface expansion — shows full parameter shapes
+        // This solves the #1 LLM friction point: discovering opts parameter fields
+        let interfaces = new Map<string, string>();
+        try {
+          const { readFileSync } = await import("fs");
+          const { join: pathJoin } = await import("path");
+          const dtsPath = pathJoin(
+            process.cwd(),
+            "builtin-modules",
+            `${name}.d.ts`,
+          );
+          const dtsContent = readFileSync(dtsPath, "utf-8");
+          interfaces = extractInterfaces(dtsContent);
+        } catch {
+          // No .d.ts available — skip interface expansion (user modules)
+        }
+
         // Build result for each function
         const results = foundFns.map((fn) => {
           // Build requires usage hint if function has dependencies
@@ -3513,10 +3533,14 @@ const moduleInfoTool = defineTool("module_info", {
             signature: formatExports([fn]),
             params: fn.params?.length
               ? fn.params
-                  .map(
-                    (p) =>
-                      `${p.name}${p.type ? `: ${p.type}` : ""}${p.description ? ` — ${p.description}` : ""}`,
-                  )
+                  .map((p) => {
+                    const base = `${p.name}${p.type ? `: ${p.type}` : ""}${p.description ? ` — ${p.description}` : ""}`;
+                    // Expand interface types so LLM can see the full shape
+                    const expanded = p.type
+                      ? expandType(p.type, interfaces)
+                      : "";
+                    return expanded ? `${base}\n${expanded}` : base;
+                  })
                   .join("\n")
               : undefined,
             returns: fn.returns?.type
@@ -3584,7 +3608,34 @@ const moduleInfoTool = defineTool("module_info", {
         };
       }
 
-      return {
+      // For large modules, load .d.ts interfaces so the LLM can discover
+      // parameter shapes even when source is omitted. This is the primary way
+      // the LLM learns what fields an options object accepts.
+      let typeDefinitions: string | undefined;
+      if (!includeSource) {
+        try {
+          const { readFileSync } = await import("fs");
+          const { join: pathJoin } = await import("path");
+          const dtsPath = pathJoin(
+            process.cwd(),
+            "builtin-modules",
+            `${name}.d.ts`,
+          );
+          const dtsContent = readFileSync(dtsPath, "utf-8");
+          const ifaces = extractInterfaces(dtsContent);
+          if (ifaces.size > 0) {
+            const parts: string[] = [];
+            for (const [ifaceName, fields] of ifaces) {
+              parts.push(`${ifaceName} = {\n${fields}\n}`);
+            }
+            typeDefinitions = parts.join("\n\n");
+          }
+        } catch {
+          // No .d.ts — skip
+        }
+      }
+
+      const result = {
         name: info.name,
         description: info.description,
         author: info.author,
@@ -3593,6 +3644,7 @@ const moduleInfoTool = defineTool("module_info", {
         modified: info.modified,
         sizeBytes: info.sizeBytes,
         exports: formatExports(info.exports),
+        ...(typeDefinitions ? { typeDefinitions } : {}),
         ...(info.structuredHints
           ? { hints: formatStructuredHints(info.structuredHints) }
           : info.hints
@@ -3608,6 +3660,21 @@ const moduleInfoTool = defineTool("module_info", {
             ? `import * as ${info.name.replace(/-/g, "")} from "ha:${info.name}"`
             : `import { ... } from "ha:${info.name}"`,
       };
+
+      // In verbose/debug mode, log the full tool response so it appears in
+      // debug logs and transcripts. This is critical for diagnosing what the
+      // LLM sees when it calls module_info — especially type definitions.
+      if (cli.verbose || cli.debug) {
+        console.error(
+          `  📋 module_info("${name}") → ${JSON.stringify(result).length} bytes`,
+        );
+        if ((result as Record<string, unknown>).typeDefinitions) {
+          console.error(
+            `  📐 Type definitions included (${String((result as Record<string, unknown>).typeDefinitions).length} chars)`,
+          );
+        }
+      }
+      return result;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       return { error: msg };

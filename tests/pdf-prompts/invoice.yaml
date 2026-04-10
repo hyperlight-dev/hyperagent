@@ -1,0 +1,29 @@
+# Simple synthetic invoice — no internet needed
+name: invoice
+description: Professional consulting invoice with line items, tax, totals
+skill: pdf-expert
+profiles: file-builder
+timeout: 180
+expected_file: invoice.pdf
+expected_min_pages: 1
+expected_content:
+  - Invoice
+  - Subtotal
+  - Total
+prompt: |
+  Create a professional PDF invoice for a software consulting company called "Apex Digital Solutions".
+
+  Include:
+  - Company header with name, address (123 Tech Lane, San Francisco, CA 94105), email and phone
+  - Invoice number INV-2026-0415, date April 15 2026, due date May 15 2026
+  - Billed to: Meridian Corp, 456 Market St, New York, NY 10001
+  - A table with these line items:
+    - "API Integration Development" — 40 hours at $175/hr = $7,000
+    - "Cloud Architecture Review" — 16 hours at $200/hr = $3,200
+    - "Security Audit & Remediation" — 24 hours at $185/hr = $4,440
+  - Subtotal: $14,640
+  - Tax (8.5%): $1,244.40
+  - Grand Total: $15,884.40
+  - Payment terms: Net 30, bank transfer details
+
+  Save as invoice.pdf. Use the "light-clean" theme with "corporate" table style.

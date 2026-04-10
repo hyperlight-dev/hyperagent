@@ -2,6 +2,7 @@
 //
 // Pure display utility for formatting export information.
 // No parsing logic — all parsing is done in the Rust guest.
+// Interface expansion reads .d.ts to show full parameter shapes.
 //
 // ─────────────────────────────────────────────────────────────────────
 
@@ -152,4 +153,96 @@ export function formatCompact(exports: ExportInfo[]): string {
       return `${e.name}(${paramStr})`;
     })
     .join("\n");
+}
+
+// ── Interface Expansion ──────────────────────────────────────────────
+// Extract and format interface/type definitions from .d.ts content
+// so that module_info can show full parameter shapes to the LLM.
+
+/**
+ * Extract all exported interface definitions from a .d.ts file content.
+ * Returns a Map of interface name → formatted field list.
+ *
+ * Uses brace-counting to handle nested types correctly (e.g.
+ * columns?: { header: string; width?: number }[]).
+ */
+export function extractInterfaces(dtsContent: string): Map<string, string> {
+  const interfaces = new Map<string, string>();
+  // Find each "export interface Name {" and extract until matching closing brace
+  const startPattern = /export\s+interface\s+(\w+)\s*\{/g;
+  let startMatch;
+
+  while ((startMatch = startPattern.exec(dtsContent)) !== null) {
+    const name = startMatch[1];
+    const bodyStart = startMatch.index + startMatch[0].length;
+
+    // Brace-count to find the matching closing brace
+    let depth = 1;
+    let pos = bodyStart;
+    while (pos < dtsContent.length && depth > 0) {
+      if (dtsContent[pos] === "{") depth++;
+      else if (dtsContent[pos] === "}") depth--;
+      pos++;
+    }
+    const body = dtsContent.slice(bodyStart, pos - 1);
+
+    // Extract property lines from the body
+    const fields: string[] = [];
+    for (const line of body.split("\n")) {
+      const trimmed = line.trim();
+      // Skip empty lines, JSDoc comments, and internal fields
+      if (
+        !trimmed ||
+        trimmed.startsWith("/*") ||
+        trimmed.startsWith("*") ||
+        trimmed.startsWith("//") ||
+        trimmed.startsWith("readonly _") // internal fields
+      ) {
+        continue;
+      }
+      // Match property declarations: name?: Type; or name: Type;
+      // Handle complex types with nested braces by taking everything after the colon
+      const propMatch = trimmed.match(
+        /^(readonly\s+)?(\w+)(\?)?:\s*(.+?);?\s*$/,
+      );
+      if (propMatch) {
+        const propName = propMatch[2];
+        const optional = propMatch[3] ? "?" : "";
+        let propType = propMatch[4].replace(/;$/, "").trim();
+        // Truncate very long types to keep output readable
+        if (propType.length > 80) {
+          propType = propType.slice(0, 77) + "...";
+        }
+        fields.push(`  ${propName}${optional}: ${propType}`);
+      }
+    }
+    if (fields.length > 0) {
+      interfaces.set(name, fields.join("\n"));
+    }
+  }
+  return interfaces;
+}
+
+/**
+ * Expand a parameter's type name to include the full interface definition.
+ * If the type matches a known interface from the .d.ts, appends the fields.
+ *
+ * @param paramType - The type string (e.g. "TableOptions")
+ * @param interfaces - Map of interface definitions from extractInterfaces()
+ * @returns Expanded string with interface fields, or empty string if not found
+ */
+export function expandType(
+  paramType: string,
+  interfaces: Map<string, string>,
+): string {
+  // Strip generics, arrays, optionality to find the base type name
+  const baseType = paramType
+    .replace(/\[\]$/, "")
+    .replace(/<.*>/, "")
+    .replace(/\s*\|.*/, "") // Take first type in union
+    .trim();
+
+  const fields = interfaces.get(baseType);
+  if (!fields) return "";
+  return `  ${baseType} = {\n${fields}\n  }`;
 }

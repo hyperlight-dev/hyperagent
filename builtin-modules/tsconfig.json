@@ -15,7 +15,10 @@
     "typeRoots": ["src/types"],
     "baseUrl": ".",
     "paths": {
+      "ha:doc-core": ["./src/doc-core.ts"],
       "ha:ooxml-core": ["./src/ooxml-core.ts"],
+      "ha:pdf": ["./src/pdf.ts"],
+      "ha:pdf-charts": ["./src/pdf-charts.ts"],
       "ha:xml-escape": ["./src/xml-escape.ts"],
       "ha:crc32": ["./src/crc32.ts"],
       "ha:str-bytes": ["./src/str-bytes.ts"],

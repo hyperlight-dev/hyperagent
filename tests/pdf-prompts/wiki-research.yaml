@@ -1,0 +1,35 @@
+# Research from Wikipedia — tests fetch + document generation
+name: wiki-research
+description: Fetch Wikipedia data about a historical topic and create an educational report
+skill: pdf-expert
+profiles: web-research file-builder
+timeout: 300
+allowed_domains: en.wikipedia.org
+expected_file: space-report.pdf
+expected_min_pages: 2
+expected_content:
+  - Apollo
+  - NASA
+prompt: |
+  Research the Apollo space program using Wikipedia and create an educational report PDF.
+
+  Steps:
+  1. Fetch the Wikipedia summary: https://en.wikipedia.org/api/rest_v1/page/summary/Apollo_program
+  2. Fetch a second summary: https://en.wikipedia.org/api/rest_v1/page/summary/Apollo_11
+  3. Create a report:
+     - Title page: "The Apollo Program — A Historical Overview"
+     - Introduction: 2-3 paragraphs based on the Apollo program summary
+     - Apollo 11 section: 2 paragraphs about the first Moon landing from the fetched data
+     - Key Missions table:
+       | Mission | Year | Achievement |
+       | Apollo 7 | 1968 | First crewed Apollo flight |
+       | Apollo 8 | 1968 | First lunar orbit |
+       | Apollo 11 | 1969 | First Moon landing |
+       | Apollo 13 | 1970 | Successful failure — safe return |
+       | Apollo 17 | 1972 | Last Moon mission |
+     - Legacy section: paragraph about the program's lasting impact
+     - A quote from Neil Armstrong: "That's one small step for man, one giant leap for mankind."
+     - References section citing Wikipedia sources
+
+  Save as space-report.pdf. Use "light-clean" theme. Add page numbers.
+

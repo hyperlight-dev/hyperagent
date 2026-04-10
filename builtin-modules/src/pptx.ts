@@ -31,16 +31,9 @@
 //
 
 import {
-  inches,
-  fontSize,
   hexColor,
   getTheme,
   getThemeNames,
-  contentTypesXml,
-  relsXml,
-  themeXml,
-  SLIDE_WIDTH,
-  SLIDE_HEIGHT,
   autoTextColor,
   isDark,
   requireHex,
@@ -51,6 +44,16 @@ import {
   requireEnum,
   THEMES,
   contrastRatio,
+  type Theme,
+} from "ha:doc-core";
+import {
+  inches,
+  fontSize,
+  contentTypesXml,
+  relsXml,
+  themeXml,
+  SLIDE_WIDTH,
+  SLIDE_HEIGHT,
   nextShapeId,
   nextShapeIdAndName,
   resetShapeIdCounter,
@@ -62,7 +65,6 @@ import {
   isShapeFragment,
   fragmentsToXml,
   type ShapeFragment,
-  type Theme,
 } from "ha:ooxml-core";
 import { escapeXml } from "ha:xml-escape";
 import { createZip } from "ha:zip-format";

@@ -3,8 +3,8 @@
   "description": "Styled tables for PPTX presentations - headers, borders, alternating rows",
   "author": "system",
   "mutable": false,
-  "sourceHash": "sha256:2d58934ed7df9fe1",
-  "dtsHash": "sha256:3ba75bbc44353467",
+  "sourceHash": "sha256:2fd1b0318ee87ab2",
+  "dtsHash": "sha256:130d021921083af6",
   "importStyle": "named",
   "hints": {
     "overview": "Table generation for PPTX. Always used with ha:pptx.",

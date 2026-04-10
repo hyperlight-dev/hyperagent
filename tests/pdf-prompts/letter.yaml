@@ -1,0 +1,28 @@
+# Formal business letter — tests simple text layout, letterhead
+name: letter
+description: Formal business letter with letterhead styling
+skill: pdf-expert
+profiles: file-builder
+timeout: 150
+expected_file: business-letter.pdf
+expected_min_pages: 1
+expected_content:
+  - Dear
+  - Sincerely
+prompt: |
+  Create a formal business letter PDF from "GlobalTech Innovations" to a prospective client.
+
+  Letterhead:
+  - Company: GlobalTech Innovations
+  - Address: 789 Innovation Drive, Suite 400, Austin, TX 78701
+  - Phone: (512) 555-0199 | Email: partnerships@globaltech.io
+
+  Letter content:
+  - Date: April 15, 2026
+  - To: Ms. Rachel Torres, VP of Engineering, Meridian Systems, 456 Enterprise Blvd, Seattle, WA 98101
+  - Subject: Partnership Proposal — Cloud Migration Services
+  - Body: 3 paragraphs proposing a strategic partnership for cloud migration services. Mention your team's expertise, successful track record (50+ enterprise migrations), and competitive pricing. Close with a call to action for a meeting.
+  - Closing: Sincerely, James Morrison, Director of Business Development
+
+  Save as business-letter.pdf. Use "light-clean" theme. Single page.
+

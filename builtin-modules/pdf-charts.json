@@ -1,0 +1,30 @@
+{
+  "name": "pdf-charts",
+  "description": "Chart rendering for PDF documents — bar, line, pie, combo charts as PDF drawing operations.",
+  "author": "system",
+  "mutable": false,
+  "sourceHash": "sha256:01ef4a209a1ba6a8",
+  "dtsHash": "sha256:00e20890fe9ff7cc",
+  "importStyle": "named",
+  "hints": {
+    "overview": "Render bar, line, pie, and combo charts in PDF documents. Charts are returned as PdfElement objects for use with addContent(). All chart values must be finite numbers.",
+    "relatedModules": [
+      "ha:pdf",
+      "ha:doc-core"
+    ],
+    "criticalRules": [
+      "series.name is REQUIRED for all chart data series",
+      "All values must be finite numbers — not null, undefined, NaN, or strings",
+      "series.values.length must equal categories.length for bar/line/combo charts",
+      "pieChart: labels.length must equal values.length",
+      "Maximum 24 series per chart, 100 categories, 100 pie slices"
+    ],
+    "antiPatterns": [
+      "Don't pass empty categories or series arrays",
+      "Don't mix up pieChart (labels + values) with barChart/lineChart (categories + series)"
+    ],
+    "commonPatterns": [
+      "import { barChart } from 'ha:pdf-charts'; addContent(doc, [barChart({ categories: ['Q1','Q2'], series: [{ name: 'Rev', values: [100,200] }] })]);"
+    ]
+  }
+}

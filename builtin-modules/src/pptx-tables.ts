@@ -12,18 +12,20 @@
 //   Style overrides always take precedence over theme-computed values.
 
 import {
-  inches,
-  fontSize,
   hexColor,
   requireHex,
   requireArray,
   requireNumber,
   isDark,
+  type Theme,
+} from "ha:doc-core";
+import {
+  inches,
+  fontSize,
   nextShapeId,
   isForceAllColors,
   _createShapeFragment,
   type ShapeFragment,
-  type Theme,
 } from "ha:ooxml-core";
 import { escapeXml } from "ha:xml-escape";
 

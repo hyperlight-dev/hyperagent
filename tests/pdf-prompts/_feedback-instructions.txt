@@ -1,0 +1,44 @@
+You have COMPLETED the document generation task above. The file has been saved successfully.
+
+NOW provide structured feedback about the generation experience. This feedback will be used
+to improve the document generation modules, skills, and patterns. Be honest and specific.
+
+Output the following JSON directly in your response (NOT via a handler — just paste it as text):
+
+```json
+{
+  "feedback": {
+    "what_worked": [
+      "List specific ha:pdf / ha:pptx API functions that worked well and why"
+    ],
+    "what_was_hard": [
+      "List specific difficulties, confusing APIs, misleading error messages",
+      "Include any function calls that failed and what the error said"
+    ],
+    "api_improvements": [
+      "Concrete suggestions: 'Add X parameter to Y function because Z'",
+      "Be specific about function names and what they should do differently"
+    ],
+    "skill_improvements": [
+      "What was missing or unclear in the SKILL.md instructions",
+      "What examples would have helped"
+    ],
+    "missing_features": [
+      "Features you wished existed but had to work around",
+      "Be specific: 'A twoColumn() flow element for side-by-side layout'"
+    ],
+    "errors_encountered": [
+      "List every runtime error you hit, with the exact error message",
+      "Include what you tried and how you fixed/worked around it"
+    ],
+    "generation_notes": "Any other observations about the generation process, performance, or output quality"
+  }
+}
+```
+
+RULES:
+- This feedback MUST be the LAST thing you do — the document MUST already be saved
+- Do NOT give yourself a quality score — that's determined by automated validation
+- Do NOT be nice — honest critical feedback is more valuable than praise
+- Include EVERY error you encountered, even ones you recovered from
+- Be specific about function names, parameter names, and error messages

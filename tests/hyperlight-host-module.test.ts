@@ -39,6 +39,7 @@ const PPTX_MODULES = [
   "crc32",
   "xml-escape",
   "zip-format",
+  "doc-core",
   "ooxml-core",
   "pptx-charts",
   "pptx-tables",

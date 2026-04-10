@@ -1,0 +1,37 @@
+{
+  "name": "pdf",
+  "description": "PDF 1.7 document generation — text, graphics, metadata, standard fonts. Flow-based layout for auto-paginating documents.",
+  "author": "system",
+  "mutable": false,
+  "sourceHash": "sha256:9db72c1b3055c1e2",
+  "dtsHash": "sha256:d563fc2187b6cefd",
+  "importStyle": "named",
+  "hints": {
+    "overview": "Generate PDF documents with text, shapes, and metadata. Uses PDF's 14 standard fonts (no embedding required). Coordinates are in points (72 points = 1 inch), with top-left origin.",
+    "relatedModules": [
+      "ha:doc-core",
+      "ha:pdf-charts"
+    ],
+    "requiredPlugins": [
+      "fs-write"
+    ],
+    "criticalRules": [
+      "Call doc.addPage() before any drawing operations",
+      "All coordinates are in POINTS (72 points = 1 inch) from TOP-LEFT corner",
+      "Colours must be 6-char hex without # (e.g. '2196F3' not '#2196F3')",
+      "Use exportToFile(doc, path, fsWrite) to save — requires host:fs-write plugin",
+      "Use doc.buildPdf() to get raw bytes as Uint8Array",
+      "TABLE_STYLES available: 'default', 'dark', 'minimal', 'corporate', 'emerald'",
+      "Use columnAlign on table() to right-align numeric columns: columnAlign: ['left','center','right','right']",
+      "kvTable values are RIGHT-ALIGNED by default — good for financial data"
+    ],
+    "antiPatterns": [
+      "Don't write raw PDF operators — use doc.drawText(), doc.drawRect(), etc.",
+      "Don't assume bottom-left origin — the API uses top-left (like screens)",
+      "Don't embed custom fonts (not yet supported) — use standard 14 fonts"
+    ],
+    "commonPatterns": [
+      "const doc = createDocument({ theme: 'light-clean', pageSize: 'a4' }); doc.addPage(); doc.drawText('Hello', 72, 72); exportToFile(doc, 'out.pdf', fsWrite);"
+    ]
+  }
+}
