@@ -26,7 +26,7 @@ regex-automata = { version = "0.4", default-features = false, features = ["alloc
 nom = { version = "8.0", default-features = false, features = ["alloc"] }
 spin = "0.10"
 rquickjs = { version = "0.11", default-features = false, features = ["bindgen", "loader"] }
-hashbrown = "0.16"
+hashbrown = "0.17"
 sha2 = { version = "0.11", default-features = false }
 
 [target.'cfg(hyperlight)'.dependencies]
