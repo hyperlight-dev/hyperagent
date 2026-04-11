@@ -2723,15 +2723,26 @@ export function addContent(
         const lineHeight = 1.3;
 
         // Headings must NOT be orphaned at page bottom. Peek at the next
-        // element and ensure enough space for the heading PLUS a meaningful
+        // element(s) and ensure enough space for the heading PLUS a meaningful
         // portion of the following content. This prevents headings landing
         // at the bottom of a page with the chart/table on the next page.
+        //
+        // For h1 (section titles), look TWO elements ahead because h1 is
+        // often followed by h2 + chart/table. Without this, the h1 lands
+        // at the bottom of a page and the h2+chart move to the next page,
+        // leaving the h1 orphaned with massive whitespace below.
         const headingHeight =
           spaceBefore + lines.length * fontSize * lineHeight + spaceAfter;
-        const nextEl = elIdx + 1 < elements.length ? elements[elIdx + 1] : null;
-        const followingHeight = nextEl
-          ? estimateNextElementHeight(nextEl as PdfElement)
-          : 30;
+        let followingHeight = 0;
+        const lookahead = d.level === 1 ? 2 : 1;
+        for (let peek = 1; peek <= lookahead; peek++) {
+          const peekEl = elIdx + peek < elements.length ? elements[elIdx + peek] : null;
+          if (peekEl) {
+            followingHeight += estimateNextElementHeight(peekEl as PdfElement);
+          }
+        }
+        // Minimum: at least 100pt of following content for any heading
+        followingHeight = Math.max(followingHeight, 100);
         const minNeeded = headingHeight + followingHeight;
         cursorY += spaceBefore;
         ensureSpace(minNeeded);
