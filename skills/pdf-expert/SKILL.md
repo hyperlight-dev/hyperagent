@@ -277,6 +277,50 @@ Use themes from ha:doc-core (same as PPTX):
 - barChart/lineChart: `series.values.length` must equal `categories.length`
 - comparisonTable: each option's `values` array must match `features.length`
 
+## Document Quality Standards — MANDATORY
+
+A professional document is NOT a dump of raw data. Every document must tell a story.
+
+### Structure Rules
+- **Every document starts with a title** — use `heading({ text, level: 1 })` or `titlePage()`
+- **Every section has a heading** — `heading({ text, level: 2 })` before each logical section
+- **Charts NEVER appear alone** — every chart MUST be preceded by a heading and followed by a paragraph interpreting the data (key insights, trends, takeaways)
+- **Tables NEVER appear alone** — introduce each table with context explaining what it shows
+- **Use spacers between sections** — `spacer(12)` or `rule()` to visually separate content
+
+### Content Rules
+- **Add narrative text** — explain what the data means, don't just show numbers
+- **Highlight key findings** — call out important values, trends, or anomalies
+- **Use bullet lists for summaries** — after a chart/table, summarize the 2-3 key takeaways
+- **Include footer and page numbers** — `addFooter()` and `addPageNumbers()` for all multi-page docs
+
+### Quality Checklist (apply before finalising)
+1. Does the document have a clear title?
+2. Does every chart have a heading AND interpretation paragraph?
+3. Are numeric values given context (comparison, % change, trend direction)?
+4. Would a reader understand the data without the original request?
+5. Is there a logical flow from section to section?
+
+### Example: GOOD vs BAD
+
+**BAD** (chart dumped on empty page):
+```javascript
+addContent(doc, [
+  pieChart({ labels: [...], values: [...], title: "Revenue" }),
+]);
+```
+
+**GOOD** (chart with context, heading, interpretation):
+```javascript
+addContent(doc, [
+  heading({ text: "Revenue Breakdown by Category", level: 2 }),
+  paragraph({ text: "Electronics continues to dominate revenue at 42%, driven by strong Q1 demand for smartphones and accessories. Clothing grew 3% quarter-over-quarter, while Home & Garden remained stable." }),
+  pieChart({ labels: [...], values: [...], title: "Revenue by Category" }),
+  paragraph({ text: "Key takeaway: The Electronics segment accounts for nearly half of all revenue. Consider diversifying to reduce concentration risk." }),
+  spacer(12),
+]);
+```
+
 ## Build Pipeline
 
 ```javascript
