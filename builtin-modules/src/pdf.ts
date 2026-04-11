@@ -3508,10 +3508,10 @@ export function richText(opts: RichTextOptions): PdfElement {
 
   for (let i = 0; i < paragraphs.length; i++) {
     const para = paragraphs[i];
-    // Accept "spans" as alias for "runs" (LLMs use both interchangeably)
-    if (!para.runs && (para as unknown as Record<string, unknown>).spans) {
-      para.runs = (para as unknown as Record<string, unknown>)
-        .spans as TextRun[];
+    // Accept "spans" or "segments" as aliases for "runs" (LLMs use all three)
+    const paraAny = para as unknown as Record<string, unknown>;
+    if (!para.runs && (paraAny.spans || paraAny.segments)) {
+      para.runs = (paraAny.spans ?? paraAny.segments) as TextRun[];
     }
     // Validate runs exist and are an array
     if (!Array.isArray(para.runs)) {
