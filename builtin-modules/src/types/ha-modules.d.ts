@@ -637,6 +637,13 @@ declare module "ha:pdf" {
       font?: string;
       /** Text colour as 6-char hex (no #). Uses theme foreground if omitted. */
       color?: string;
+      /**
+       * Text alignment relative to the X position.
+       * 'left' (default): X is the left edge.
+       * 'center': X is the center point — text extends equally left and right.
+       * 'right': X is the right edge — text extends left from X.
+       */
+      align?: "left" | "center" | "right";
   }
   /** Options for drawRect(). */
   export interface DrawRectOptions {
@@ -1131,8 +1138,11 @@ declare module "ha:pdf" {
    * @param doc - PdfDocument to add content to
    * @param elements - Array of PdfElement objects from builder functions
    * @param opts - Optional margins
+   * @returns { lastY: number } — the Y position (in points from top) after the last element
    */
-  export declare function addContent(doc: PdfDocument, elements: PdfElement[], opts?: AddContentOptions): void;
+  export declare function addContent(doc: PdfDocument, elements: PdfElement[], opts?: AddContentOptions): {
+      lastY: number;
+  };
   /** A single run of text with optional formatting. */
   export interface TextRun {
       /** Text content. */

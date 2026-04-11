@@ -740,6 +740,13 @@ export interface DrawTextOptions {
   font?: string;
   /** Text colour as 6-char hex (no #). Uses theme foreground if omitted. */
   color?: string;
+  /**
+   * Text alignment relative to the X position.
+   * 'left' (default): X is the left edge.
+   * 'center': X is the center point — text extends equally left and right.
+   * 'right': X is the right edge — text extends left from X.
+   */
+  align?: "left" | "center" | "right";
 }
 
 /** Options for drawRect(). */
@@ -947,8 +954,18 @@ export function createDocument(opts?: DocumentOptions): PdfDocument {
         colorRgb = hexToRgb(theme.fg);
       }
 
+      // Apply alignment — adjust X based on text width
+      let drawX = x;
+      if (opts?.align === "center") {
+        const textW = measureText(text, fontName, fs);
+        drawX = x - textW / 2;
+      } else if (opts?.align === "right") {
+        const textW = measureText(text, fontName, fs);
+        drawX = x - textW;
+      }
+
       const pdfY = convertY(y, page.size.height);
-      page.contentOps.push(textOp(text, x, pdfY, fontRef, fs, colorRgb));
+      page.contentOps.push(textOp(text, drawX, pdfY, fontRef, fs, colorRgb));
 
       // Track cursor — advance below this text
       const textBottom = y + fs;
@@ -2494,12 +2511,13 @@ export interface AddContentOptions {
  * @param doc - PdfDocument to add content to
  * @param elements - Array of PdfElement objects from builder functions
  * @param opts - Optional margins
+ * @returns { lastY: number } — the Y position (in points from top) after the last element
  */
 export function addContent(
   doc: PdfDocument,
   elements: PdfElement[],
   opts?: AddContentOptions,
-): void {
+): { lastY: number } {
   const margins: Margins = {
     ...DEFAULT_MARGINS,
     ...opts?.margins,
@@ -3394,6 +3412,9 @@ export function addContent(
       lastPage.cursorY = cursorY;
     }
   }
+
+  // Return the final Y position so callers can continue drawing below
+  return { lastY: cursorY };
 }
 
 // ── Rich Text & Code Block Elements ──────────────────────────────────
