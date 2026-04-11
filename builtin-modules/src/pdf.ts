@@ -38,6 +38,56 @@ import {
 } from "ha:doc-core";
 import { deflate } from "ha:ziplib";
 
+// ── Zlib Wrapper ─────────────────────────────────────────────────────
+// ha:ziplib produces raw DEFLATE (RFC 1951) which is correct for ZIP
+// archives. But PDF's FlateDecode expects zlib format (RFC 1950):
+// 2-byte header + raw DEFLATE + 4-byte Adler32 checksum.
+// This wrapper converts raw DEFLATE to zlib format for PDF streams.
+
+/**
+ * Compute Adler32 checksum of uncompressed data.
+ * Used for the zlib trailer in FlateDecode streams.
+ */
+function adler32(data: Uint8Array): number {
+  let a = 1;
+  let b = 0;
+  for (let i = 0; i < data.length; i++) {
+    a = (a + data[i]) % 65521;
+    b = (b + a) % 65521;
+  }
+  return (b << 16) | a;
+}
+
+/**
+ * Wrap raw DEFLATE data in zlib format for PDF FlateDecode.
+ * Adds 2-byte zlib header (CM=8, CINFO=7, no dict, FLEVEL=0)
+ * and 4-byte Adler32 checksum of the UNCOMPRESSED data.
+ *
+ * @param rawDeflate - Raw DEFLATE compressed data from ha:ziplib
+ * @param uncompressed - Original uncompressed data (needed for Adler32)
+ * @returns Zlib-wrapped data suitable for PDF /FlateDecode
+ */
+function wrapZlib(
+  rawDeflate: Uint8Array,
+  uncompressed: Uint8Array,
+): Uint8Array {
+  const checksum = adler32(uncompressed);
+  // Zlib header: CMF=0x78 (CM=8 deflate, CINFO=7 = 32K window)
+  //              FLG=0x01 (FCHECK makes CMF*256+FLG divisible by 31)
+  // 0x78 * 256 + 0x01 = 30721. 30721 % 31 = 0. ✓
+  const result = new Uint8Array(2 + rawDeflate.length + 4);
+  result[0] = 0x78; // CMF
+  result[1] = 0x01; // FLG
+  result.set(rawDeflate, 2);
+  // Adler32 in big-endian
+  const off = 2 + rawDeflate.length;
+  result[off] = (checksum >> 24) & 0xff;
+  result[off + 1] = (checksum >> 16) & 0xff;
+  result[off + 2] = (checksum >> 8) & 0xff;
+  result[off + 3] = checksum & 0xff;
+  return result;
+}
+
 // ── Constants ────────────────────────────────────────────────────────
 
 /** Points per inch (PDF base unit). */
@@ -1221,7 +1271,9 @@ function buildPdfBytes(
     let streamBytes: Uint8Array;
     let filterEntry = "";
     if (!debug && rawStreamBytes.length > 0) {
-      const compressed = deflate(rawStreamBytes);
+      const rawCompressed = deflate(rawStreamBytes);
+      // Wrap raw DEFLATE in zlib format for PDF FlateDecode compliance
+      const compressed = wrapZlib(rawCompressed, rawStreamBytes);
       // Only use compression if it actually saves space
       if (compressed.length < rawStreamBytes.length) {
         streamBytes = compressed;
@@ -1298,26 +1350,29 @@ function buildPdfBytes(
   }
 
   // ── Cross-reference table ──
+  // Use actual max object number (not pre-calculated totalObjects) to avoid
+  // gap entries that stricter PDF parsers (like pdf.js/pdf-parse) reject.
+  const maxObjNum = Math.max(...objects.map((o) => o.num));
   const xrefStart = currentOffset;
   const xrefLines: string[] = [];
   xrefLines.push(`xref${NL}`);
-  xrefLines.push(`0 ${totalObjects + 1}${NL}`);
+  xrefLines.push(`0 ${maxObjNum + 1}${NL}`);
   // Object 0 is always free
-  xrefLines.push(`0000000000 65535 f \r\n`);
-  for (let i = 1; i <= totalObjects; i++) {
+  xrefLines.push(`0000000000 65535 f\r\n`);
+  for (let i = 1; i <= maxObjNum; i++) {
     const off = offsets.get(i);
     if (off != null) {
-      xrefLines.push(`${off.toString().padStart(10, "0")} 00000 n \r\n`);
+      xrefLines.push(`${off.toString().padStart(10, "0")} 00000 n\r\n`);
     } else {
       // Object not emitted (gap) — mark as free
-      xrefLines.push(`0000000000 00000 f \r\n`);
+      xrefLines.push(`0000000000 00000 f\r\n`);
     }
   }
 
   // ── Trailer ──
   const trailer =
     `trailer${NL}` +
-    `<< /Size ${totalObjects + 1} /Root 1 0 R /Info 3 0 R >>${NL}` +
+    `<< /Size ${maxObjNum + 1} /Root 1 0 R /Info 3 0 R >>${NL}` +
     `startxref${NL}` +
     `${xrefStart}${NL}` +
     `%%EOF${NL}`;

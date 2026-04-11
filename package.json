@@ -39,6 +39,9 @@
   "devDependencies": {
     "@types/node": "^25.3.3",
     "@xarsh/ooxml-validator": "^0.1.10",
+    "pdf-parse": "^1.1.1",
+    "pixelmatch": "^7.1.0",
+    "pngjs": "^7.0.0",
     "prettier": "^3.8.1",
     "tsx": "^4.0.0",
     "typescript": "^5.8.0",
