@@ -2741,8 +2741,8 @@ export function addContent(
             followingHeight += estimateNextElementHeight(peekEl as PdfElement);
           }
         }
-        // Minimum: at least 100pt of following content for any heading
-        followingHeight = Math.max(followingHeight, 100);
+        // Fallback: if no next element, require at least one body line
+        if (followingHeight === 0) followingHeight = 20;
         const minNeeded = headingHeight + followingHeight;
         cursorY += spaceBefore;
         ensureSpace(minNeeded);

@@ -125,9 +125,19 @@ function validateValues(values: unknown[], paramName: string): number[] {
 
 /**
  * Calculate nice Y-axis tick values for a given data range.
- * Returns 5-7 evenly spaced values that include 0 and cover the data range.
+ * Returns evenly spaced values that include 0 and cover the data range.
+ * The number of ticks adapts to the available plot height to prevent
+ * overlapping labels on small charts.
+ *
+ * @param minVal - Minimum data value
+ * @param maxVal - Maximum data value
+ * @param plotHeight - Available plot height in points (optional, defaults to 200)
  */
-function niceAxisTicks(minVal: number, maxVal: number): number[] {
+function niceAxisTicks(
+  minVal: number,
+  maxVal: number,
+  plotHeight?: number,
+): number[] {
   if (minVal === maxVal) {
     // All values are the same — create a range around it
     return minVal === 0 ? [0, 1] : [0, minVal];
@@ -138,8 +148,14 @@ function niceAxisTicks(minVal: number, maxVal: number): number[] {
   const hi = Math.max(0, maxVal);
   const range = hi - lo;
 
+  // Adapt tick count to chart height — each tick label needs ~18pt
+  // (8pt font + 10pt gap) to avoid overlapping
+  const MIN_PT_PER_TICK = 18;
+  const availableHeight = plotHeight ?? 200;
+  const maxTicks = Math.max(2, Math.floor(availableHeight / MIN_PT_PER_TICK));
+  const TARGET_TICKS = Math.min(5, maxTicks);
+
   // Pick a nice step size (1, 2, 5, 10, 20, 50, 100, ...)
-  const TARGET_TICKS = 5;
   const rawStep = range / TARGET_TICKS;
   const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
   const residual = rawStep / magnitude;
@@ -290,7 +306,7 @@ export function barChart(opts: BarChartOptions): PdfElement {
     }
   }
 
-  const ticks = niceAxisTicks(minVal, maxVal);
+  const ticks = niceAxisTicks(minVal, maxVal, plotH);
   const axisMin = ticks[0];
   const axisMax = ticks[ticks.length - 1];
   const axisRange = axisMax - axisMin || 1;
@@ -543,7 +559,7 @@ export function lineChart(opts: LineChartOptions): PdfElement {
     }
   }
 
-  const ticks = niceAxisTicks(minVal, maxVal);
+  const ticks = niceAxisTicks(minVal, maxVal, plotH);
   const axisMin = ticks[0];
   const axisMax = ticks[ticks.length - 1];
   const axisRange = axisMax - axisMin || 1;
@@ -1001,7 +1017,7 @@ export function comboChart(opts: ComboChartOptions): PdfElement {
     }
   }
 
-  const ticks = niceAxisTicks(minVal, maxVal);
+  const ticks = niceAxisTicks(minVal, maxVal, plotH);
   const axisMin = ticks[0];
   const axisMax = ticks[ticks.length - 1];
   const axisRange = axisMax - axisMin || 1;

@@ -3,7 +3,7 @@
   "description": "Chart rendering for PDF documents — bar, line, pie, combo charts as PDF drawing operations.",
   "author": "system",
   "mutable": false,
-  "sourceHash": "sha256:3dc4d07750ce3a7f",
+  "sourceHash": "sha256:406c61d080b74406",
   "dtsHash": "sha256:00e20890fe9ff7cc",
   "importStyle": "named",
   "hints": {
