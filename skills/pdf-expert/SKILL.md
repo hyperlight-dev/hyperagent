@@ -81,6 +81,12 @@ addContent(doc, [
 exportToFile(doc, "report.pdf", fsWrite);
 ```
 
+**Page behaviour**: `addContent()` starts on the CURRENT page. If no pages exist, it creates one.
+When content overflows, it auto-creates new pages. You can call `addContent()` multiple times —
+each call continues where the last one left off. Use `doc.addPage()` before `addContent()` only
+to force a page break between sections. Do NOT try to control exact page count — let the
+content flow naturally.
+
 **IMPORTANT**: Call `module_info("pdf", "table")` to see ALL options for any function.
 The typeDefinitions in module_info show every parameter including alignment, styles, etc.
 

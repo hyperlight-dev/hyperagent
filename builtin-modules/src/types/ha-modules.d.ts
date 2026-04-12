@@ -1294,6 +1294,8 @@ declare module "ha:pdf" {
       label: string;
       /** Accent colour for the value text as 6-char hex. Uses theme accent1 if omitted. */
       color?: string;
+      /** Trend indicator shown next to the value (e.g. "+14%", "-2.3%", "+6 pts"). Green for +, red for -. */
+      change?: string;
       /** Background colour as 6-char hex. Default: light grey "F5F5F5". Set to "" for no background. */
       bgColor?: string;
       /** Card width in points. Default: auto-sized to fit content area. */

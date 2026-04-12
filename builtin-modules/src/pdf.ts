@@ -2767,8 +2767,10 @@ export function estimateHeight(
       }
 
       case "metricCard": {
-        // Card: padding + large value (24pt) + gap + label (10pt) + padding
-        totalH += 8 + 24 + 4 + 10 + 8 + 8; // ~62pt per card
+        // Card: padding + large value (24pt) + optional change (14pt) + gap + label (10pt) + padding
+        const mc = el._data as MetricCardData;
+        const changeH = mc.change ? 14 : 0;
+        totalH += 8 + 24 + changeH + 4 + 10 + 8 + 8; // ~62-76pt per card
         break;
       }
 
@@ -3672,8 +3674,11 @@ export function addContent(
         const d = el._data as MetricCardData;
         const valueFontSize = 24;
         const labelFontSize = 10;
+        const changeFontSize = 12;
         const padding = 8;
-        const cardH = padding + valueFontSize + 4 + labelFontSize + padding;
+        const hasChange = d.change && d.change.length > 0;
+        const cardH =
+          padding + valueFontSize + (hasChange ? changeFontSize + 2 : 0) + 4 + labelFontSize + padding;
         const cardW = d.width ?? Math.min(contentWidth, 200);
 
         ensureSpace(cardH + 8);
@@ -3698,11 +3703,31 @@ export function addContent(
           },
         );
 
-        // Label text below value
+        let yAfterValue = cursorY + padding + valueFontSize;
+
+        // Change/trend indicator (green for +, red for -)
+        if (hasChange) {
+          const changeText = d.change!;
+          const isPositive = changeText.startsWith("+");
+          const isNegative = changeText.startsWith("-");
+          const changeColor = isPositive
+            ? "4CAF50" // green
+            : isNegative
+              ? "F44336" // red
+              : "757575"; // grey for neutral
+          yAfterValue += changeFontSize + 2;
+          doc.drawText(changeText, margins.left + padding, yAfterValue, {
+            font: "Helvetica-Bold",
+            fontSize: changeFontSize,
+            color: changeColor,
+          });
+        }
+
+        // Label text below value (and change if present)
         doc.drawText(
           d.label,
           margins.left + padding,
-          cursorY + padding + valueFontSize + 4 + labelFontSize,
+          yAfterValue + 4 + labelFontSize,
           {
             font: "Helvetica",
             fontSize: labelFontSize,
@@ -4056,6 +4081,7 @@ export function quote(opts: QuoteOptions): PdfElement {
 interface MetricCardData {
   value: string; // e.g. "$8.2M"
   label: string; // e.g. "Total Revenue"
+  change?: string; // e.g. "+14%" trend indicator
   color?: string; // accent colour for the value text (6-char hex)
   bgColor?: string; // background colour (6-char hex), empty = no bg
   width?: number; // explicit card width in points
@@ -4069,6 +4095,8 @@ export interface MetricCardOptions {
   label: string;
   /** Accent colour for the value text as 6-char hex. Uses theme accent1 if omitted. */
   color?: string;
+  /** Trend indicator shown next to the value (e.g. "+14%", "-2.3%", "+6 pts"). Green for +, red for -. */
+  change?: string;
   /** Background colour as 6-char hex. Default: light grey "F5F5F5". Set to "" for no background. */
   bgColor?: string;
   /** Card width in points. Default: auto-sized to fit content area. */
@@ -4089,6 +4117,7 @@ export function metricCard(opts: MetricCardOptions): PdfElement {
   const data: MetricCardData = {
     value: requireString(opts.value, "metricCard.value"),
     label: requireString(opts.label, "metricCard.label"),
+    change: opts.change,
     color: opts.color,
     bgColor: opts.bgColor ?? "F5F5F5",
     width: opts.width,
