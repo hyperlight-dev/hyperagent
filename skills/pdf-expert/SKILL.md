@@ -183,7 +183,7 @@ CRITICAL: Validate that every row has the same number of cells as headers.
   - **columnAlign**: per-column alignment array, e.g. `["left", "center", "right", "right"]` — USE THIS for numeric/currency columns
   - Also accepts `columns: [{header, width?, align?}]` syntax instead of separate headers/colWidths/columnAlign
 - `kvTable({ items: [{ key, value }], style?, keyWidth? })` — key-value pairs
-  - Also accepts `entries` instead of `items`. keyWidth > 1 = absolute points, keyWidth <= 1 = ratio.
+  - keyWidth > 1 = absolute points, keyWidth <= 1 = ratio.
 - `comparisonTable({ features, options: [{ name, values: [booleans] }], style? })` — ✓/✗ matrix
 
 **Table Styles:** `default`, `dark`, `minimal`, `corporate`, `emerald`
@@ -238,17 +238,12 @@ addContent(doc, [
 
 ## Theme Selection
 
-Use themes from ha:doc-core (same as PPTX):
+Call `describeThemes()` from `ha:doc-core` to see all available themes with descriptions
+and recommended use cases. Or call `getThemeNames()` for just the names.
 
-- `corporate-blue` — Dark blue bg, white text (default)
-- `dark-gradient` — GitHub dark, light text
-- `light-clean` — White bg, dark text (best for most documents)
-- `emerald` — Teal bg, white text
-- `sunset` — Dark red bg, white/gold text
-- `black` / `midnight` — Pure black bg
-- `brutalist` — Bold black, red accents
-
-**For documents, `light-clean` is usually the best choice.** Dark themes are better for presentations.
+**ALWAYS use `light-clean` for document content** unless the user specifically asks for a
+dark/branded theme. Dark themes (corporate-blue, emerald, etc.) render white text on dark
+page backgrounds — this works correctly but looks very different from typical documents.
 
 ## Page Sizes
 

@@ -24,7 +24,7 @@ prompt: |
      - A comparison table: Q1 2026 vs Q1 2025 for Revenue, Headcount, Customer NPS
   5. Add page numbers (skip title page) and footer "Confidential — Internal Use Only"
 
-  Save as quarterly-report.pdf. Use "corporate-blue" theme.
+  Save as quarterly-report.pdf. Use "light-clean" theme with "corporate-blue" for the title page only.
 
   IMPORTANT: After generating the PDF, return a JSON object with these fields:
   {

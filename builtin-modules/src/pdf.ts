@@ -2817,18 +2817,29 @@ export function addContent(
   const contentWidth = doc.pageSize.width - margins.left - margins.right;
   const pageBottom = doc.pageSize.height - margins.bottom;
 
+  // Access to internal page data for cursor tracking
+  const internals = doc as unknown as {
+    _getPages: () => PageData[];
+  };
+
   // Ensure we have at least one page
   if (doc.pageCount === 0) {
     doc.addPage();
+    // Fill dark theme background on first auto-created page
+    if (doc.theme.isDark) {
+      doc.drawRect(0, 0, doc.pageSize.width, doc.pageSize.height, {
+        fill: doc.theme.bg,
+      });
+      // Reset cursor — bg fill shouldn't count as content
+      const pages = internals._getPages();
+      if (pages.length > 0) pages[pages.length - 1].cursorY = 0;
+    }
   }
 
   // Read the tracked cursor position from the current page.
   // If the LLM has already drawn content (drawText, drawRect, etc.),
   // cursorY will be > 0 and we start BELOW that content.
   // If no prior content, we start at margins.top.
-  const internals = doc as unknown as {
-    _getPages: () => PageData[];
-  };
   let cursorY = margins.top;
   if (typeof internals._getPages === "function") {
     const pages = internals._getPages();
@@ -2846,6 +2857,15 @@ export function addContent(
   function ensureSpace(needed: number): void {
     if (cursorY + needed > pageBottom) {
       doc.addPage();
+      // Fill dark theme background on new pages
+      if (doc.theme.isDark) {
+        doc.drawRect(0, 0, doc.pageSize.width, doc.pageSize.height, {
+          fill: doc.theme.bg,
+        });
+        // Reset cursor — bg fill shouldn't count as content
+        const pages = internals._getPages();
+        if (pages.length > 0) pages[pages.length - 1].cursorY = 0;
+      }
       cursorY = margins.top;
     }
   }
@@ -3527,6 +3547,67 @@ export function addContent(
                   }
                 }
                 cy += bd.spaceAfter;
+                break;
+              }
+              case "richText": {
+                const rt = ce._data as RichTextData;
+                cy += rt.spaceBefore;
+                for (const para of rt.paragraphs) {
+                  const fullText = para.runs.map((r) => r.text).join("");
+                  const firstRun = para.runs[0];
+                  const rtFont = firstRun?.bold
+                    ? "Helvetica-Bold"
+                    : firstRun?.italic
+                      ? "Helvetica-Oblique"
+                      : rt.font;
+                  const rtColor = resolveColor(firstRun?.color);
+                  const rtSize = firstRun?.fontSize ?? rt.fontSize;
+                  const lns = wrapText(fullText, rtFont, rtSize, colW);
+                  for (const ln of lns) {
+                    doc.drawText(ln, colX, cy + rtSize, {
+                      font: rtFont,
+                      fontSize: rtSize,
+                      color: rtColor,
+                    });
+                    cy += rtSize * rt.lineHeight;
+                  }
+                }
+                cy += rt.spaceAfter;
+                break;
+              }
+              case "metricCard": {
+                const mc = ce._data as MetricCardData;
+                const vfs = 24;
+                const lfs = 10;
+                const pd = 8;
+                const cfs = mc.change ? 12 : 0;
+                const ch = pd + vfs + (cfs > 0 ? cfs + 2 : 0) + 4 + lfs + pd;
+                const cw = mc.width ?? Math.min(colW, 200);
+                if (mc.bgColor && mc.bgColor.length === 6) {
+                  doc.drawRect(colX, cy, cw, ch, { fill: mc.bgColor });
+                }
+                doc.drawText(mc.value, colX + pd, cy + pd + vfs, {
+                  font: "Helvetica-Bold",
+                  fontSize: vfs,
+                  color: mc.color ?? doc.theme.accent1,
+                });
+                let mcY = cy + pd + vfs;
+                if (mc.change) {
+                  mcY += 12 + 2;
+                  const isPos = mc.change.startsWith("+");
+                  const isNeg = mc.change.startsWith("-");
+                  doc.drawText(mc.change, colX + pd, mcY, {
+                    font: "Helvetica-Bold",
+                    fontSize: 12,
+                    color: isPos ? "4CAF50" : isNeg ? "F44336" : "757575",
+                  });
+                }
+                doc.drawText(mc.label, colX + pd, mcY + 4 + lfs, {
+                  font: "Helvetica",
+                  fontSize: lfs,
+                  color: resolveColor(undefined),
+                });
+                cy += ch + 8;
                 break;
               }
               default:

@@ -184,10 +184,58 @@ export function getTheme(name: string): Theme {
 
 /**
  * Get all available theme names.
- * @returns Array of valid theme names: ['corporate-blue', 'dark-gradient', 'light-clean', 'emerald', 'sunset', 'black', 'brutalist', 'midnight']
+ * @returns Array of valid theme names
  */
 export function getThemeNames(): string[] {
   return Object.keys(THEMES);
+}
+
+/** Theme description for LLM consumption. */
+interface ThemeDescription {
+  name: string;
+  bg: string;
+  fg: string;
+  isDark: boolean;
+  bestFor: string;
+}
+
+/** Human-readable descriptions of what each theme is best for. */
+const THEME_DESCRIPTIONS: Record<string, string> = {
+  "corporate-blue": "Professional dark blue — title pages, executive presentations",
+  "dark-gradient": "GitHub-style dark mode — developer docs, technical reports",
+  "light-clean": "Clean white background — documents, reports, invoices, letters, resumes (RECOMMENDED for most PDFs)",
+  emerald: "Rich teal/green — branded reports, sustainability content",
+  sunset: "Warm dark red/gold — creative, marketing materials",
+  black: "Pure black — minimal, high-contrast presentations",
+  midnight: "Pure black (alias for 'black')",
+  brutalist: "Bold black with red accents — statements, manifestos",
+};
+
+/**
+ * Get a markdown-formatted description of all available themes.
+ * Includes name, background/text colours, whether it's dark, and recommended use cases.
+ * Use this to help choose the right theme for a document.
+ *
+ * @returns Markdown string describing all themes
+ */
+export function describeThemes(): string {
+  const lines: string[] = [
+    "## Available Themes",
+    "",
+    "| Theme | Background | Text | Dark? | Best For |",
+    "|-------|-----------|------|-------|----------|",
+  ];
+  for (const name of Object.keys(THEMES)) {
+    const t = THEMES[name];
+    const desc = THEME_DESCRIPTIONS[name] ?? "";
+    lines.push(
+      `| \`${name}\` | #${t.bg} | #${t.fg} | ${t.isDark ? "Yes" : "No"} | ${desc} |`,
+    );
+  }
+  lines.push("");
+  lines.push("**For PDF documents, use `light-clean`** unless the user specifically requests a dark/branded theme.");
+  lines.push("Dark themes render white text — content pages will have dark backgrounds automatically.");
+  return lines.join("\n");
 }
 
 // ── WCAG 2.0 Contrast Utilities ──────────────────────────────────────

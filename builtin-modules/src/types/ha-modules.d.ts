@@ -100,9 +100,17 @@ declare module "ha:doc-core" {
   export declare function getTheme(name: string): Theme;
   /**
    * Get all available theme names.
-   * @returns Array of valid theme names: ['corporate-blue', 'dark-gradient', 'light-clean', 'emerald', 'sunset', 'black', 'brutalist', 'midnight']
+   * @returns Array of valid theme names
    */
   export declare function getThemeNames(): string[];
+  /**
+   * Get a markdown-formatted description of all available themes.
+   * Includes name, background/text colours, whether it's dark, and recommended use cases.
+   * Use this to help choose the right theme for a document.
+   *
+   * @returns Markdown string describing all themes
+   */
+  export declare function describeThemes(): string;
   /**
    * Calculate WCAG 2.0 relative luminance of a hex colour.
    * @param hex - 6-char hex colour (no #)
