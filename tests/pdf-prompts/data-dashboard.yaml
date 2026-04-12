@@ -5,7 +5,7 @@ skill: pdf-expert
 profiles: file-builder
 timeout: 240
 expected_file: data-dashboard.pdf
-expected_min_pages: 2
+expected_min_pages: 3
 expected_content:
   - Dashboard
   - Revenue
@@ -13,16 +13,17 @@ prompt: |
   Create a data dashboard PDF for an e-commerce company "ShopWave" with Q1 2026 metrics.
   This must be a PROFESSIONAL REPORT — not just charts dumped on pages.
   Every chart MUST have a heading above it and a paragraph below interpreting the key findings.
+  Let the content flow naturally across pages — do NOT try to force a specific page count.
 
-  Page 1 — KPI Overview:
+  Section 1 — KPI Overview:
   - Title: "ShopWave Q1 2026 Dashboard"
   - Brief executive summary paragraph (2-3 sentences) explaining overall Q1 performance
-  - Key metrics in a table: Total Revenue ($8.2M), Orders (142K), Avg Order Value ($57.75), Customer Retention (73%)
+  - Key metrics using metricCard() or kvTable: Total Revenue ($8.2M), Orders (142K), Avg Order Value ($57.75), Customer Retention (73%)
   - A paragraph interpreting the KPIs (highlight what's strong, what needs attention)
-  - A bar chart: Monthly revenue — Jan $2.4M, Feb $2.7M, Mar $3.1M
+  - A bar chart: Monthly revenue — Jan $2.4M, Feb $2.7M, Mar $3.1M (subtitle: "Values in $M")
   - A paragraph below the bar chart noting the upward trend (+29% Jan→Mar)
 
-  Page 2 — Breakdown:
+  Section 2 — Revenue & User Analysis:
   - Section heading: "Revenue & User Analysis"
   - A pie chart: Revenue by category — Electronics 42%, Clothing 28%, Home & Garden 18%, Other 12%
   - A paragraph interpreting the pie chart (Electronics dominance, growth areas)

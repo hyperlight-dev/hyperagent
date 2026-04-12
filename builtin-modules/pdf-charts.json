@@ -3,8 +3,8 @@
   "description": "Chart rendering for PDF documents — bar, line, pie, combo charts as PDF drawing operations.",
   "author": "system",
   "mutable": false,
-  "sourceHash": "sha256:406c61d080b74406",
-  "dtsHash": "sha256:dd82a2dd0632de9d",
+  "sourceHash": "sha256:b88170467caba2b1",
+  "dtsHash": "sha256:b61044c815cba0ea",
   "importStyle": "named",
   "hints": {
     "overview": "Render bar, line, pie, and combo charts in PDF documents. Charts are returned as PdfElement objects for use with addContent(). All chart values must be finite numbers.",

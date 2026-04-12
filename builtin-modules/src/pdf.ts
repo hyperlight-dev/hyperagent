@@ -33,6 +33,7 @@ import {
   requireArray,
   requireHex,
   requireNumber,
+  requireString,
   THEMES,
   type Theme,
 } from "ha:doc-core";
@@ -352,15 +353,51 @@ export function serializeValue(val: PdfValue): string {
 // ── PDF Text Escaping ────────────────────────────────────────────────
 
 /**
+ * Map Unicode code points to WinAnsiEncoding byte values.
+ * Standard 14 PDF fonts use WinAnsiEncoding, not Unicode.
+ * Characters outside Latin-1 (0x00-0xFF) that appear in WinAnsi
+ * need explicit mapping or they render as garbage.
+ */
+const UNICODE_TO_WINANSI: Record<number, number> = {
+  0x2022: 0x95, // • bullet
+  0x2013: 0x96, // – en-dash
+  0x2014: 0x97, // — em-dash
+  0x2018: 0x91, // ' left single quote
+  0x2019: 0x92, // ' right single quote / apostrophe
+  0x201c: 0x93, // " left double quote
+  0x201d: 0x94, // " right double quote
+  0x2026: 0x85, // … ellipsis
+  0x2122: 0x99, // ™ trademark
+  0x20ac: 0x80, // € euro sign
+};
+
+/**
  * Escape a string for use in a PDF text-showing operator (Tj).
- * Escapes backslash, parens, and carriage return.
+ * Escapes backslash, parens, and carriage return. Also maps common
+ * Unicode characters to WinAnsiEncoding byte values so they render
+ * correctly in standard 14 fonts.
  */
 function escapeTextString(text: string): string {
-  return text
-    .replace(/\\/g, "\\\\")
-    .replace(/\(/g, "\\(")
-    .replace(/\)/g, "\\)")
-    .replace(/\r/g, "\\r");
+  let mapped = "";
+  for (let i = 0; i < text.length; i++) {
+    const cp = text.charCodeAt(i);
+    const winAnsi = UNICODE_TO_WINANSI[cp];
+    if (winAnsi !== undefined) {
+      // Emit as octal escape for the WinAnsi byte value
+      mapped += "\\" + winAnsi.toString(8).padStart(3, "0");
+    } else if (cp === 0x5c) {
+      mapped += "\\\\"; // backslash
+    } else if (cp === 0x28) {
+      mapped += "\\("; // open paren
+    } else if (cp === 0x29) {
+      mapped += "\\)"; // close paren
+    } else if (cp === 0x0d) {
+      mapped += "\\r"; // carriage return
+    } else {
+      mapped += text[i];
+    }
+  }
+  return mapped;
 }
 
 // ── PDF Colour Helpers ───────────────────────────────────────────────
@@ -2022,6 +2059,7 @@ interface TableData {
   style: TableStyle;
   colWidths?: number[]; // optional fixed column widths in points or ratios
   columnAlign?: ("left" | "center" | "right")[]; // per-column text alignment
+  compact?: boolean; // compact mode — reduced row padding
 }
 
 interface KvTableData {
@@ -2036,7 +2074,7 @@ interface KvTableData {
 
 interface ComparisonTableData {
   features: string[];
-  options: { name: string; values: boolean[] }[];
+  options: { name: string; values: (boolean | string)[] }[];
   fontSize: number;
   style: TableStyle;
 }
@@ -2076,6 +2114,12 @@ export interface TableOptions {
    * Default: all "left".
    */
   columnAlign?: ("left" | "center" | "right")[];
+  /**
+   * Compact mode: reduces row padding for information-dense layouts.
+   * Row height drops from ~2.2x to ~1.6x fontSize.
+   * Default: false.
+   */
+  compact?: boolean;
 }
 
 /**
@@ -2151,6 +2195,7 @@ export function table(opts: TableOptions): PdfElement {
     style,
     colWidths,
     columnAlign,
+    compact: opts.compact,
   };
   return _createPdfElement("table", data);
 }
@@ -2226,8 +2271,12 @@ export function kvTable(opts: KvTableOptions): PdfElement {
 export interface ComparisonTableOptions {
   /** Feature names (row labels). */
   features: string[];
-  /** Options to compare. Each has a name and boolean values matching features. */
-  options: { name: string; values: boolean[] }[];
+  /**
+   * Options to compare. Each has a name and values matching features.
+   * Values can be booleans (rendered as Y/N) or strings (rendered as-is).
+   * This supports both feature matrices (boolean) and metric comparisons (string).
+   */
+  options: { name: string; values: (boolean | string)[] }[];
   /** Font size in points. Default: 10. */
   fontSize?: number;
   /** Table style preset name or custom TableStyle. Default: 'default'. */
@@ -2247,7 +2296,7 @@ export function comparisonTable(opts: ComparisonTableOptions): PdfElement {
     "comparisonTable.features",
     { nonEmpty: true },
   );
-  const options = requireArray<{ name: string; values: boolean[] }>(
+  const options = requireArray<{ name: string; values: (boolean | string)[] }>(
     opts.options,
     "comparisonTable.options",
     { nonEmpty: true },
@@ -2259,7 +2308,7 @@ export function comparisonTable(opts: ComparisonTableOptions): PdfElement {
       options[i].values.length !== features.length
     ) {
       throw new Error(
-        `comparisonTable.options[${i}].values: expected ${features.length} booleans ` +
+        `comparisonTable.options[${i}].values: expected ${features.length} values ` +
           `(matching features) but got ${Array.isArray(options[i].values) ? options[i].values.length : "non-array"}.`,
       );
     }
@@ -2351,8 +2400,9 @@ const CELL_PAD_V = 4;
  * Calculate the height of a table row based on font size and content.
  * Row height = fontSize + top padding + bottom padding.
  */
-function tableRowHeight(fontSize: number): number {
-  return fontSize + CELL_PAD_V * 2 + 2; // +2 for descent below baseline
+function tableRowHeight(fontSize: number, compact?: boolean): number {
+  const padV = compact ? 2 : CELL_PAD_V;
+  return fontSize + padV * 2 + 2; // +2 for descent below baseline
 }
 
 /**
@@ -2373,13 +2423,15 @@ function renderTable(
   getCursorY: () => number,
   setCursorY: (v: number) => void,
   columnAlign?: ("left" | "center" | "right")[],
+  compact?: boolean,
 ): void {
-  const rowH = tableRowHeight(fontSize);
+  const rowH = tableRowHeight(fontSize, compact);
   const headerH = rowH;
 
   // Text baseline offset within a row: top padding + font size
   // (drawText Y is the baseline position in top-left coords)
-  const textYOffset = CELL_PAD_V + fontSize;
+  const padV = compact ? 2 : CELL_PAD_V;
+  const textYOffset = padV + fontSize;
 
   /**
    * Calculate the X position for cell text based on column alignment.
@@ -2590,7 +2642,12 @@ export function estimateHeight(
         const fontSize = HEADING_SIZES[d.level] ?? 11;
         const spaceBefore = d.spaceBefore ?? (d.level <= 2 ? 16 : 10);
         const spaceAfter = d.spaceAfter ?? (d.level <= 2 ? 8 : 6);
-        const lines = wrapText(d.text, "Helvetica-Bold", fontSize, contentWidth);
+        const lines = wrapText(
+          d.text,
+          "Helvetica-Bold",
+          fontSize,
+          contentWidth,
+        );
         totalH += spaceBefore + lines.length * fontSize * 1.3 + spaceAfter;
         break;
       }
@@ -2697,10 +2754,21 @@ export function estimateHeight(
 
       case "quote": {
         const d = el._data as QuoteData;
-        const lines = wrapText(d.text, "Helvetica-Oblique", d.fontSize, contentWidth - 20);
+        const lines = wrapText(
+          d.text,
+          "Helvetica-Oblique",
+          d.fontSize,
+          contentWidth - 20,
+        );
         let qH = d.spaceBefore + lines.length * d.fontSize * d.lineHeight;
         if (d.author) qH += d.fontSize * 1.5; // author line
         totalH += qH + d.spaceAfter;
+        break;
+      }
+
+      case "metricCard": {
+        // Card: padding + large value (24pt) + gap + label (10pt) + padding
+        totalH += 8 + 24 + 4 + 10 + 8 + 8; // ~62pt per card
         break;
       }
 
@@ -2923,7 +2991,8 @@ export function addContent(
         let followingHeight = 0;
         const lookahead = d.level === 1 ? 2 : 1;
         for (let peek = 1; peek <= lookahead; peek++) {
-          const peekEl = elIdx + peek < elements.length ? elements[elIdx + peek] : null;
+          const peekEl =
+            elIdx + peek < elements.length ? elements[elIdx + peek] : null;
           if (peekEl) {
             followingHeight += estimateNextElementHeight(peekEl as PdfElement);
           }
@@ -3073,8 +3142,11 @@ export function addContent(
             contentWidth,
           );
         }
-        const totalH = tableRowHeight(d.fontSize) * (1 + d.rows.length);
-        ensureSpace(Math.min(totalH, tableRowHeight(d.fontSize) * 3)); // At least header + 2 rows must fit
+        const totalH =
+          tableRowHeight(d.fontSize, d.compact) * (1 + d.rows.length);
+        ensureSpace(
+          Math.min(totalH, tableRowHeight(d.fontSize, d.compact) * 3),
+        ); // At least header + 2 rows must fit
 
         renderTable(
           doc,
@@ -3092,6 +3164,7 @@ export function addContent(
             cursorY = v;
           },
           d.columnAlign,
+          d.compact,
         );
         cursorY += 8; // Space after table
         break;
@@ -3153,7 +3226,11 @@ export function addContent(
         const headers = ["Feature", ...d.options.map((o) => o.name)];
         const rows = d.features.map((feature, fi) => [
           feature,
-          ...d.options.map((o) => (o.values[fi] ? "\u2713" : "\u2717")),
+          ...d.options.map((o) => {
+            const v = o.values[fi];
+            // String values render as-is; booleans as Y/N
+            return typeof v === "string" ? v : v ? "Y" : "N";
+          }),
         ]);
         const colWidths = autoColumnWidths(
           headers,
@@ -3591,6 +3668,52 @@ export function addContent(
         break;
       }
 
+      case "metricCard": {
+        const d = el._data as MetricCardData;
+        const valueFontSize = 24;
+        const labelFontSize = 10;
+        const padding = 8;
+        const cardH = padding + valueFontSize + 4 + labelFontSize + padding;
+        const cardW = d.width ?? Math.min(contentWidth, 200);
+
+        ensureSpace(cardH + 8);
+
+        // Background box
+        if (d.bgColor && d.bgColor.length === 6) {
+          doc.drawRect(margins.left, cursorY, cardW, cardH, {
+            fill: d.bgColor,
+          });
+        }
+
+        // Large value text
+        const valueColor = d.color ?? doc.theme.accent1;
+        doc.drawText(
+          d.value,
+          margins.left + padding,
+          cursorY + padding + valueFontSize,
+          {
+            font: "Helvetica-Bold",
+            fontSize: valueFontSize,
+            color: valueColor,
+          },
+        );
+
+        // Label text below value
+        doc.drawText(
+          d.label,
+          margins.left + padding,
+          cursorY + padding + valueFontSize + 4 + labelFontSize,
+          {
+            font: "Helvetica",
+            fontSize: labelFontSize,
+            color: resolveColor(undefined),
+          },
+        );
+
+        cursorY += cardH + 8; // card height + gap
+        break;
+      }
+
       case "chart": {
         // Chart elements contain pre-computed drawing operations from
         // ha:pdf-charts. We translate them relative to current cursor position.
@@ -3599,12 +3722,17 @@ export function addContent(
           width: number;
           height: number;
           title?: string;
+          subtitle?: string;
         };
 
-        // Draw title above chart if provided
+        // Draw title and optional subtitle above chart
+        let chartHeaderH = 0;
         if (d.title) {
           const titleSize = 14;
-          ensureSpace(titleSize * 1.5 + d.height);
+          const subtitleSize = 10;
+          chartHeaderH = titleSize * 1.5;
+          if (d.subtitle) chartHeaderH += subtitleSize * 1.3;
+          ensureSpace(chartHeaderH + d.height);
           // drawText Y is baseline — add fontSize so cursorY = visual top
           doc.drawText(d.title, margins.left, cursorY + titleSize, {
             font: "Helvetica-Bold",
@@ -3612,6 +3740,14 @@ export function addContent(
             color: resolveColor(undefined),
           });
           cursorY += titleSize * 1.5;
+          if (d.subtitle) {
+            doc.drawText(d.subtitle, margins.left, cursorY + subtitleSize, {
+              font: "Helvetica",
+              fontSize: subtitleSize,
+              color: doc.theme.subtle,
+            });
+            cursorY += subtitleSize * 1.3;
+          }
         } else {
           ensureSpace(d.height);
         }
@@ -3630,11 +3766,16 @@ export function addContent(
               // Chart text Y is the TOP of the text (like screen coords).
               // drawText treats Y as the baseline, so we add fontSize to
               // convert from top-of-text to baseline position.
-              doc.drawText(op.text ?? "", chartX + op.x, chartY + op.y + (op.fontSize ?? 8), {
-                font: op.font,
-                fontSize: op.fontSize,
-                color: op.color,
-              });
+              doc.drawText(
+                op.text ?? "",
+                chartX + op.x,
+                chartY + op.y + (op.fontSize ?? 8),
+                {
+                  font: op.font,
+                  fontSize: op.fontSize,
+                  color: op.color,
+                },
+              );
               break;
             case "rect":
               doc.drawRect(chartX + op.x, chartY + op.y, op.w ?? 0, op.h ?? 0, {
@@ -3661,10 +3802,7 @@ export function addContent(
                 const page = pages[pages.length - 1];
                 const pageH = page.size.height;
                 const pdfPoints: Array<[number, number]> = pts.map(
-                  ([px, py]) => [
-                    chartX + px,
-                    convertY(chartY + py, pageH),
-                  ],
+                  ([px, py]) => [chartX + px, convertY(chartY + py, pageH)],
                 );
                 const fillRgb = op.fill
                   ? hexToRgb(requireHex(op.fill, "polygon.fill"))
@@ -3909,6 +4047,53 @@ export function quote(opts: QuoteOptions): PdfElement {
     spaceAfter: opts.spaceAfter ?? 12,
   };
   return _createPdfElement("quote", data);
+}
+
+// ── Metric Card Element ──────────────────────────────────────────────
+// Dashboard-style KPI card: large value + label in a coloured box.
+
+/** Internal data for a metric card. */
+interface MetricCardData {
+  value: string; // e.g. "$8.2M"
+  label: string; // e.g. "Total Revenue"
+  color?: string; // accent colour for the value text (6-char hex)
+  bgColor?: string; // background colour (6-char hex), empty = no bg
+  width?: number; // explicit card width in points
+}
+
+/** Options for metricCard(). */
+export interface MetricCardOptions {
+  /** The metric value to display prominently (e.g. "$8.2M", "142K", "73%"). */
+  value: string;
+  /** Label describing the metric (e.g. "Total Revenue", "Customer Retention"). */
+  label: string;
+  /** Accent colour for the value text as 6-char hex. Uses theme accent1 if omitted. */
+  color?: string;
+  /** Background colour as 6-char hex. Default: light grey "F5F5F5". Set to "" for no background. */
+  bgColor?: string;
+  /** Card width in points. Default: auto-sized to fit content area. */
+  width?: number;
+}
+
+/**
+ * Create a metric card element for flow layout.
+ * Renders a prominent value with a smaller label underneath, in an
+ * optional coloured box. Ideal for KPI dashboards.
+ *
+ * Use multiple metricCard() elements inside a twoColumn() for side-by-side KPIs.
+ *
+ * @param opts - Metric card options
+ * @returns PdfElement for use with addContent()
+ */
+export function metricCard(opts: MetricCardOptions): PdfElement {
+  const data: MetricCardData = {
+    value: requireString(opts.value, "metricCard.value"),
+    label: requireString(opts.label, "metricCard.label"),
+    color: opts.color,
+    bgColor: opts.bgColor ?? "F5F5F5",
+    width: opts.width,
+  };
+  return _createPdfElement("metricCard", data);
 }
 
 // ── Page Templates ───────────────────────────────────────────────────

@@ -439,6 +439,8 @@ declare module "ha:pdf-charts" {
       series: ChartSeries[];
       /** Chart title (drawn above chart). */
       title?: string;
+      /** Chart subtitle (rendered smaller below title, e.g. "Values in $M"). */
+      subtitle?: string;
       /** Chart width in points. Default: 400. */
       width?: number;
       /** Chart height in points (TOTAL including axes, legend, and padding — not just the plot area). Default: 250. In addContent, a chart title adds ~21pt on top. */
@@ -466,6 +468,8 @@ declare module "ha:pdf-charts" {
       series: ChartSeries[];
       /** Chart title. */
       title?: string;
+      /** Chart subtitle (rendered smaller below title, e.g. "Values in $M"). */
+      subtitle?: string;
       /** Chart width in points. Default: 400. */
       width?: number;
       /** Chart height in points (TOTAL including axes, legend, and padding — not just the plot area). Default: 250. In addContent, a chart title adds ~21pt on top. */
@@ -490,6 +494,8 @@ declare module "ha:pdf-charts" {
       values: number[];
       /** Chart title. */
       title?: string;
+      /** Chart subtitle (rendered smaller below title, e.g. "Values in $M"). */
+      subtitle?: string;
       /** Chart width in points. Default: 400. */
       width?: number;
       /** Chart height in points (TOTAL including axes, legend, and padding — not just the plot area). Default: 250. In addContent, a chart title adds ~21pt on top. */
@@ -521,6 +527,8 @@ declare module "ha:pdf-charts" {
       lineSeries?: ChartSeries[];
       /** Chart title. */
       title?: string;
+      /** Chart subtitle (rendered smaller below title, e.g. "Values in $M"). */
+      subtitle?: string;
       /** Chart width in points. Default: 400. */
       width?: number;
       /** Chart height in points (TOTAL including axes, legend, and padding — not just the plot area). Default: 250. In addContent, a chart title adds ~21pt on top. */
@@ -1032,6 +1040,12 @@ declare module "ha:pdf" {
        * Default: all "left".
        */
       columnAlign?: ("left" | "center" | "right")[];
+      /**
+       * Compact mode: reduces row padding for information-dense layouts.
+       * Row height drops from ~2.2x to ~1.6x fontSize.
+       * Default: false.
+       */
+      compact?: boolean;
   }
   /**
    * Create a data table element for flow layout.
@@ -1089,10 +1103,14 @@ declare module "ha:pdf" {
   export interface ComparisonTableOptions {
       /** Feature names (row labels). */
       features: string[];
-      /** Options to compare. Each has a name and boolean values matching features. */
+      /**
+       * Options to compare. Each has a name and values matching features.
+       * Values can be booleans (rendered as Y/N) or strings (rendered as-is).
+       * This supports both feature matrices (boolean) and metric comparisons (string).
+       */
       options: {
           name: string;
-          values: boolean[];
+          values: (boolean | string)[];
       }[];
       /** Font size in points. Default: 10. */
       fontSize?: number;
@@ -1268,6 +1286,30 @@ declare module "ha:pdf" {
    * @returns PdfElement for use with addContent()
    */
   export declare function quote(opts: QuoteOptions): PdfElement;
+  /** Options for metricCard(). */
+  export interface MetricCardOptions {
+      /** The metric value to display prominently (e.g. "$8.2M", "142K", "73%"). */
+      value: string;
+      /** Label describing the metric (e.g. "Total Revenue", "Customer Retention"). */
+      label: string;
+      /** Accent colour for the value text as 6-char hex. Uses theme accent1 if omitted. */
+      color?: string;
+      /** Background colour as 6-char hex. Default: light grey "F5F5F5". Set to "" for no background. */
+      bgColor?: string;
+      /** Card width in points. Default: auto-sized to fit content area. */
+      width?: number;
+  }
+  /**
+   * Create a metric card element for flow layout.
+   * Renders a prominent value with a smaller label underneath, in an
+   * optional coloured box. Ideal for KPI dashboards.
+   *
+   * Use multiple metricCard() elements inside a twoColumn() for side-by-side KPIs.
+   *
+   * @param opts - Metric card options
+   * @returns PdfElement for use with addContent()
+   */
+  export declare function metricCard(opts: MetricCardOptions): PdfElement;
   /** Options for titlePage(). */
   export interface TitlePageOptions {
       /** Document title. */

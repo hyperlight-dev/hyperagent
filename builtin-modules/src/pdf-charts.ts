@@ -207,6 +207,8 @@ export interface BarChartOptions {
   series: ChartSeries[];
   /** Chart title (drawn above chart). */
   title?: string;
+  /** Chart subtitle (rendered smaller below title, e.g. "Values in $M"). */
+  subtitle?: string;
   /** Chart width in points. Default: 400. */
   width?: number;
   /** Chart height in points (TOTAL including axes, legend, and padding — not just the plot area). Default: 250. In addContent, a chart title adds ~21pt on top. */
@@ -465,6 +467,7 @@ export function barChart(opts: BarChartOptions): PdfElement {
     width: chartW,
     height: chartH,
     title: opts.title,
+    subtitle: opts.subtitle,
   });
 }
 
@@ -478,6 +481,8 @@ export interface LineChartOptions {
   series: ChartSeries[];
   /** Chart title. */
   title?: string;
+  /** Chart subtitle (rendered smaller below title, e.g. "Values in $M"). */
+  subtitle?: string;
   /** Chart width in points. Default: 400. */
   width?: number;
   /** Chart height in points (TOTAL including axes, legend, and padding — not just the plot area). Default: 250. In addContent, a chart title adds ~21pt on top. */
@@ -703,6 +708,7 @@ export function lineChart(opts: LineChartOptions): PdfElement {
     width: chartW,
     height: chartH,
     title: opts.title,
+    subtitle: opts.subtitle,
   });
 }
 
@@ -716,6 +722,8 @@ export interface PieChartOptions {
   values: number[];
   /** Chart title. */
   title?: string;
+  /** Chart subtitle (rendered smaller below title, e.g. "Values in $M"). */
+  subtitle?: string;
   /** Chart width in points. Default: 400. */
   width?: number;
   /** Chart height in points (TOTAL including axes, legend, and padding — not just the plot area). Default: 250. In addContent, a chart title adds ~21pt on top. */
@@ -898,6 +906,7 @@ export function pieChart(opts: PieChartOptions): PdfElement {
     width: chartW,
     height: chartH,
     title: opts.title,
+    subtitle: opts.subtitle,
   });
 }
 
@@ -913,6 +922,8 @@ export interface ComboChartOptions {
   lineSeries?: ChartSeries[];
   /** Chart title. */
   title?: string;
+  /** Chart subtitle (rendered smaller below title, e.g. "Values in $M"). */
+  subtitle?: string;
   /** Chart width in points. Default: 400. */
   width?: number;
   /** Chart height in points (TOTAL including axes, legend, and padding — not just the plot area). Default: 250. In addContent, a chart title adds ~21pt on top. */
@@ -1194,5 +1205,6 @@ export function comboChart(opts: ComboChartOptions): PdfElement {
     width: chartW,
     height: chartH,
     title: opts.title,
+    subtitle: opts.subtitle,
   });
 }

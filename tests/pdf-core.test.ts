@@ -1682,7 +1682,7 @@ describe("comparisonTable()", () => {
         features: ["A", "B"],
         options: [{ name: "X", values: [true] }], // Should be 2 values
       }),
-    ).toThrow(/2 booleans/);
+    ).toThrow(/2 values/);
   });
 });
 
