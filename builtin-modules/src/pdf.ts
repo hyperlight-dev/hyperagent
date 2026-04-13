@@ -2456,6 +2456,33 @@ function renderTable(
   const textYOffset = padV + fontSize;
 
   /**
+   * Truncate text with ellipsis if it's wider than the available column width.
+   * Returns the original text if it fits, or truncated text with "..." appended.
+   */
+  function fitCellText(text: string, font: string, maxWidth: number): string {
+    const availW = maxWidth - CELL_PAD_H * 2;
+    if (availW <= 0) return "";
+    const textW = measureText(text, font, fontSize);
+    if (textW <= availW) return text;
+    // Truncate: binary search for max chars that fit with ellipsis
+    const ellipsis = "...";
+    const ellipsisW = measureText(ellipsis, font, fontSize);
+    const targetW = availW - ellipsisW;
+    if (targetW <= 0) return ellipsis;
+    let lo = 0;
+    let hi = text.length;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (measureText(text.slice(0, mid), font, fontSize) <= targetW) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return text.slice(0, lo) + ellipsis;
+  }
+
+  /**
    * Calculate the X position for cell text based on column alignment.
    * @param cellLeft - Left edge of the cell
    * @param colWidth - Width of the column
@@ -2496,14 +2523,15 @@ function renderTable(
   let cellX = x;
   for (let c = 0; c < headers.length; c++) {
     const align = columnAlign?.[c] ?? "left";
+    const headerText = fitCellText(headers[c], style.headerFont, colWidths[c]);
     const textX = cellTextX(
       cellX,
       colWidths[c],
-      headers[c],
+      headerText,
       style.headerFont,
       align,
     );
-    doc.drawText(headers[c], textX, curY + textYOffset, {
+    doc.drawText(headerText, textX, curY + textYOffset, {
       font: style.headerFont,
       fontSize,
       color: style.headerFg,
@@ -2533,14 +2561,15 @@ function renderTable(
     cellX = x;
     for (let c = 0; c < rows[r].length; c++) {
       const align = columnAlign?.[c] ?? "left";
+      const cellText = fitCellText(rows[r][c], style.bodyFont, colWidths[c]);
       const textX = cellTextX(
         cellX,
         colWidths[c],
-        rows[r][c],
+        cellText,
         style.bodyFont,
         align,
       );
-      doc.drawText(rows[r][c], textX, curY + textYOffset, {
+      doc.drawText(cellText, textX, curY + textYOffset, {
         font: style.bodyFont,
         fontSize,
         color: style.bodyFg,
