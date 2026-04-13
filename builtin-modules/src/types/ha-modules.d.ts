@@ -1213,6 +1213,8 @@ declare module "ha:pdf" {
       bold?: boolean;
       /** Italic. Default: false. */
       italic?: boolean;
+      /** Underline. Default: false. Draws a line under the text. */
+      underline?: boolean;
       /** Font size override in points. */
       fontSize?: number;
       /** Colour override as 6-char hex. */
@@ -1329,6 +1331,37 @@ declare module "ha:pdf" {
    * @returns PdfElement for use with addContent()
    */
   export declare function metricCard(opts: MetricCardOptions): PdfElement;
+  /** Options for textBlock(). */
+  export interface TextBlockOptions {
+      /** Array of text lines to render with tight spacing. */
+      lines: string[];
+      /** Font size in points. Default: 11. */
+      fontSize?: number;
+      /** Font name. Default: 'Helvetica'. */
+      font?: string;
+      /** Text colour as 6-char hex. Uses theme foreground if omitted. */
+      color?: string;
+      /** Bold. Default: false. */
+      bold?: boolean;
+      /** Line height multiplier. Default: 1.2 (tight). */
+      lineHeight?: number;
+      /** Space before block in points. Default: 0. */
+      spaceBefore?: number;
+      /** Space after block in points. Default: 8. */
+      spaceAfter?: number;
+  }
+  /**
+   * Create a compact text block for multi-line content like addresses,
+   * contact info, or any text that needs tight line spacing without
+   * individual paragraph() calls per line.
+   *
+   * @param opts - Text block options
+   * @returns PdfElement for use with addContent()
+   *
+   * @example
+   * textBlock({ lines: ["Jane Smith", "VP Engineering", "Acme Corp", "123 Main St", "City, ST 12345"] })
+   */
+  export declare function textBlock(opts: TextBlockOptions): PdfElement;
   /** Options for titlePage(). */
   export interface TitlePageOptions {
       /** Document title. */

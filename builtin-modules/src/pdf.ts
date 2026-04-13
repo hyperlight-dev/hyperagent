@@ -3730,6 +3730,7 @@ export function addContent(
           const lines = wrapText(fullText, font, fs, contentWidth);
           ensureSpace(lineSpacing);
 
+          const yBeforeRender = cursorY;
           renderLines(
             lines,
             font,
@@ -3738,6 +3739,20 @@ export function addContent(
             color,
             para.align ?? "left",
           );
+
+          // Draw underline if first run requests it
+          if (firstRun.underline) {
+            let ulY = yBeforeRender;
+            for (const line of lines) {
+              const lineW = measureText(line, font, fs);
+              const ulBottom = ulY + fs + 1; // 1pt below baseline
+              doc.drawLine(margins.left, ulBottom, margins.left + lineW, ulBottom, {
+                color: firstRun.color ?? doc.theme.fg,
+                lineWidth: 0.5,
+              });
+              ulY += lineSpacing;
+            }
+          }
         }
 
         cursorY += scaleSpacing(d.spaceAfter);
@@ -4051,6 +4066,8 @@ export interface TextRun {
   bold?: boolean;
   /** Italic. Default: false. */
   italic?: boolean;
+  /** Underline. Default: false. Draws a line under the text. */
+  underline?: boolean;
   /** Font size override in points. */
   fontSize?: number;
   /** Colour override as 6-char hex. */
@@ -4287,6 +4304,61 @@ export function metricCard(opts: MetricCardOptions): PdfElement {
     width: opts.width,
   };
   return _createPdfElement("metricCard", data);
+}
+
+// ── Text Block Element ───────────────────────────────────────────────
+// Compact multi-line text for addresses, contact info, etc.
+
+/** Options for textBlock(). */
+export interface TextBlockOptions {
+  /** Array of text lines to render with tight spacing. */
+  lines: string[];
+  /** Font size in points. Default: 11. */
+  fontSize?: number;
+  /** Font name. Default: 'Helvetica'. */
+  font?: string;
+  /** Text colour as 6-char hex. Uses theme foreground if omitted. */
+  color?: string;
+  /** Bold. Default: false. */
+  bold?: boolean;
+  /** Line height multiplier. Default: 1.2 (tight). */
+  lineHeight?: number;
+  /** Space before block in points. Default: 0. */
+  spaceBefore?: number;
+  /** Space after block in points. Default: 8. */
+  spaceAfter?: number;
+}
+
+/**
+ * Create a compact text block for multi-line content like addresses,
+ * contact info, or any text that needs tight line spacing without
+ * individual paragraph() calls per line.
+ *
+ * @param opts - Text block options
+ * @returns PdfElement for use with addContent()
+ *
+ * @example
+ * textBlock({ lines: ["Jane Smith", "VP Engineering", "Acme Corp", "123 Main St", "City, ST 12345"] })
+ */
+export function textBlock(opts: TextBlockOptions): PdfElement {
+  const fs = opts.fontSize ?? 11;
+  const font = opts.font ?? "Helvetica";
+  const lh = opts.lineHeight ?? 1.2;
+  // Render as a single paragraph with newline-joined text
+  // Using paragraph internally for consistency with flow layout
+  const data: ParagraphData = {
+    text: opts.lines.join("\n"),
+    fontSize: fs,
+    font,
+    color: opts.color,
+    bold: opts.bold ?? false,
+    italic: false,
+    align: "left",
+    lineHeight: lh,
+    spaceBefore: opts.spaceBefore ?? 0,
+    spaceAfter: opts.spaceAfter ?? 8,
+  };
+  return _createPdfElement("paragraph", data);
 }
 
 // ── Page Templates ───────────────────────────────────────────────────

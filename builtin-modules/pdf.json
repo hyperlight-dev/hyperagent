@@ -3,8 +3,8 @@
   "description": "PDF 1.7 document generation — text, graphics, metadata, standard fonts. Flow-based layout for auto-paginating documents.",
   "author": "system",
   "mutable": false,
-  "sourceHash": "sha256:b1f1f07965753e9d",
-  "dtsHash": "sha256:d34f5855ddf5ddae",
+  "sourceHash": "sha256:e8252404dfdacfa0",
+  "dtsHash": "sha256:417d116d584ee1c4",
   "importStyle": "named",
   "hints": {
     "overview": "Generate PDF documents with text, shapes, and metadata. Uses PDF's 14 standard fonts (no embedding required). Coordinates are in points (72 points = 1 inch), with top-left origin.",
