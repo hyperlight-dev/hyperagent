@@ -4570,17 +4570,22 @@ export function titlePage(doc: PdfDocument, opts: TitlePageOptions): void {
     color: theme.fg,
   });
 
-  // Subtitle
+  // Subtitle — auto-wrapped if too wide for the page
   if (opts.subtitle) {
-    const subY = titleY + titleSize * 1.6;
     const subSize = 18;
-    const subW = measureText(opts.subtitle, "Helvetica", subSize);
-    const subX = (ps.width - subW) / 2;
-    doc.drawText(opts.subtitle, subX, subY, {
-      font: "Helvetica",
-      fontSize: subSize,
-      color: theme.subtle,
-    });
+    const maxSubW = ps.width * 0.75; // max 75% of page width
+    const subLines = wrapText(opts.subtitle, "Helvetica", subSize, maxSubW);
+    let subY = titleY + titleSize * 1.6;
+    for (const line of subLines) {
+      const lineW2 = measureText(line, "Helvetica", subSize);
+      const lineX2 = (ps.width - lineW2) / 2;
+      doc.drawText(line, lineX2, subY, {
+        font: "Helvetica",
+        fontSize: subSize,
+        color: theme.subtle,
+      });
+      subY += subSize * 1.4;
+    }
   }
 
   // Accent line
