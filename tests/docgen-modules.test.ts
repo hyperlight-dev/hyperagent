@@ -729,8 +729,10 @@ describe("embedImage", () => {
     const slideRels = entries.find(
       (e: { name: string }) => e.name === "ppt/slides/_rels/slide1.xml.rels",
     );
-    expect(slideRels.data).toContain("rIdImage1");
     expect(slideRels.data).toContain("image");
+    // Image rel should use standard rId* format (not rIdImage*)
+    expect(slideRels.data).toMatch(/rId\d+/);
+    expect(slideRels.data).not.toContain("rIdImage");
     // Content type should include image
     const ct = entries.find(
       (e: { name: string }) => e.name === "[Content_Types].xml",

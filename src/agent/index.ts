@@ -1171,12 +1171,20 @@ const registerHandlerTool = defineTool("register_handler", {
     // ── Check for uninspected module imports ──────────────────────
     // Warn if the handler imports ha:* modules that the LLM hasn't
     // called module_info on. This catches guessing-without-reading.
+    // Skip trivial utility modules that have simple/obvious APIs.
+    const TRIVIAL_MODULES = new Set([
+      "shared-state",
+      "xml-escape",
+      "base64",
+      "crc32",
+      "str-bytes",
+    ]);
     const inspected: Set<string> = state.modulesInspected ?? new Set();
     const importedModules = (
       code.match(/from\s+["']ha:([^"']+)["']/g) ?? []
     ).map((m: string) => m.replace(/from\s+["']ha:/, "").replace(/["']$/, ""));
     const uninspected = importedModules.filter(
-      (m: string) => !inspected.has(m),
+      (m: string) => !inspected.has(m) && !TRIVIAL_MODULES.has(m),
     );
 
     // ── Proceed with registration ─────────────────────────────────
