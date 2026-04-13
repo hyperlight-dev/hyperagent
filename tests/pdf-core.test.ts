@@ -713,6 +713,54 @@ describe("exportToFile", () => {
   });
 });
 
+// ── Document Validation ──────────────────────────────────────────────
+
+describe("validateDocument()", () => {
+  it("should detect overlapping text", () => {
+    const doc = pdf.createDocument();
+    doc.addPage();
+    // Draw two text boxes at the same position — clear overlap
+    doc.drawText("Hello World", 72, 100, { fontSize: 24 });
+    doc.drawText("Overlapping Text", 72, 105, { fontSize: 24 });
+
+    const warnings = pdf.validateDocument(doc);
+    expect(warnings.length).toBeGreaterThan(0);
+    expect(warnings[0]).toContain("OVERLAP");
+  });
+
+  it("should detect text outside page bounds", () => {
+    const doc = pdf.createDocument();
+    doc.addPage();
+    doc.drawText("Off the left edge", -100, 100);
+
+    const warnings = pdf.validateDocument(doc);
+    expect(warnings.some((w: string) => w.includes("CLIPPED"))).toBe(true);
+  });
+
+  it("should pass for well-spaced content", () => {
+    const doc = pdf.createDocument();
+    doc.addPage();
+    doc.drawText("Line 1", 72, 100, { fontSize: 12 });
+    doc.drawText("Line 2", 72, 120, { fontSize: 12 });
+    doc.drawText("Line 3", 72, 140, { fontSize: 12 });
+
+    const warnings = pdf.validateDocument(doc);
+    expect(warnings.length).toBe(0);
+  });
+
+  it("should block exportToFile when validation fails", () => {
+    const doc = pdf.createDocument();
+    doc.addPage();
+    doc.drawText("Big text", 72, 100, { fontSize: 36 });
+    doc.drawText("Collision", 72, 105, { fontSize: 36 });
+
+    const mockFs = { writeFileBinary: () => {} };
+    expect(() => pdf.exportToFile(doc, "test.pdf", mockFs)).toThrow(
+      /LAYOUT VALIDATION FAILED/,
+    );
+  });
+});
+
 // ── Edge Cases ───────────────────────────────────────────────────────
 
 describe("edge cases", () => {

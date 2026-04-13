@@ -853,6 +853,15 @@ export interface DrawImageOptions {
 // ── Page Data ────────────────────────────────────────────────────────
 
 /** Internal page representation. */
+/** A recorded text bounding box for overlap detection. */
+interface TextBox {
+  x: number; // left edge (points, top-left coords)
+  y: number; // top edge (points, top-left coords)
+  w: number; // width
+  h: number; // height (fontSize)
+  text: string; // for error messages
+}
+
 interface PageData {
   /** Content stream operators accumulated for this page. */
   contentOps: string[];
@@ -867,6 +876,8 @@ interface PageData {
    * Starts at 0 (top of page). Default margins are applied by addContent().
    */
   cursorY: number;
+  /** Recorded text bounding boxes for overlap/bounds validation. */
+  textBoxes: TextBox[];
 }
 
 // ── PdfDocument ──────────────────────────────────────────────────────
@@ -1004,6 +1015,7 @@ export function createDocument(opts?: DocumentOptions): PdfDocument {
         size: size ?? pageSize,
         imageRefs: new Set(),
         cursorY: 0,
+        textBoxes: [],
       });
     },
 
@@ -1035,6 +1047,16 @@ export function createDocument(opts?: DocumentOptions): PdfDocument {
 
       const pdfY = convertY(y, page.size.height);
       page.contentOps.push(textOp(text, drawX, pdfY, fontRef, fs, colorRgb));
+
+      // Record bounding box for overlap/bounds validation
+      const textW = measureText(text, fontName, fs);
+      page.textBoxes.push({
+        x: drawX,
+        y: y - fs, // y is baseline, text top is y - fontSize
+        w: textW,
+        h: fs,
+        text: text.length > 40 ? text.slice(0, 37) + "..." : text,
+      });
 
       // Track cursor — advance below this text
       const textBottom = y + fs;
@@ -4833,6 +4855,7 @@ export function restoreDocument(serialized: SerializedDocument): PdfDocument {
       size: p.size,
       imageRefs: new Set(p.imageRefs),
       cursorY: p.size.height, // Assume restored pages are full
+      textBoxes: [],
     });
   }
 
@@ -4849,11 +4872,130 @@ export function restoreDocument(serialized: SerializedDocument): PdfDocument {
  * @param path - Output file path
  * @param fsWrite - The host:fs-write module
  */
+// ── Document Validation ──────────────────────────────────────────────
+// Post-render validation that catches layout problems the LLM can't see.
+// Runs automatically on buildPdf() and exportToFile().
+
+/** Overlap threshold: two text boxes overlapping by more than this fraction trigger an error. */
+const OVERLAP_THRESHOLD = 0.3; // 30% overlap = definitely wrong
+
+/** Minimum content coverage per page (excluding first/last page). */
+const MIN_CONTENT_COVERAGE = 0.15; // 15% of usable page area
+
+/**
+ * Validate the document for layout problems that produce garbage output.
+ * Checks:
+ * 1. Text-on-text overlap (two text elements rendering on top of each other)
+ * 2. Content outside page bounds (clipped/invisible text)
+ * 3. Excessive whitespace on interior pages
+ *
+ * Throws descriptive errors so the LLM knows WHAT is wrong and WHERE.
+ *
+ * @param doc - PdfDocument to validate
+ */
+export function validateDocument(doc: PdfDocument): string[] {
+  const docAny = doc as unknown as {
+    _getPages: () => PageData[];
+  };
+  if (typeof docAny._getPages !== "function") return [];
+
+  const pages = docAny._getPages();
+  const warnings: string[] = [];
+
+  for (let pi = 0; pi < pages.length; pi++) {
+    const page = pages[pi];
+    const pageNum = pi + 1;
+    const boxes = page.textBoxes;
+
+    // ── Check 1: Text overlap detection ──
+    // Compare every pair of text boxes on the same page.
+    // If two boxes overlap significantly, report it.
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i];
+        const b = boxes[j];
+
+        // Calculate overlap area
+        const overlapX = Math.max(
+          0,
+          Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x),
+        );
+        const overlapY = Math.max(
+          0,
+          Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y),
+        );
+        const overlapArea = overlapX * overlapY;
+        const smallerArea = Math.min(a.w * a.h, b.w * b.h);
+
+        if (smallerArea > 0 && overlapArea / smallerArea > OVERLAP_THRESHOLD) {
+          warnings.push(
+            `Page ${pageNum}: TEXT OVERLAP — "${a.text}" overlaps with "${b.text}" ` +
+              `at y=${a.y.toFixed(0)}..${(a.y + a.h).toFixed(0)} and y=${b.y.toFixed(0)}..${(b.y + b.h).toFixed(0)}. ` +
+              `Move elements apart or reduce font sizes to prevent overlapping text.`,
+          );
+        }
+      }
+    }
+
+    // ── Check 2: Content outside page bounds ──
+    for (const box of boxes) {
+      if (box.x < -5) {
+        warnings.push(
+          `Page ${pageNum}: TEXT CLIPPED — "${box.text}" starts at x=${box.x.toFixed(0)} which is off the left edge of the page. ` +
+            `Text will be invisible. Move it to x >= 0.`,
+        );
+      }
+      if (box.x + box.w > page.size.width + 5) {
+        warnings.push(
+          `Page ${pageNum}: TEXT CLIPPED — "${box.text}" extends to x=${(box.x + box.w).toFixed(0)} ` +
+            `which exceeds page width (${page.size.width}). Text will be cut off.`,
+        );
+      }
+      if (box.y < -5) {
+        warnings.push(
+          `Page ${pageNum}: TEXT CLIPPED — "${box.text}" is above the top of the page (y=${box.y.toFixed(0)}).`,
+        );
+      }
+      if (box.y > page.size.height + 5) {
+        warnings.push(
+          `Page ${pageNum}: TEXT CLIPPED — "${box.text}" is below the bottom of the page (y=${box.y.toFixed(0)}).`,
+        );
+      }
+    }
+
+    // ── Check 3: Excessive whitespace on interior pages ──
+    // Skip first page (may be title page) and last page (may have just takeaways)
+    if (pages.length > 2 && pi > 0 && pi < pages.length - 1) {
+      const usableHeight = page.size.height - 144; // 72pt margins top + bottom
+      const contentHeight = page.cursorY > 72 ? page.cursorY - 72 : 0;
+      const coverage = usableHeight > 0 ? contentHeight / usableHeight : 0;
+      if (coverage < MIN_CONTENT_COVERAGE && boxes.length < 3) {
+        warnings.push(
+          `Page ${pageNum}: EXCESSIVE WHITESPACE — page is ${(coverage * 100).toFixed(0)}% filled ` +
+            `(${contentHeight.toFixed(0)}pt of ${usableHeight.toFixed(0)}pt usable). ` +
+            `Consider merging content with adjacent pages to avoid nearly-empty pages.`,
+        );
+      }
+    }
+  }
+
+  return warnings;
+}
+
 export function exportToFile(
   doc: PdfDocument,
   path: string,
   fsWrite: { writeFileBinary: (path: string, data: Uint8Array) => void },
 ): void {
+  // Validate before saving — catch layout problems before they become garbage PDFs
+  const warnings = validateDocument(doc);
+  if (warnings.length > 0) {
+    throw new Error(
+      `PDF LAYOUT VALIDATION FAILED (${warnings.length} issue${warnings.length > 1 ? "s" : ""}):\n\n` +
+        warnings.map((w, i) => `  ${i + 1}. ${w}`).join("\n\n") +
+        `\n\nFix these layout issues before saving. The current output would look broken.`,
+    );
+  }
   const bytes = doc.buildPdf();
   fsWrite.writeFileBinary(path, bytes);
 }

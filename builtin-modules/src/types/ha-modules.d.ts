@@ -1489,13 +1489,17 @@ declare module "ha:pdf" {
    */
   export declare function restoreDocument(serialized: SerializedDocument): PdfDocument;
   /**
-   * Build and write a PDF document to a file using the fs-write plugin.
-   * Convenience wrapper around doc.buildPdf() + writeFileBinary().
+   * Validate the document for layout problems that produce garbage output.
+   * Checks:
+   * 1. Text-on-text overlap (two text elements rendering on top of each other)
+   * 2. Content outside page bounds (clipped/invisible text)
+   * 3. Excessive whitespace on interior pages
    *
-   * @param doc - PdfDocument to export
-   * @param path - Output file path
-   * @param fsWrite - The host:fs-write module
+   * Throws descriptive errors so the LLM knows WHAT is wrong and WHERE.
+   *
+   * @param doc - PdfDocument to validate
    */
+  export declare function validateDocument(doc: PdfDocument): string[];
   export declare function exportToFile(doc: PdfDocument, path: string, fsWrite: {
       writeFileBinary: (path: string, data: Uint8Array) => void;
   }): void;
