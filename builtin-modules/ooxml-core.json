@@ -3,8 +3,8 @@
   "description": "Shared OOXML infrastructure - units, colors, themes, Content_Types, relationships",
   "author": "system",
   "mutable": false,
-  "sourceHash": "sha256:8ba16c70de1382a9",
-  "dtsHash": "sha256:c7b5811f1d63cca9",
+  "sourceHash": "sha256:6877434f2bd79bb0",
+  "dtsHash": "sha256:79d963b9d5b1ed08",
   "importStyle": "named",
   "hints": {
     "overview": "Low-level OOXML infrastructure. Most users should use ha:pptx instead.",

@@ -275,7 +275,6 @@ declare module "ha:markdown" {
 }
 
 declare module "ha:ooxml-core" {
-  export { hexColor, type Theme, THEMES, getTheme, getThemeNames, luminance, contrastRatio, autoTextColor, isDark, requireHex, requireThemeColor, type RequireThemeColorOptions, requireNumber, type RequireNumberOptions, requireString, requireArray, type RequireArrayOptions, requireEnum, } from "ha:doc-core";
   /** EMUs per inch. */
   export declare const EMU_PER_INCH: number;
   /** EMUs per typographic point. */
@@ -419,6 +418,7 @@ declare module "ha:ooxml-core" {
    * Used by shape functions to skip contrast validation.
    */
   export declare function isForceAllColors(): boolean;
+  export {};
 }
 
 declare module "ha:pdf-charts" {
@@ -1161,6 +1161,15 @@ declare module "ha:pdf" {
   export interface AddContentOptions {
       /** Page margins. Default: 1 inch on all sides. */
       margins?: Partial<Margins>;
+      /**
+       * Maximum pages for this content. If content would exceed this,
+       * spacing (spaceBefore, spaceAfter, lineHeight) is automatically
+       * scaled down to fit. Does NOT reduce font sizes — only whitespace.
+       * Useful for single-page documents (invoices, letters, resumes).
+       *
+       * Example: `addContent(doc, elements, { maxPages: 1 })`
+       */
+      maxPages?: number;
   }
   /**
    * Estimate the total vertical height (in points) that an array of PdfElements

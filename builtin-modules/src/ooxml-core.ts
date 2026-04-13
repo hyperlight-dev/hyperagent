@@ -3,34 +3,9 @@
 // This module provides OOXML-specific utilities: EMU conversions, XML
 // generators, slide dimensions, ShapeFragment branded types, and shape
 // ID management. Format-agnostic utilities (themes, colours, validation)
-// live in ha:doc-core and are re-exported from here for compatibility.
+// live in ha:doc-core — import them directly from there.
 //
 // Hints are now in ooxml-core.json (structured metadata).
-
-// ── Re-exports from ha:doc-core ──────────────────────────────────────
-// These were extracted to ha:doc-core so PDF and other formats can share
-// them without depending on OOXML infrastructure. Re-exported here so
-// that existing code importing from ha:ooxml-core continues to work.
-export {
-  hexColor,
-  type Theme,
-  THEMES,
-  getTheme,
-  getThemeNames,
-  luminance,
-  contrastRatio,
-  autoTextColor,
-  isDark,
-  requireHex,
-  requireThemeColor,
-  type RequireThemeColorOptions,
-  requireNumber,
-  type RequireNumberOptions,
-  requireString,
-  requireArray,
-  type RequireArrayOptions,
-  requireEnum,
-} from "ha:doc-core";
 
 // Import for local use within this module (themeXml needs Theme)
 import { type Theme } from "ha:doc-core";

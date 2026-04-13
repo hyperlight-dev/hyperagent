@@ -9,7 +9,10 @@ import { describe, it, expect } from "vitest";
 
 // ── ooxml-core ───────────────────────────────────────────────────────
 
-const core = await import("../builtin-modules/ooxml-core.js");
+const core: any = await import("../builtin-modules/ooxml-core.js");
+const docCore: any = await import("../builtin-modules/doc-core.js");
+// Merge doc-core exports into core for backward-compatible test assertions
+Object.assign(core, docCore);
 
 /** Convert ShapeFragment or string to XML string for test assertions */
 const toXml = (v: unknown): string => (typeof v === "string" ? v : String(v));

@@ -14,7 +14,7 @@ import { describe, it, expect } from "vitest";
 
 // ── ooxml-core contrast utilities ────────────────────────────────────
 
-const core: any = await import("../builtin-modules/ooxml-core.js");
+const core: any = await import("../builtin-modules/doc-core.js");
 
 /** Convert ShapeFragment or string to XML string for test assertions */
 const toXml = (v: unknown): string => (typeof v === "string" ? v : String(v));

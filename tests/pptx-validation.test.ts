@@ -13,6 +13,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // ── Module imports ───────────────────────────────────────────────────
 
 const core: any = await import("../builtin-modules/ooxml-core.js");
+const docCore: any = await import("../builtin-modules/doc-core.js");
+Object.assign(core, docCore);
 const pptx: any = await import("../builtin-modules/pptx.js");
 const charts: any = await import("../builtin-modules/pptx-charts.js");
 const tables: any = await import("../builtin-modules/pptx-tables.js");

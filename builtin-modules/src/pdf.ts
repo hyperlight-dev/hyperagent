@@ -2642,6 +2642,15 @@ function autoColumnWidths(
 export interface AddContentOptions {
   /** Page margins. Default: 1 inch on all sides. */
   margins?: Partial<Margins>;
+  /**
+   * Maximum pages for this content. If content would exceed this,
+   * spacing (spaceBefore, spaceAfter, lineHeight) is automatically
+   * scaled down to fit. Does NOT reduce font sizes — only whitespace.
+   * Useful for single-page documents (invoices, letters, resumes).
+   *
+   * Example: `addContent(doc, elements, { maxPages: 1 })`
+   */
+  maxPages?: number;
 }
 
 /**
@@ -2901,6 +2910,28 @@ export function addContent(
     }
   }
 
+  // ── maxPages: auto-scale spacing to fit ──
+  // If maxPages is set, estimate total height and calculate a scale factor
+  // to reduce spacing (spaceBefore, spaceAfter, lineHeight) so content fits.
+  // Font sizes are NOT reduced — only whitespace.
+  let spacingScale = 1.0;
+  if (opts?.maxPages && opts.maxPages > 0) {
+    const usableH = pageBottom - cursorY; // remaining on current page
+    const totalAvailable = usableH + (opts.maxPages - 1) * (pageBottom - margins.top);
+    const estimated = estimateHeight(elements, { contentWidth });
+    if (estimated > totalAvailable && totalAvailable > 0) {
+      // Scale spacing down. Clamp to minimum 0.4 to avoid unreadable compression.
+      spacingScale = Math.max(0.4, totalAvailable / estimated);
+    }
+  }
+
+  /**
+   * Apply spacing scale to a value (spaceBefore, spaceAfter, etc.)
+   */
+  function scaleSpacing(value: number): number {
+    return spacingScale < 1.0 ? Math.round(value * spacingScale) : value;
+  }
+
   /**
    * Check if we need a new page. If remaining space is less than needed,
    * add a new page and reset cursor.
@@ -3020,19 +3051,19 @@ export function addContent(
         const font = resolveFont(d.font, d.bold, d.italic);
         const color = resolveColor(d.color);
         const lines = wrapText(d.text, font, d.fontSize, contentWidth);
-        const totalHeight =
-          d.spaceBefore +
-          lines.length * d.fontSize * d.lineHeight +
-          d.spaceAfter;
+        const sb = scaleSpacing(d.spaceBefore);
+        const sa = scaleSpacing(d.spaceAfter);
+        const lh = spacingScale < 1.0 ? d.lineHeight * spacingScale : d.lineHeight;
+        const totalHeight = sb + lines.length * d.fontSize * lh + sa;
 
         // Add space before
-        cursorY += d.spaceBefore;
-        ensureSpace(d.fontSize * d.lineHeight); // At least one line must fit
+        cursorY += sb;
+        ensureSpace(d.fontSize * lh); // At least one line must fit
 
-        renderLines(lines, font, d.fontSize, d.lineHeight, color, d.align);
+        renderLines(lines, font, d.fontSize, lh, color, d.align);
 
         // Add space after
-        cursorY += d.spaceAfter;
+        cursorY += sa;
         void totalHeight; // Used for future orphan/widow control
         break;
       }
@@ -3046,9 +3077,9 @@ export function addContent(
         // spaceBefore provides visual gap above the heading. Since renderLines
         // now offsets text by fontSize (so cursorY = visual top, not baseline),
         // we don't need extra ascent compensation here.
-        const spaceBefore = d.spaceBefore ?? (d.level <= 2 ? 16 : 10);
-        const spaceAfter = d.spaceAfter ?? (d.level <= 2 ? 8 : 6);
-        const lineHeight = 1.3;
+        const spaceBefore = scaleSpacing(d.spaceBefore ?? (d.level <= 2 ? 16 : 10));
+        const spaceAfter = scaleSpacing(d.spaceAfter ?? (d.level <= 2 ? 8 : 6));
+        const lineHeight = spacingScale < 1.0 ? 1.3 * spacingScale : 1.3;
 
         // Headings must NOT be orphaned at page bottom. Peek at the next
         // element(s) and ensure enough space for the heading PLUS a meaningful
@@ -3084,10 +3115,11 @@ export function addContent(
       case "bulletList": {
         const d = el._data as BulletListData;
         const color = resolveColor(d.color);
-        const lineSpacing = d.fontSize * d.lineHeight;
+        const blLh = spacingScale < 1.0 ? d.lineHeight * spacingScale : d.lineHeight;
+        const lineSpacing = d.fontSize * blLh;
         const availWidth = contentWidth - d.indent;
 
-        cursorY += d.spaceBefore;
+        cursorY += scaleSpacing(d.spaceBefore);
 
         for (const item of d.items) {
           const lines = wrapText(item, d.font, d.fontSize, availWidth);
@@ -3112,7 +3144,7 @@ export function addContent(
           }
         }
 
-        cursorY += d.spaceAfter;
+        cursorY += scaleSpacing(d.spaceAfter);
         break;
       }
 
@@ -3122,7 +3154,7 @@ export function addContent(
         const lineSpacing = d.fontSize * d.lineHeight;
         const availWidth = contentWidth - d.indent;
 
-        cursorY += d.spaceBefore;
+        cursorY += scaleSpacing(d.spaceBefore);
 
         for (let idx = 0; idx < d.items.length; idx++) {
           const item = d.items[idx];
@@ -3149,7 +3181,7 @@ export function addContent(
           }
         }
 
-        cursorY += d.spaceAfter;
+        cursorY += scaleSpacing(d.spaceAfter);
         break;
       }
 
@@ -3424,7 +3456,7 @@ export function addContent(
 
       case "twoColumn": {
         const d = el._data as TwoColumnData;
-        cursorY += d.spaceBefore;
+        cursorY += scaleSpacing(d.spaceBefore);
 
         const leftW = contentWidth * d.ratio;
         const rightW = contentWidth - leftW - d.gap;
@@ -3680,7 +3712,7 @@ export function addContent(
       case "richText": {
         const d = el._data as RichTextData;
         const lineSpacing = d.fontSize * d.lineHeight;
-        cursorY += d.spaceBefore;
+        cursorY += scaleSpacing(d.spaceBefore);
 
         for (const para of d.paragraphs) {
           // Concatenate all runs into a single string for wrapping,
@@ -3708,7 +3740,7 @@ export function addContent(
           );
         }
 
-        cursorY += d.spaceAfter;
+        cursorY += scaleSpacing(d.spaceAfter);
         break;
       }
 
@@ -3718,7 +3750,7 @@ export function addContent(
         const lineH = d.fontSize * d.lineHeight;
         const blockH = codeLines.length * lineH + d.padding * 2;
 
-        cursorY += d.spaceBefore;
+        cursorY += scaleSpacing(d.spaceBefore);
         ensureSpace(Math.min(blockH, lineH * 3 + d.padding * 2));
 
         // Background rectangle
@@ -3759,7 +3791,7 @@ export function addContent(
         const authorH = d.author ? d.fontSize * 1.4 : 0;
         const totalH = d.spaceBefore + textBlockH + authorH + d.spaceAfter;
 
-        cursorY += d.spaceBefore;
+        cursorY += scaleSpacing(d.spaceBefore);
         ensureSpace(textBlockH + authorH);
 
         // Left accent border
@@ -3797,7 +3829,7 @@ export function addContent(
           cursorY += authorH;
         }
 
-        cursorY += d.spaceAfter;
+        cursorY += scaleSpacing(d.spaceAfter);
         void totalH; // Future use
         break;
       }
