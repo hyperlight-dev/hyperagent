@@ -99,6 +99,7 @@ import {
   formatCompact,
   extractInterfaces,
   expandType,
+  resolveTypeReferences,
 } from "./format-exports.js";
 import { loadPatterns } from "./pattern-loader.js";
 import { loadSkills } from "./skill-loader.js";
@@ -3648,7 +3649,10 @@ const moduleInfoTool = defineTool("module_info", {
           `${name}.d.ts`,
         );
         const dtsContent = readFileSync(dtsPath, "utf-8");
-        const ifaces = extractInterfaces(dtsContent);
+        const rawIfaces = extractInterfaces(dtsContent);
+        // Resolve cross-references so the LLM sees all related types
+        // in a single module_info call without needing follow-up queries
+        const ifaces = resolveTypeReferences(rawIfaces);
         if (ifaces.size > 0) {
           // Format as markdown for better LLM readability
           const parts: string[] = [

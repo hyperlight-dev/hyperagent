@@ -246,3 +246,58 @@ export function expandType(
   if (!fields) return "";
   return `  ${baseType} = {\n${fields}\n  }`;
 }
+
+/**
+ * Resolve cross-references in extracted interfaces. When a field type
+ * references another interface from the same file, inline it as a
+ * "see: InterfaceName" note rather than leaving the LLM to make a
+ * separate module_info call.
+ *
+ * Modifies the map in-place — each interface's field list gets
+ * "→ see InterfaceName below" annotations and referenced interfaces
+ * are appended at the end.
+ */
+export function resolveTypeReferences(
+  interfaces: Map<string, string>,
+): Map<string, string> {
+  const resolved = new Map<string, string>();
+  const referenced = new Set<string>();
+
+  for (const [name, fields] of interfaces) {
+    const lines = fields.split("\n");
+    const enriched: string[] = [];
+    for (const line of lines) {
+      enriched.push(line);
+      // Check if the type references a known interface
+      const typeMatch = line.match(/:\s*(.+)$/);
+      if (typeMatch) {
+        const typeStr = typeMatch[1].trim();
+        // Find interface names in the type string
+        for (const [ifaceName] of interfaces) {
+          if (
+            ifaceName !== name &&
+            typeStr.includes(ifaceName) &&
+            !referenced.has(ifaceName)
+          ) {
+            referenced.add(ifaceName);
+          }
+        }
+      }
+    }
+    resolved.set(name, enriched.join("\n"));
+  }
+
+  // Append referenced interfaces that aren't top-level options
+  // (e.g. TableStyle, ChartSeries) as a "Referenced Types" section
+  // so the LLM sees them without a separate call
+  for (const refName of referenced) {
+    if (!resolved.has(refName)) {
+      const fields = interfaces.get(refName);
+      if (fields) {
+        resolved.set(refName, fields);
+      }
+    }
+  }
+
+  return resolved;
+}
