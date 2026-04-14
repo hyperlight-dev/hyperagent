@@ -1816,6 +1816,30 @@ export function heading(opts: HeadingOptions): PdfElement {
   return _createPdfElement("heading", data);
 }
 
+/**
+ * Create a section heading with a rule underneath — convenience wrapper.
+ * Returns an array of PdfElements. Spread into your elements array:
+ *   `[...sectionHeading({ text: "Summary" }), paragraph({...})]`
+ *
+ * @param opts - Section heading options (text, optional level and color)
+ * @returns Array of PdfElements (heading + rule)
+ */
+export function sectionHeading(opts: {
+  text: string;
+  level?: number;
+  color?: string;
+}): PdfElement[] {
+  return [
+    heading({
+      text: opts.text,
+      level: opts.level ?? 2,
+      color: opts.color,
+      spaceAfter: 4,
+    }),
+    rule({ marginTop: 0, marginBottom: 8, thickness: 0.75 }),
+  ];
+}
+
 /** Options for bulletList(). */
 export interface BulletListOptions {
   /** List items (strings). */
@@ -2146,6 +2170,7 @@ interface TableData {
   colWidths?: number[]; // optional fixed column widths in points or ratios
   columnAlign?: ("left" | "center" | "right")[]; // per-column text alignment
   compact?: boolean; // compact mode — reduced row padding
+  footerRow?: string[]; // optional bold footer/totals row
 }
 
 interface KvTableData {
@@ -2216,6 +2241,12 @@ export interface TableOptions {
    * Default: false.
    */
   compact?: boolean;
+  /**
+   * Optional footer/totals row rendered with bold styling and a thicker
+   * top border. Common for invoice totals, summary rows.
+   * Must have the same number of cells as headers.
+   */
+  footerRow?: string[];
 }
 
 /**
@@ -2292,6 +2323,7 @@ export function table(opts: TableOptions): PdfElement {
     colWidths,
     columnAlign,
     compact: opts.compact,
+    footerRow: opts.footerRow,
   };
   return _createPdfElement("table", data);
 }
@@ -2513,6 +2545,7 @@ function renderTable(
   compact?: boolean,
   skipHeader?: boolean,
   rowBold?: boolean[],
+  footerRow?: string[],
 ): void {
   const rowH = tableRowHeight(fontSize, compact);
   const headerH = rowH;
@@ -2652,6 +2685,51 @@ function renderTable(
     }
 
     // Row bottom border
+    doc.drawLine(x, curY + rowH, x + totalWidth, curY + rowH, {
+      color: style.borderColor,
+      lineWidth: style.borderWidth,
+    });
+
+    setCursorY(curY + rowH);
+  }
+
+  // ── Footer row (bold, thicker top border) ──
+  if (footerRow && footerRow.length > 0) {
+    ensureSpace(rowH);
+    curY = getCursorY();
+
+    // Thicker border above footer
+    doc.drawLine(x, curY, x + totalWidth, curY, {
+      color: style.borderColor,
+      lineWidth: style.borderWidth * 2,
+    });
+
+    // Footer background (same as header)
+    if (style.headerBg) {
+      doc.drawRect(x, curY, totalWidth, rowH, { fill: style.headerBg });
+    }
+
+    // Footer cells in bold
+    cellX = x;
+    for (let c = 0; c < footerRow.length && c < colWidths.length; c++) {
+      const align = columnAlign?.[c] ?? "left";
+      const cellText = fitCellText(footerRow[c], style.headerFont, colWidths[c]);
+      const textX = cellTextX(
+        cellX,
+        colWidths[c],
+        cellText,
+        style.headerFont,
+        align,
+      );
+      doc.drawText(cellText, textX, curY + textYOffset, {
+        font: style.headerFont,
+        fontSize,
+        color: style.headerFg,
+      });
+      cellX += colWidths[c];
+    }
+
+    // Footer bottom border
     doc.drawLine(x, curY + rowH, x + totalWidth, curY + rowH, {
       color: style.borderColor,
       lineWidth: style.borderWidth,
@@ -3642,6 +3720,9 @@ export function addContent(
           },
           d.columnAlign,
           d.compact,
+          false, // skipHeader
+          undefined, // rowBold
+          d.footerRow,
         );
         cursorY += 8; // Space after table
         break;
@@ -4698,6 +4779,12 @@ export interface TitlePageOptions {
   author?: string;
   /** Date string. */
   date?: string;
+  /**
+   * Override the document theme for this page only.
+   * Use a theme name like 'corporate-blue', 'dark-navy', etc.
+   * The rest of the document keeps its original theme.
+   */
+  theme?: string;
 }
 
 /**
@@ -4708,7 +4795,7 @@ export interface TitlePageOptions {
  * @param opts - TitlePageOptions
  */
 export function titlePage(doc: PdfDocument, opts: TitlePageOptions): void {
-  const theme = doc.theme;
+  const theme = opts.theme ? getTheme(opts.theme) : doc.theme;
   const ps = doc.pageSize;
   doc.addPage();
 

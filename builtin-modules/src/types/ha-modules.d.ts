@@ -891,6 +891,19 @@ declare module "ha:pdf" {
    * @returns PdfElement for use with addContent()
    */
   export declare function heading(opts: HeadingOptions): PdfElement;
+  /**
+   * Create a section heading with a rule underneath — convenience wrapper.
+   * Returns an array of PdfElements. Spread into your elements array:
+   *   `[...sectionHeading({ text: "Summary" }), paragraph({...})]`
+   *
+   * @param opts - Section heading options (text, optional level and color)
+   * @returns Array of PdfElements (heading + rule)
+   */
+  export declare function sectionHeading(opts: {
+      text: string;
+      level?: number;
+      color?: string;
+  }): PdfElement[];
   /** Options for bulletList(). */
   export interface BulletListOptions {
       /** List items (strings). */
@@ -1084,6 +1097,12 @@ declare module "ha:pdf" {
        * Default: false.
        */
       compact?: boolean;
+      /**
+       * Optional footer/totals row rendered with bold styling and a thicker
+       * top border. Common for invoice totals, summary rows.
+       * Must have the same number of cells as headers.
+       */
+      footerRow?: string[];
   }
   /**
    * Create a data table element for flow layout.
@@ -1437,6 +1456,12 @@ declare module "ha:pdf" {
       author?: string;
       /** Date string. */
       date?: string;
+      /**
+       * Override the document theme for this page only.
+       * Use a theme name like 'corporate-blue', 'dark-navy', etc.
+       * The rest of the document keeps its original theme.
+       */
+      theme?: string;
   }
   /**
    * Add a title/cover page to the document.
