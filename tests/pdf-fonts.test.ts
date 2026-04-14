@@ -6,7 +6,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, writeFileSync, unlinkSync } from "fs";
+import { execSync } from "child_process";
 
 const pdf: any = await import("../builtin-modules/pdf.js");
 
@@ -292,5 +293,74 @@ describe("font subsetting", () => {
     const str = pdfToString(bytes);
     // W array should have entries for the used glyphs
     expect(str).toContain("/W [");
+  });
+});
+
+// ── pdftotext Verification ───────────────────────────────────────────
+
+describe("custom font text extraction", () => {
+  it("should render custom font text that pdftotext can extract", () => {
+    const data = loadDejaVu();
+    // Use debug: true for uncompressed streams (easier to verify)
+    const doc = pdf.createDocument({ debug: true });
+    pdf.registerCustomFont(doc, { name: "DJ", data });
+
+    doc.addPage();
+    doc.drawText("Hello World", 72, 100, { font: "DJ", fontSize: 14 });
+
+    const bytes = doc.buildPdf();
+    const tmpPath = "/tmp/test-custom-font.pdf";
+    writeFileSync(tmpPath, bytes);
+
+    try {
+      const extracted = execSync(`pdftotext ${tmpPath} -`).toString().trim();
+      // pdftotext uses the ToUnicode CMap to extract text
+      // If CMap is correct, we get the original text back
+      expect(extracted).toContain("Hello");
+    } finally {
+      try {
+        unlinkSync(tmpPath);
+      } catch {
+        /* ignore */
+      }
+    }
+  });
+
+  it("should work with compressed streams (non-debug mode)", () => {
+    const data = loadDejaVu();
+    // Non-debug = compressed streams
+    const doc = pdf.createDocument();
+    pdf.registerCustomFont(doc, { name: "DJ", data });
+
+    doc.addPage();
+    doc.drawText("Test compressed", 72, 100, { font: "DJ", fontSize: 14 });
+
+    const bytes = doc.buildPdf();
+    const tmpPath = "/tmp/test-custom-font-compressed.pdf";
+    writeFileSync(tmpPath, bytes);
+
+    try {
+      // qpdf should pass (no stream errors)
+      const qpdfResult = execSync(`qpdf --check ${tmpPath} 2>&1`).toString();
+      expect(qpdfResult).toContain("No syntax or stream encoding errors");
+
+      // pdftoppm should render (check file exists and has size)
+      execSync(
+        `pdftoppm -png -r 100 -singlefile ${tmpPath} /tmp/test-font-page`,
+      );
+      const pngStat = readFileSync("/tmp/test-font-page.png");
+      expect(pngStat.length).toBeGreaterThan(1000); // should be a real image
+    } finally {
+      try {
+        unlinkSync(tmpPath);
+      } catch {
+        /* ignore */
+      }
+      try {
+        unlinkSync("/tmp/test-font-page.png");
+      } catch {
+        /* ignore */
+      }
+    }
   });
 });

@@ -1,0 +1,47 @@
+# Custom font test — tests registerCustomFont with DejaVu Sans
+# Uses fs-read to load a system TTF font, registers it, and renders
+# multilingual text that would be impossible with standard 14 fonts.
+name: multilingual-report
+description: Multilingual report using custom TrueType font with Cyrillic and extended Latin
+skill: pdf-expert
+profiles: file-builder
+timeout: 240
+expected_file: multilingual-report.pdf
+expected_min_pages: 1
+expected_content:
+  - Multilingual
+  - Summary
+prompt: |
+  Create a PDF report demonstrating multilingual text support using a custom TrueType font.
+
+  IMPORTANT: You MUST register a custom font before using it. Follow these exact steps:
+
+  1. First, enable the fs-read plugin
+  2. Use readFileBinary to load the DejaVu Sans font from: /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+  3. Call registerCustomFont(doc, { name: "DejaVu", data: fontData }) to register it
+  4. Then use font: "DejaVu" in your paragraph/heading elements
+
+  The report should contain:
+
+  Title page:
+  - Title: "Multilingual Document Report"
+  - Subtitle: "Testing Unicode Support with Custom Fonts"
+
+  Page 2 — Content:
+  - Section heading: "Language Samples"
+  - A paragraph in English: "This document demonstrates HyperAgent's ability to render text in multiple scripts using embedded TrueType fonts."
+  - A section for each language with a heading and sample text:
+    - French: "Les systèmes informatiques modernes doivent prendre en charge plusieurs langues."
+    - German: "Ästhetische Programmierung erfordert sorgfältige Überlegung."
+    - Polish: "Zażółć gęślą jaźń — pangram zawierający polskie znaki diakrytyczne."
+    - Czech: "Příliš žluťoučký kůň úpěl ďábelské ódy."
+  - All language sample paragraphs MUST use font: "DejaVu" (the custom font)
+  - English text and headings can use the default Helvetica
+
+  Page 3 — Summary:
+  - A section heading "Summary"
+  - A callout box explaining that custom fonts enable full Unicode support
+  - A bullet list of supported script types: Latin Extended, Cyrillic, Greek
+
+  Use the "light-clean" theme.
+  Save as multilingual-report.pdf.

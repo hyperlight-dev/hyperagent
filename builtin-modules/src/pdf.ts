@@ -1779,10 +1779,22 @@ function buildPdfBytes(
         ? subsetTTF(customFont, usedCPs)
         : customFont.rawData;
 
-      // Compress font data
-      const compressedFont = debug
-        ? fontData
-        : wrapZlib(deflate(fontData), fontData);
+      // Compress font data — skip if compressed >= original (font may already be compact)
+      let compressedFont: Uint8Array;
+      let fontCompressed = false;
+      if (debug) {
+        compressedFont = fontData;
+      } else {
+        const rawDeflated = deflate(fontData);
+        const zlibWrapped = wrapZlib(rawDeflated, fontData);
+        if (zlibWrapped.length < fontData.length) {
+          compressedFont = zlibWrapped;
+          fontCompressed = true;
+        } else {
+          // Compression didn't help — store uncompressed
+          compressedFont = fontData;
+        }
+      }
 
       // Build /W array (CID widths) - only for used codepoints to keep small
       const wEntries: string[] = [];
@@ -1841,7 +1853,7 @@ function buildPdfBytes(
       );
 
       // Object base+3: FontFile2 stream (embedded TTF)
-      const fontFilterStr = debug ? "" : "/Filter /FlateDecode ";
+      const fontFilterStr = fontCompressed ? "/Filter /FlateDecode " : "";
       addStreamObject(
         fontFileObj,
         `${fontFilterStr}/Length ${compressedFont.length} /Length1 ${fontData.length}`,
