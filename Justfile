@@ -256,6 +256,14 @@ fmt-all: fmt fmt-analysis-guest fmt-runtime
 test-all: test test-analysis-guest
     @echo "✅ All tests passed"
 
+# PDF visual regression tests
+test-pdf-visual:
+    npx vitest run tests/pdf-visual.test.ts
+
+# Update PDF golden baselines (run after intentional visual changes)
+update-pdf-golden:
+    UPDATE_GOLDEN=1 npx vitest run tests/pdf-visual.test.ts
+
 # ── OOXML Validation ─────────────────────────────────────────────────
 
 # Validate a PPTX file against the OpenXML SDK schema.
