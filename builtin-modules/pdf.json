@@ -3,7 +3,7 @@
   "description": "PDF 1.7 document generation — text, graphics, metadata, standard fonts. Flow-based layout for auto-paginating documents.",
   "author": "system",
   "mutable": false,
-  "sourceHash": "sha256:7f17cccc65b0ec6b",
+  "sourceHash": "sha256:24d8fa7a97e5f177",
   "dtsHash": "sha256:920b1f5e5a2468a6",
   "importStyle": "named",
   "hints": {

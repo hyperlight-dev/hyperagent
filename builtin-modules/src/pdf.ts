@@ -4172,7 +4172,15 @@ export function addContent(
               ? "F44336" // red
               : "757575"; // grey for neutral
           yAfterValue += changeFontSize + 2;
-          doc.drawText(changeText, margins.left + padding, yAfterValue, {
+
+          // Draw coloured trend indicator dot before the change text
+          const dotSize = 5;
+          const dotY = yAfterValue - changeFontSize / 2 - dotSize / 2;
+          doc.drawRect(margins.left + padding, dotY, dotSize, dotSize, {
+            fill: changeColor,
+          });
+          const textOffset = dotSize + 4;
+          doc.drawText(changeText, margins.left + padding + textOffset, yAfterValue, {
             font: "Helvetica-Bold",
             fontSize: changeFontSize,
             color: changeColor,
