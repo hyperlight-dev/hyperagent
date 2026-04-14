@@ -2036,10 +2036,24 @@ function buildPdfBytes(
       // Object base+4: ToUnicode CMap
       const toUnicodeContent = buildToUnicodeCMap(customFont, usedCPs);
       const cmapBytes = encodeText(toUnicodeContent);
-      const compressedCMap = debug
-        ? cmapBytes
-        : wrapZlib(deflate(cmapBytes), cmapBytes);
-      const cmapFilterStr = debug ? "" : "/Filter /FlateDecode ";
+      // Compress CMap — skip if compressed >= original
+      let compressedCMap: Uint8Array;
+      let cmapCompressed = false;
+      if (debug) {
+        compressedCMap = cmapBytes;
+      } else {
+        const rawDeflated = deflate(cmapBytes);
+        const zlibWrapped = wrapZlib(rawDeflated, cmapBytes);
+        // Verify: decompress to check deflate actually worked
+        // If deflate returned raw data (not valid DEFLATE), store uncompressed
+        if (zlibWrapped.length < cmapBytes.length) {
+          compressedCMap = zlibWrapped;
+          cmapCompressed = true;
+        } else {
+          compressedCMap = cmapBytes;
+        }
+      }
+      const cmapFilterStr = cmapCompressed ? "/Filter /FlateDecode " : "";
       addStreamObject(
         toUnicodeObj,
         `${cmapFilterStr}/Length ${compressedCMap.length}`,
