@@ -47,7 +47,7 @@ jobs:
               - 'Justfile'
               - 'Dockerfile'
               - '.github/workflows/**'
-      - uses: actions/github-script@v8
+      - uses: actions/github-script@v9
         id: docs-only
         with:
           script: |
