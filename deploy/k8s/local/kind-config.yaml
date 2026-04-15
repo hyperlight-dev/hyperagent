@@ -1,0 +1,20 @@
+# KIND cluster configuration for HyperAgent local development
+# Creates a single-node cluster with /dev/kvm access
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: hyperagent
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.31.0
+    # Mount /dev/kvm from host into the KIND node
+    extraMounts:
+      - hostPath: /dev/kvm
+        containerPath: /dev/kvm
+    # Label the node for Hyperlight device plugin
+    labels:
+      hyperlight.dev/enabled: "true"
+      hyperlight.dev/hypervisor: kvm
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      config_path = "/etc/containerd/certs.d"

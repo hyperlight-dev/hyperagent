@@ -1,0 +1,75 @@
+# HyperAgent K8s Job Template
+# Variables (substituted by envsubst at deploy time):
+#   $JOB_NAME    — unique job name
+#   $IMAGE       — container image (e.g. hyperagentacr.azurecr.io/hyperagent:latest)
+#   $PROMPT      — the prompt text
+#   $EXTRA_ARGS  — additional CLI args (e.g. --skill pdf-expert --send-timeout 900000)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${JOB_NAME}
+  namespace: hyperagent
+  labels:
+    app.kubernetes.io/name: hyperagent
+    app.kubernetes.io/part-of: hyperagent
+    hyperagent.dev/type: prompt-job
+spec:
+  # Keep completed pod for 10 minutes (for kubectl cp / logs)
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hyperagent
+        hyperagent.dev/type: prompt-job
+        job-name: ${JOB_NAME}
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        hyperlight.dev/hypervisor: kvm
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: hyperagent
+          image: ${IMAGE}
+          args: ["--auto-approve"${EXTRA_ARGS}]
+          env:
+            - name: HYPERAGENT_PROMPT
+              value: "${PROMPT}"
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hyperagent-auth
+                  key: GITHUB_TOKEN
+            # Default agent send-timeout is 5 min — increase for K8s batch runs
+            - name: HYPERAGENT_SEND_TIMEOUT_MS
+              value: "900000"
+          resources:
+            limits:
+              hyperlight.dev/hypervisor: "1"
+            requests:
+              memory: "256Mi"
+              cpu: "500m"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: output
+              mountPath: /output
+            - name: tmp
+              mountPath: /tmp
+            - name: hyperagent-home
+              mountPath: /home/hyperagent/.hyperagent
+      volumes:
+        - name: output
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: hyperagent-home
+          emptyDir: {}

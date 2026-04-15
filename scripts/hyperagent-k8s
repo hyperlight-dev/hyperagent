@@ -1,0 +1,336 @@
+#!/bin/bash
+# hyperagent-k8s — Run HyperAgent prompts as Kubernetes Jobs
+#
+# Usage:
+#   ./scripts/hyperagent-k8s --prompt "Create a PDF invoice" [--skill pdf-expert] [--timeout 600]
+#   ./scripts/hyperagent-k8s --prompt "Research topic" --skill research-synthesiser --output-dir ./results
+#
+# The script creates a K8s Job, waits for completion, retrieves output
+# files via kubectl cp, streams logs, and optionally cleans up.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "${ROOT}/deploy/k8s/common.sh"
+
+# Load config
+if [ -f "${ROOT}/deploy/k8s/azure/config.env" ]; then
+    source "${ROOT}/deploy/k8s/azure/config.env"
+fi
+
+# ── Defaults ──────────────────────────────────────────────────────────
+
+PROMPT=""
+SKILL=""
+TIMEOUT=600
+OUTPUT_DIR=""
+INPUT_DIR=""
+CLEANUP=true
+NAMESPACE="hyperagent"
+# Image priority: --image flag > HYPERAGENT_K8S_IMAGE env > ACR from config > GHCR fallback
+if [ -n "${HYPERAGENT_K8S_IMAGE:-}" ]; then
+    IMAGE="${HYPERAGENT_K8S_IMAGE}"
+elif [ -n "${ACR_NAME:-}" ]; then
+    IMAGE="${ACR_NAME}.azurecr.io/${HYPERAGENT_IMAGE_NAME:-hyperagent}:${HYPERAGENT_IMAGE_TAG:-latest}"
+else
+    IMAGE="ghcr.io/hyperlight-dev/hyperagent:latest"
+fi
+
+# ── Parse args ────────────────────────────────────────────────────────
+
+usage() {
+    echo "Usage: hyperagent-k8s --prompt <text> [options]"
+    echo ""
+    echo "Options:"
+    echo "  --prompt <text>        Prompt text (required)"
+    echo "  --skill <name>         Preload a skill (e.g. pdf-expert, pptx-expert)"
+    echo "  --timeout <seconds>    Job timeout in seconds (default: 600)"
+    echo "  --output-dir <path>    Local directory for output files (default: ./output-<jobname>)"
+    echo "  --input-dir <path>     Local directory of files to make available in the pod"
+    echo "  --no-cleanup           Don't delete the job after retrieving output"
+    echo "  --image <image>        Override container image"
+    echo "  --namespace <ns>       K8s namespace (default: hyperagent)"
+    echo ""
+    exit 1
+}
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --prompt)
+            # Consume all args until the next --flag (supports unquoted multi-word prompts from just)
+            shift
+            PROMPT_PARTS=()
+            while [[ $# -gt 0 && ! "$1" =~ ^-- ]]; do
+                PROMPT_PARTS+=("$1")
+                shift
+            done
+            PROMPT="${PROMPT_PARTS[*]}"
+            ;;
+        --skill)      SKILL="$2"; shift 2 ;;
+        --timeout)    TIMEOUT="$2"; shift 2 ;;
+        --output-dir) OUTPUT_DIR="$2"; shift 2 ;;
+        --input-dir)  INPUT_DIR="$2"; shift 2 ;;
+        --no-cleanup) CLEANUP=false; shift ;;
+        --image)      IMAGE="$2"; shift 2 ;;
+        --namespace)  NAMESPACE="$2"; shift 2 ;;
+        --help|-h)    usage ;;
+        *)            log_error "Unknown option: $1"; usage ;;
+    esac
+done
+
+if [ -z "$PROMPT" ]; then
+    log_error "--prompt is required"
+    usage
+fi
+
+# ── Generate unique job name ──────────────────────────────────────────
+
+RANDOM_SUFFIX=$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n' | head -c 8)
+JOB_NAME="hyperagent-$(date +%s)-${RANDOM_SUFFIX}"
+
+if [ -z "$OUTPUT_DIR" ]; then
+    OUTPUT_DIR="./output-${JOB_NAME}"
+fi
+
+# ── Build extra args ─────────────────────────────────────────────────
+
+EXTRA_ARGS=""
+if [ -n "$SKILL" ]; then
+    EXTRA_ARGS=", \"--skill\", \"${SKILL}\""
+fi
+
+# ── Render and apply Job manifest ────────────────────────────────────
+
+log_step "Creating job: ${JOB_NAME}"
+log_info "  Prompt: ${PROMPT:0:80}$([ ${#PROMPT} -gt 80 ] && echo '...')"
+log_info "  Image:  ${IMAGE}"
+log_info "  Timeout: ${TIMEOUT}s"
+[ -n "$SKILL" ] && log_info "  Skill: ${SKILL}"
+[ -n "$INPUT_DIR" ] && log_info "  Input: ${INPUT_DIR}"
+
+# Export vars for envsubst
+export JOB_NAME IMAGE PROMPT EXTRA_ARGS
+
+# Select manifest based on auth method (Key Vault vs K8s Secret)
+if kubectl get secretproviderclass hyperagent-keyvault -n "${NAMESPACE}" &>/dev/null; then
+    JOB_TEMPLATE="${ROOT}/deploy/k8s/manifests/hyperagent-job-keyvault.yaml"
+    log_info "  Auth: Azure Key Vault (CSI)"
+else
+    JOB_TEMPLATE="${ROOT}/deploy/k8s/manifests/hyperagent-job.yaml"
+    log_info "  Auth: K8s Secret"
+fi
+
+# If --input-dir is set, append a hint to the prompt so the LLM knows where to find files
+if [ -n "$INPUT_DIR" ]; then
+    if [ ! -d "$INPUT_DIR" ]; then
+        log_error "Input directory does not exist: ${INPUT_DIR}"
+        exit 1
+    fi
+    PROMPT="${PROMPT} Input files are available at /input/ — enable fs-read with baseDir=/input to access them."
+fi
+
+# Render the job manifest (only substitute our specific variables)
+MANIFEST=$(envsubst '${JOB_NAME} ${IMAGE} ${PROMPT} ${EXTRA_ARGS}' < "${JOB_TEMPLATE}")
+
+# If --input-dir is set, inject an init container and input volume into the manifest.
+# The init container waits for a .ready marker file, which we create after kubectl cp.
+if [ -n "$INPUT_DIR" ]; then
+    # Add input volume to volumes list
+    MANIFEST=$(echo "$MANIFEST" | sed '/^      volumes:/a\        - name: input\n          emptyDir: {}')
+
+    # Add input volumeMount to the main container
+    MANIFEST=$(echo "$MANIFEST" | sed '/mountPath: \/output/a\            - name: input\n              mountPath: /input\n              readOnly: true')
+
+    # Add init container that waits for files to be copied
+    MANIFEST=$(echo "$MANIFEST" | sed '/^      containers:/i\      initContainers:\n        - name: wait-for-input\n          image: busybox:1.36\n          command: ["sh", "-c", "echo Waiting for input files...; while [ ! -f /input/.ready ]; do sleep 1; done; echo Input files ready; ls -la /input/"]\n          volumeMounts:\n            - name: input\n              mountPath: /input')
+fi
+
+# Apply
+echo -e "${BLUE}\$ kubectl apply -f - <<manifest>>${NC}"
+echo "$MANIFEST" | kubectl apply -f -
+log_success "Job created"
+
+# ── Copy input files if --input-dir is set ───────────────────────────
+
+if [ -n "$INPUT_DIR" ]; then
+    log_step "Copying input files from ${INPUT_DIR}..."
+
+    # Wait for init container to be running
+    for _i in $(seq 1 24); do
+        INIT_STATUS=$(kubectl get pod -n "${NAMESPACE}" -l "job-name=${JOB_NAME}" \
+            -o jsonpath='{.items[0].status.initContainerStatuses[0].state.running}' 2>/dev/null || echo "")
+        if [ -n "$INIT_STATUS" ] && [ "$INIT_STATUS" != "null" ]; then
+            break
+        fi
+        sleep 5
+    done
+
+    INIT_POD=$(kubectl get pods -n "${NAMESPACE}" -l "job-name=${JOB_NAME}" \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+
+    if [ -z "$INIT_POD" ]; then
+        log_error "Could not find pod for input file copy"
+        exit 1
+    fi
+
+    # Copy files into the init container
+    log_cmd kubectl cp "${INPUT_DIR}/." "${NAMESPACE}/${INIT_POD}:/input/" -c wait-for-input
+
+    # Create the ready marker to signal the init container to exit
+    kubectl exec "$INIT_POD" -n "${NAMESPACE}" -c wait-for-input -- touch /input/.ready 2>/dev/null
+
+    FILE_COUNT=$(find "$INPUT_DIR" -type f | wc -l)
+    log_success "Copied ${FILE_COUNT} input file(s) to pod"
+fi
+
+# ── SIGINT handler — clean up job on Ctrl+C ──────────────────────────
+
+cleanup_on_interrupt() {
+    echo ""
+    log_warning "Interrupted — cleaning up job ${JOB_NAME}..."
+    kubectl delete job "${JOB_NAME}" -n "${NAMESPACE}" --ignore-not-found=true 2>/dev/null
+    exit 130
+}
+trap cleanup_on_interrupt INT TERM
+
+# ── Wait for completion ──────────────────────────────────────────────
+
+log_step "Waiting for job to complete (timeout: ${TIMEOUT}s)..."
+
+# Wait for pod to be ready, then stream logs in background
+(
+    # Wait up to 60s for a running pod
+    for _i in $(seq 1 12); do
+        POD=$(kubectl get pods -n "${NAMESPACE}" -l "job-name=${JOB_NAME}" \
+            -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+        PHASE=$(kubectl get pods -n "${NAMESPACE}" -l "job-name=${JOB_NAME}" \
+            -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "")
+        if [ -n "$POD" ] && [[ "$PHASE" == "Running" || "$PHASE" == "Succeeded" ]]; then
+            echo -e "${BLUE}\$ kubectl logs -n ${NAMESPACE} ${POD} -f${NC}"
+            kubectl logs -n "${NAMESPACE}" "$POD" -f 2>/dev/null || true
+            break
+        fi
+        sleep 5
+    done
+) &
+LOG_STREAMER_PID=$!
+
+# Poll for both Complete and Failed — kubectl wait only handles one condition
+POLL_INTERVAL=5
+ELAPSED=0
+JOB_RESULT=""
+
+while [ "$ELAPSED" -lt "$TIMEOUT" ]; do
+    # Check job conditions
+    JOB_STATUS=$(kubectl get job "${JOB_NAME}" -n "${NAMESPACE}" \
+        -o jsonpath='{.status.conditions[0].type}' 2>/dev/null || echo "")
+
+    if [ "$JOB_STATUS" = "Complete" ]; then
+        JOB_RESULT="complete"
+        break
+    elif [ "$JOB_STATUS" = "Failed" ]; then
+        JOB_RESULT="failed"
+        break
+    fi
+
+    # Also check pod phase — catches completion before Job condition updates
+    POD_STATUS=$(kubectl get pods -n "${NAMESPACE}" -l "job-name=${JOB_NAME}" \
+        -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "")
+
+    if [ "$POD_STATUS" = "Succeeded" ]; then
+        JOB_RESULT="complete"
+        break
+    elif [ "$POD_STATUS" = "Failed" ]; then
+        JOB_RESULT="failed"
+        break
+    fi
+
+    # Check if the entrypoint finished copying output files
+    # "Waiting.*file retrieval" is printed AFTER files are copied to /output/
+    if [ "$POD_STATUS" = "Running" ]; then
+        POD_NAME_CHECK=$(kubectl get pods -n "${NAMESPACE}" -l "job-name=${JOB_NAME}" \
+            -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+        if [ -n "$POD_NAME_CHECK" ]; then
+            if kubectl logs "$POD_NAME_CHECK" -n "${NAMESPACE}" 2>/dev/null | grep -q "Waiting.*file retrieval"; then
+                JOB_RESULT="complete"
+                break
+            fi
+        fi
+    fi
+
+    sleep "$POLL_INTERVAL"
+    ELAPSED=$((ELAPSED + POLL_INTERVAL))
+done
+
+if [ "$JOB_RESULT" = "complete" ]; then
+    # Kill the background log streamer
+    kill "$LOG_STREAMER_PID" 2>/dev/null || true; wait "$LOG_STREAMER_PID" 2>/dev/null || true
+    log_success "Job completed successfully"
+elif [ "$JOB_RESULT" = "failed" ]; then
+    kill "$LOG_STREAMER_PID" 2>/dev/null || true; wait "$LOG_STREAMER_PID" 2>/dev/null || true
+    log_error "Job failed"
+
+    # Print logs and pod events for debugging
+    log_step "Pod events:"
+    POD_NAME=$(kubectl get pods -n "${NAMESPACE}" -l "job-name=${JOB_NAME}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+    if [ -n "$POD_NAME" ]; then
+        kubectl describe pod "$POD_NAME" -n "${NAMESPACE}" 2>/dev/null | grep -A 20 "Events:" || true
+        echo ""
+        log_step "Job logs:"
+        kubectl logs "$POD_NAME" -n "${NAMESPACE}" 2>/dev/null || true
+    fi
+
+    if [ "$CLEANUP" = true ]; then
+        kubectl delete job "${JOB_NAME}" -n "${NAMESPACE}" --ignore-not-found=true 2>/dev/null
+    fi
+    exit 1
+else
+    kill "$LOG_STREAMER_PID" 2>/dev/null || true; wait "$LOG_STREAMER_PID" 2>/dev/null || true
+    log_error "Job timed out after ${TIMEOUT}s"
+
+    log_step "Job logs:"
+    POD_NAME=$(kubectl get pods -n "${NAMESPACE}" -l "job-name=${JOB_NAME}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+    if [ -n "$POD_NAME" ]; then
+        kubectl logs "$POD_NAME" -n "${NAMESPACE}" 2>/dev/null || true
+    fi
+
+    if [ "$CLEANUP" = true ]; then
+        kubectl delete job "${JOB_NAME}" -n "${NAMESPACE}" --ignore-not-found=true 2>/dev/null
+    fi
+    exit 1
+fi
+
+# ── Retrieve output ──────────────────────────────────────────────────
+
+POD_NAME=$(kubectl get pods -n "${NAMESPACE}" -l "job-name=${JOB_NAME}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+
+if [ -z "$POD_NAME" ]; then
+    log_error "Could not find pod for job ${JOB_NAME}"
+    exit 1
+fi
+
+# Copy output files
+log_step "Retrieving output files..."
+mkdir -p "$OUTPUT_DIR"
+
+# Check if there are any files in /output/
+FILE_COUNT=$(kubectl exec "$POD_NAME" -n "${NAMESPACE}" -- sh -c 'find /output -type f 2>/dev/null | wc -l' 2>/dev/null || echo "0")
+
+if [ "$FILE_COUNT" -gt 0 ]; then
+    log_cmd kubectl cp "${NAMESPACE}/${POD_NAME}:/output/" "${OUTPUT_DIR}/"
+    log_success "Retrieved ${FILE_COUNT} file(s) to ${OUTPUT_DIR}/"
+    ls -la "$OUTPUT_DIR"/ 2>/dev/null || true
+else
+    log_info "No output files generated"
+    rmdir "$OUTPUT_DIR" 2>/dev/null || true
+fi
+
+# ── Cleanup ──────────────────────────────────────────────────────────
+
+if [ "$CLEANUP" = true ]; then
+    log_cmd kubectl delete job "${JOB_NAME}" -n "${NAMESPACE}" --ignore-not-found=true
+    log_info "Job cleaned up"
+fi
+
+echo ""
+log_success "Done! 🎉"

@@ -326,3 +326,243 @@ docker-build:
 # Run hyperagent in Docker (requires /dev/kvm or /dev/mshv)
 docker-run *ARGS:
     ./scripts/hyperagent-docker {{ARGS}}
+
+# ── Kubernetes Deployment ─────────────────────────────────────────────
+
+# Internal: check common K8s prerequisites
+_k8s-check-common:
+    #!/usr/bin/env bash
+    source deploy/k8s/common.sh
+    require_cmd docker "https://docs.docker.com/get-docker/" || exit 1
+    require_cmd kubectl "https://kubernetes.io/docs/tasks/tools/" || exit 1
+
+# Internal: check Azure prerequisites
+_k8s-check-azure:
+    #!/usr/bin/env bash
+    source deploy/k8s/common.sh
+    require_cmd az "https://docs.microsoft.com/en-us/cli/azure/install-azure-cli" || exit 1
+    require_cmd kubectl "https://kubernetes.io/docs/tasks/tools/" || exit 1
+    require_cmd envsubst "apt install gettext-base" || exit 1
+    if ! az account show &>/dev/null; then
+      log_error "Not logged in to Azure CLI. Run 'az login' first."
+      exit 1
+    fi
+
+# Internal: check local (KIND) prerequisites
+_k8s-check-local:
+    #!/usr/bin/env bash
+    source deploy/k8s/common.sh
+    require_cmd docker "https://docs.docker.com/get-docker/" || exit 1
+    require_cmd kind "go install sigs.k8s.io/kind@latest" || exit 1
+    require_cmd kubectl "https://kubernetes.io/docs/tasks/tools/" || exit 1
+    if [ ! -e /dev/kvm ]; then
+      log_error "/dev/kvm not found — Hyperlight requires hardware virtualisation"
+      exit 1
+    fi
+
+# ── Local (KIND) ──────────────────────────────────────────────────────
+
+# Create local KIND cluster with /dev/kvm and local registry
+k8s-local-up: _k8s-check-local
+    ./deploy/k8s/local/setup.sh
+
+# Tear down local KIND cluster and registry
+k8s-local-down: _k8s-check-local
+    ./deploy/k8s/local/teardown.sh
+
+# Build and load image into local KIND cluster
+k8s-local-build version="0.0.0-dev": _k8s-check-common
+    #!/usr/bin/env bash
+    # Resolve symlinks for Docker COPY
+    if [ -L deps/js-host-api ]; then
+      target=$(readlink -f deps/js-host-api)
+      rm deps/js-host-api
+      cp -r "$target" deps/js-host-api
+      trap 'rm -rf deps/js-host-api && ln -sfn "'"$target"'" deps/js-host-api' EXIT
+    fi
+    docker build -t hyperagent --build-arg VERSION="{{version}}" .
+    docker build -f deploy/k8s/Dockerfile -t hyperagent-k8s .
+    # Push to local registry
+    docker tag hyperagent-k8s localhost:5000/hyperagent:latest
+    docker push localhost:5000/hyperagent:latest
+
+# Deploy device plugin to local KIND cluster
+k8s-local-deploy-plugin: _k8s-check-common
+    #!/usr/bin/env bash
+    source deploy/k8s/common.sh
+    export IMAGE="ghcr.io/hyperlight-dev/hyperlight-device-plugin:latest" DEVICE_COUNT="2000" DEVICE_UID="65534" DEVICE_GID="65534"
+    envsubst < deploy/k8s/manifests/device-plugin.yaml | kubectl apply -f -
+    kubectl apply -f deploy/k8s/manifests/namespace.yaml
+    echo "Waiting for device plugin pods..."
+    kubectl rollout status daemonset/hyperlight-device-plugin -n hyperlight-system --timeout=120s
+
+# Run a prompt on local KIND cluster
+k8s-local-run +ARGS:
+    HYPERAGENT_K8S_IMAGE=localhost:5000/hyperagent:latest ./scripts/hyperagent-k8s {{ARGS}}
+
+# ── Azure (AKS) ──────────────────────────────────────────────────────
+
+# Create AKS cluster + ACR + KVM node pool
+k8s-infra-up: _k8s-check-azure
+    ./deploy/k8s/azure/setup.sh
+
+# Tear down all Azure resources
+k8s-infra-down: _k8s-check-azure
+    ./deploy/k8s/azure/teardown.sh
+
+# Stop AKS cluster (save costs when not in use)
+k8s-stop:
+    #!/usr/bin/env bash
+    source deploy/k8s/azure/config.env
+    az aks stop -g "${RESOURCE_GROUP}" -n "${CLUSTER_NAME}"
+
+# Start AKS cluster
+k8s-start:
+    #!/usr/bin/env bash
+    source deploy/k8s/azure/config.env
+    az aks start -g "${RESOURCE_GROUP}" -n "${CLUSTER_NAME}"
+
+# Get AKS credentials for kubectl
+k8s-credentials:
+    #!/usr/bin/env bash
+    source deploy/k8s/azure/config.env
+    az aks get-credentials -g "${RESOURCE_GROUP}" -n "${CLUSTER_NAME}" --overwrite-existing
+
+# Deploy hyperlight device plugin to cluster
+k8s-deploy-plugin: _k8s-check-common
+    #!/usr/bin/env bash
+    source deploy/k8s/azure/config.env
+    export IMAGE="${DEVICE_PLUGIN_IMAGE}" DEVICE_COUNT="${DEVICE_COUNT}" DEVICE_UID="${DEVICE_UID}" DEVICE_GID="${DEVICE_GID}"
+    envsubst < deploy/k8s/manifests/device-plugin.yaml | kubectl apply -f -
+    kubectl apply -f deploy/k8s/manifests/namespace.yaml
+    echo "Waiting for device plugin pods..."
+    kubectl rollout status daemonset/hyperlight-device-plugin -n hyperlight-system --timeout=120s
+
+# Build HyperAgent K8s image (builds base image first)
+k8s-build version="0.0.0-dev": _k8s-check-common
+    #!/usr/bin/env bash
+    # Resolve symlinks for Docker COPY
+    if [ -L deps/js-host-api ]; then
+      target=$(readlink -f deps/js-host-api)
+      rm deps/js-host-api
+      cp -r "$target" deps/js-host-api
+      trap 'rm -rf deps/js-host-api && ln -sfn "'"$target"'" deps/js-host-api' EXIT
+    fi
+    docker build -t hyperagent --build-arg VERSION="{{version}}" .
+    docker build -f deploy/k8s/Dockerfile -t hyperagent-k8s .
+
+# Push HyperAgent K8s image to ACR
+k8s-push: _k8s-check-azure
+    #!/usr/bin/env bash
+    source deploy/k8s/azure/config.env
+    az acr login --name "${ACR_NAME}"
+    docker tag hyperagent-k8s "${ACR_NAME}.azurecr.io/${HYPERAGENT_IMAGE_NAME}:${HYPERAGENT_IMAGE_TAG}"
+    docker push "${ACR_NAME}.azurecr.io/${HYPERAGENT_IMAGE_NAME}:${HYPERAGENT_IMAGE_TAG}"
+
+# Set up GitHub authentication (K8s Secret — simple but less secure)
+k8s-setup-auth:
+    ./deploy/k8s/setup-auth.sh
+
+# Set up GitHub authentication via Azure Key Vault
+k8s-setup-auth-keyvault:
+    ./deploy/k8s/setup-auth-keyvault.sh
+
+# Run a prompt as a K8s Job
+k8s-run +ARGS:
+    ./scripts/hyperagent-k8s {{ARGS}}
+
+# Show cluster, device plugin, and job status
+k8s-status:
+    #!/usr/bin/env bash
+    source deploy/k8s/common.sh
+    echo ""
+    log_step "Cluster nodes:"
+    kubectl get nodes -o custom-columns='NAME:.metadata.name,HYPERVISOR:.metadata.labels.hyperlight\.dev/hypervisor,CAPACITY:.status.allocatable.hyperlight\.dev/hypervisor' 2>/dev/null || echo "  (not connected)"
+    echo ""
+    log_step "Device plugin:"
+    kubectl get pods -n hyperlight-system -l app.kubernetes.io/name=hyperlight-device-plugin 2>/dev/null || echo "  (not deployed)"
+    echo ""
+    log_step "HyperAgent jobs:"
+    kubectl get jobs -n hyperagent -l hyperagent.dev/type=prompt-job 2>/dev/null || echo "  (none)"
+    echo ""
+
+# Smoke test: verify cluster, device plugin, auth, and image are all working
+k8s-smoke-test:
+    #!/usr/bin/env bash
+    source deploy/k8s/common.sh
+    PASS=0
+    FAIL=0
+    echo ""
+    log_step "Running K8s smoke tests..."
+    echo ""
+
+    # 1. kubectl connected?
+    if kubectl cluster-info &>/dev/null; then
+      log_success "✅ kubectl connected to cluster"
+      PASS=$((PASS + 1))
+    else
+      log_error "❌ kubectl not connected — run 'just k8s-credentials' or 'just k8s-local-up'"
+      FAIL=$((FAIL + 1))
+    fi
+
+    # 2. KVM nodes available?
+    KVM_NODES=$(kubectl get nodes -l hyperlight.dev/hypervisor=kvm -o name 2>/dev/null | wc -l)
+    if [ "$KVM_NODES" -gt 0 ]; then
+      log_success "✅ ${KVM_NODES} KVM node(s) available"
+      PASS=$((PASS + 1))
+    else
+      log_error "❌ No KVM nodes found — check node pool labels"
+      FAIL=$((FAIL + 1))
+    fi
+
+    # 3. Device plugin running?
+    PLUGIN_READY=$(kubectl get pods -n hyperlight-system -l app.kubernetes.io/name=hyperlight-device-plugin -o jsonpath='{.items[*].status.phase}' 2>/dev/null)
+    if echo "$PLUGIN_READY" | grep -q "Running"; then
+      log_success "✅ Device plugin running"
+      PASS=$((PASS + 1))
+    else
+      log_error "❌ Device plugin not running — run 'just k8s-deploy-plugin' or 'just k8s-local-deploy-plugin'"
+      FAIL=$((FAIL + 1))
+    fi
+
+    # 4. Hypervisor resource allocatable?
+    CAPACITY=$(kubectl get nodes -o jsonpath='{.items[*].status.allocatable.hyperlight\.dev/hypervisor}' 2>/dev/null | tr ' ' '\n' | grep -v '^$' | head -1)
+    if [ -n "$CAPACITY" ] && [ "$CAPACITY" != "0" ]; then
+      log_success "✅ hyperlight.dev/hypervisor resource available (capacity: ${CAPACITY})"
+      PASS=$((PASS + 1))
+    else
+      log_error "❌ No hyperlight.dev/hypervisor resource — device plugin may not be working"
+      FAIL=$((FAIL + 1))
+    fi
+
+    # 5. Namespace exists?
+    if kubectl get namespace hyperagent &>/dev/null; then
+      log_success "✅ hyperagent namespace exists"
+      PASS=$((PASS + 1))
+    else
+      log_error "❌ hyperagent namespace missing — run 'just k8s-deploy-plugin' (creates namespace)"
+      FAIL=$((FAIL + 1))
+    fi
+
+    # 6. Auth secret exists?
+    if kubectl get secret hyperagent-auth -n hyperagent &>/dev/null; then
+      log_success "✅ hyperagent-auth secret exists"
+      PASS=$((PASS + 1))
+    else
+      log_error "❌ hyperagent-auth secret missing — run 'just k8s-setup-auth'"
+      FAIL=$((FAIL + 1))
+    fi
+
+    # Summary
+    echo ""
+    echo "════════════════════════════════════════"
+    if [ "$FAIL" -eq 0 ]; then
+      log_success "All ${PASS} checks passed — ready to run prompts! 🚀"
+    else
+      log_error "${FAIL} check(s) failed, ${PASS} passed"
+      echo ""
+      log_info "Fix the issues above, then re-run: just k8s-smoke-test"
+    fi
+    echo "════════════════════════════════════════"
+    echo ""
+    [ "$FAIL" -eq 0 ]

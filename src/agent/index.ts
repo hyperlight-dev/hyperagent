@@ -97,9 +97,6 @@ import {
   formatExports,
   formatSignatures,
   formatCompact,
-  extractInterfaces,
-  expandType,
-  resolveTypeReferences,
 } from "./format-exports.js";
 import { loadPatterns } from "./pattern-loader.js";
 import { loadSkills } from "./skill-loader.js";
@@ -1149,7 +1146,6 @@ const registerHandlerTool = defineTool("register_handler", {
           success: false,
           error: `Validation failed:\n  • ${errorMessages}`,
           validationErrors: validation.errors,
-          hint: "This handler was NOT registered. Fix the errors and call register_handler again with the corrected code.",
         };
         console.error(`  ${C.err("❌ " + errorResult.error)}`);
         return errorResult;
@@ -1168,41 +1164,9 @@ const registerHandlerTool = defineTool("register_handler", {
       };
     }
 
-    // ── Check for uninspected module imports ──────────────────────
-    // Warn if the handler imports ha:* modules that the LLM hasn't
-    // called module_info on. This catches guessing-without-reading.
-    // Skip trivial utility modules that have simple/obvious APIs.
-    const TRIVIAL_MODULES = new Set([
-      "shared-state",
-      "xml-escape",
-      "base64",
-      "crc32",
-      "str-bytes",
-    ]);
-    const inspected: Set<string> = state.modulesInspected ?? new Set();
-    const importedModules = (
-      code.match(/from\s+["']ha:([^"']+)["']/g) ?? []
-    ).map((m: string) => m.replace(/from\s+["']ha:/, "").replace(/["']$/, ""));
-    const uninspected = importedModules.filter(
-      (m: string) => !inspected.has(m) && !TRIVIAL_MODULES.has(m),
-    );
-
     // ── Proceed with registration ─────────────────────────────────
     const result = await sandbox.registerHandler(name, code, { isModule });
     if (result.success) {
-      // Warn about uninspected modules
-      if (uninspected.length > 0) {
-        const modList = uninspected.map((m: string) => `ha:${m}`).join(", ");
-        console.error(
-          `  ${C.warn("⚠️")} You imported ${modList} without calling module_info first. ` +
-            `Call module_info('${uninspected[0]}') to read the typeDefinitions and discover all available parameters.`,
-        );
-        // Add warning to result so LLM sees it
-        (result as Record<string, unknown>).apiDiscoveryWarning =
-          `You imported ${modList} without calling module_info() first. ` +
-          `The typeDefinitions in module_info show ALL available parameters. ` +
-          `Call module_info('${uninspected[0]}') before using its functions.`;
-      }
       // Warn if handler code is large relative to input buffer
       const bufSizes = sandbox.getEffectiveBufferSizes();
       const codeBytes = Buffer.byteLength(code, "utf8");
@@ -1422,108 +1386,6 @@ const editHandlerTool = defineTool("edit_handler", {
     oldString: string;
     newString: string;
   }) => {
-    // ── Pre-validate the edit before committing ──────────────────
-    // Get the current handler source, apply the edit locally, and
-    // validate the result. This prevents using edit_handler to bypass
-    // the static analysis validator (which register_handler enforces).
-    const sourceResult = sandbox.getHandlerSource(name, {
-      lineNumbers: false,
-    });
-    if (!sourceResult.success) {
-      console.error(`  ${C.err("❌ " + sourceResult.error)}`);
-      return sourceResult;
-    }
-
-    const currentCode = sourceResult.code as string;
-    const occurrences = currentCode.split(oldString).length - 1;
-    if (occurrences === 0) {
-      const err = `oldString not found in handler "${name}"`;
-      console.error(`  ${C.err("❌ " + err)}`);
-      return { success: false, error: err };
-    }
-    if (occurrences > 1) {
-      const err = `oldString found ${occurrences} times in handler "${name}" — must be unique`;
-      console.error(`  ${C.err("❌ " + err)}`);
-      return { success: false, error: err };
-    }
-
-    const editedCode = currentCode.replace(oldString, newString);
-
-    // Run the same validation as register_handler
-    const registeredHandlers = sandbox.getHandlers().filter((h) => h !== name);
-    const availableModules = sandbox.getAvailableModules();
-
-    let validationContext: ValidationContext = {
-      handlerName: name,
-      registeredHandlers,
-      availableModules,
-      expectHandler: true,
-    };
-
-    try {
-      let validation = await validateJavaScriptGuest(
-        editedCode,
-        validationContext,
-      );
-
-      const maxIterations = 20;
-      let iterations = 0;
-      while (
-        !validation.deepValidationDone &&
-        validation.missingSources.length > 0 &&
-        validation.errors.length === 0 &&
-        iterations < maxIterations
-      ) {
-        iterations++;
-        const {
-          sources: newSources,
-          dtsSources: newDtsSources,
-          moduleJsons: newModuleJsons,
-        } = loadModuleFilesForValidator(
-          validation.missingSources,
-          pluginManager,
-        );
-        validationContext = {
-          ...validationContext,
-          moduleSources: {
-            ...validationContext.moduleSources,
-            ...newSources,
-          },
-          dtsSources: { ...validationContext.dtsSources, ...newDtsSources },
-          moduleJsons: { ...validationContext.moduleJsons, ...newModuleJsons },
-        };
-        validation = await validateJavaScriptGuest(
-          editedCode,
-          validationContext,
-        );
-      }
-
-      if (validation.errors.length > 0) {
-        const errMsg = validation.errors
-          .map((e) => {
-            const loc = e.line ? ` (line ${e.line})` : "";
-            return `${e.type}: ${e.message}${loc}`;
-          })
-          .join("\n");
-        console.error(`  ${C.err("❌ Validation failed for edited handler:")}`);
-        console.error(`     ${errMsg.replace(/\n/g, "\n     ")}`);
-        return {
-          success: false,
-          error: `Validation failed:\n${errMsg}`,
-          hint: "This handler was NOT modified. Fix the validation errors and try again.",
-        };
-      }
-    } catch (e) {
-      // If validation itself crashes, log but still allow the edit
-      // (analysis guest may not be available in all environments)
-      if (state.verboseOutput) {
-        console.error(
-          `  ⚠️ Validation skipped for edit_handler: ${e instanceof Error ? e.message : String(e)}`,
-        );
-      }
-    }
-
-    // Validation passed — commit the edit
     const result = await sandbox.editHandler(name, oldString, newString);
     if (result.success) {
       console.error(
@@ -3566,9 +3428,6 @@ const moduleInfoTool = defineTool("module_info", {
     // Track that the LLM has engaged with module discovery
     // This also satisfies the hasCalledListModules requirement for register_handler
     state.hasCalledListModules = true;
-    // Track this specific module as inspected
-    if (!state.modulesInspected) state.modulesInspected = new Set();
-    state.modulesInspected.add(name);
 
     try {
       // Block access to internal modules (names starting with _)
@@ -3620,23 +3479,6 @@ const moduleInfoTool = defineTool("module_info", {
           };
         }
 
-        // Load .d.ts for interface expansion — shows full parameter shapes
-        // This solves the #1 LLM friction point: discovering opts parameter fields
-        let interfaces = new Map<string, string>();
-        try {
-          const { readFileSync } = await import("fs");
-          const { join: pathJoin } = await import("path");
-          const dtsPath = pathJoin(
-            process.cwd(),
-            "builtin-modules",
-            `${name}.d.ts`,
-          );
-          const dtsContent = readFileSync(dtsPath, "utf-8");
-          interfaces = extractInterfaces(dtsContent);
-        } catch {
-          // No .d.ts available — skip interface expansion (user modules)
-        }
-
         // Build result for each function
         const results = foundFns.map((fn) => {
           // Build requires usage hint if function has dependencies
@@ -3671,14 +3513,10 @@ const moduleInfoTool = defineTool("module_info", {
             signature: formatExports([fn]),
             params: fn.params?.length
               ? fn.params
-                  .map((p) => {
-                    const base = `${p.name}${p.type ? `: ${p.type}` : ""}${p.description ? ` — ${p.description}` : ""}`;
-                    // Expand interface types so LLM can see the full shape
-                    const expanded = p.type
-                      ? expandType(p.type, interfaces)
-                      : "";
-                    return expanded ? `${base}\n${expanded}` : base;
-                  })
+                  .map(
+                    (p) =>
+                      `${p.name}${p.type ? `: ${p.type}` : ""}${p.description ? ` — ${p.description}` : ""}`,
+                  )
                   .join("\n")
               : undefined,
             returns: fn.returns?.type
@@ -3689,43 +3527,11 @@ const moduleInfoTool = defineTool("module_info", {
           };
         });
 
-        // Collect relevant type definitions for the queried functions.
-        // This ensures the LLM sees full parameter shapes even when querying
-        // specific functions (previously only returned in the full module view).
-        let relevantTypes: string | undefined;
-        if (interfaces.size > 0) {
-          const resolved = resolveTypeReferences(interfaces);
-          const relevant = new Set<string>();
-          for (const fn of foundFns) {
-            for (const p of fn.params ?? []) {
-              if (p.type) {
-                // Extract base type name (strip [], <>, ?, |)
-                const base = p.type
-                  .replace(/\[\]$/, "")
-                  .replace(/<.*>/, "")
-                  .replace(/\s*\|.*/, "")
-                  .replace(/\?$/, "")
-                  .trim();
-                if (resolved.has(base)) relevant.add(base);
-              }
-            }
-          }
-          if (relevant.size > 0) {
-            const parts: string[] = [];
-            for (const typeName of relevant) {
-              const fields = resolved.get(typeName);
-              if (fields) parts.push(`${typeName} = {\n${fields}\n}`);
-            }
-            relevantTypes = parts.join("\n\n");
-          }
-        }
-
         // For single function, return flat; for multiple, return array
         if (results.length === 1) {
           return {
             name: info.name,
             ...results[0],
-            ...(relevantTypes ? { typeDefinitions: relevantTypes } : {}),
             importAs: `import { ${results[0].functionName} } from "ha:${info.name}"`,
           };
         }
@@ -3733,14 +3539,14 @@ const moduleInfoTool = defineTool("module_info", {
         return {
           name: info.name,
           functions: results,
-          ...(relevantTypes ? { typeDefinitions: relevantTypes } : {}),
           ...(notFound.length > 0 ? { notFound } : {}),
           importAs: `import { ${foundFns.map((f) => f.name).join(", ")} } from "ha:${info.name}"`,
         };
       }
 
-      // Source code is never included — exports + typeDefinitions + hints
-      // provide everything the LLM needs for API usage.
+      // For large modules (>10KB), omit source to avoid overwhelming the output.
+      // The LLM gets exports + JSDoc which is what it needs for API usage.
+      const includeSource = info.sizeBytes <= 10240;
 
       // If signatures mode requested, return detailed parameter info
       if (signatures) {
@@ -3778,74 +3584,30 @@ const moduleInfoTool = defineTool("module_info", {
         };
       }
 
-      // Always load type definitions from .d.ts so the LLM can discover
-      // parameter shapes. This is the primary way the LLM learns what fields
-      // an options object accepts. Source code is NEVER included — exports +
-      // types + hints are sufficient for API usage.
-      let typeDefinitions: string | undefined;
-      try {
-        const { readFileSync } = await import("fs");
-        const { join: pathJoin } = await import("path");
-        const dtsPath = pathJoin(
-          process.cwd(),
-          "builtin-modules",
-          `${name}.d.ts`,
-        );
-        const dtsContent = readFileSync(dtsPath, "utf-8");
-        const rawIfaces = extractInterfaces(dtsContent);
-        // Resolve cross-references so the LLM sees all related types
-        // in a single module_info call without needing follow-up queries
-        const ifaces = resolveTypeReferences(rawIfaces);
-        if (ifaces.size > 0) {
-          // Format as markdown for better LLM readability
-          const parts: string[] = [
-            "## Parameter Types",
-            "",
-            "**IMPORTANT: Read these type definitions to discover ALL available options.**",
-            "Call `module_info('" +
-              name +
-              "', 'functionName')` for details on a specific function.",
-            "",
-          ];
-          for (const [ifaceName, fields] of ifaces) {
-            parts.push(`### ${ifaceName}\n\`\`\`\n${fields}\n\`\`\``);
-          }
-          typeDefinitions = parts.join("\n");
-        }
-      } catch {
-        // No .d.ts — skip (user modules or native modules)
-      }
-
-      const result = {
+      return {
         name: info.name,
         description: info.description,
+        author: info.author,
+        mutable: info.mutable,
+        created: info.created,
+        modified: info.modified,
+        sizeBytes: info.sizeBytes,
         exports: formatExports(info.exports),
-        ...(typeDefinitions ? { typeDefinitions } : {}),
         ...(info.structuredHints
           ? { hints: formatStructuredHints(info.structuredHints) }
           : info.hints
             ? { hints: info.hints }
             : {}),
+        ...(includeSource
+          ? { source: info.source }
+          : {
+              sourceOmitted: `Source too large (${(info.sizeBytes / 1024).toFixed(1)}KB). Use exports above for API reference.`,
+            }),
         importAs:
           info.importStyle === "namespace"
             ? `import * as ${info.name.replace(/-/g, "")} from "ha:${info.name}"`
             : `import { ... } from "ha:${info.name}"`,
       };
-
-      // In verbose/debug mode, log the full tool response so it appears in
-      // debug logs and transcripts. This is critical for diagnosing what the
-      // LLM sees when it calls module_info — especially type definitions.
-      if (cli.verbose || cli.debug) {
-        console.error(
-          `  📋 module_info("${name}") → ${JSON.stringify(result).length} bytes`,
-        );
-        if ((result as Record<string, unknown>).typeDefinitions) {
-          console.error(
-            `  📐 Type definitions included (${String((result as Record<string, unknown>).typeDefinitions).length} chars)`,
-          );
-        }
-      }
-      return result;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       return { error: msg };
@@ -4239,8 +4001,6 @@ function buildSessionConfig() {
         // Capture prompt and reset per-prompt tracking flags
         state.currentUserPrompt = input.prompt;
         state.hasCalledListModules = false;
-        // Track which modules the LLM has called module_info on this turn
-        state.modulesInspected = new Set<string>();
 
         // Auto-invoke suggest_approach for non-trivial prompts
         const isNonTrivial = input.prompt.length > 25;
@@ -4892,12 +4652,20 @@ async function main(): Promise<void> {
     // ── Non-interactive prompt mode ──────────────────────────────
     // When --prompt "..." is provided, send the prompt once and exit.
     if (cli.prompt) {
-      // Skills are handled via preLoadedSkills (set earlier from --skill flag).
-      // runSuggestApproach will inject skill content into the system message
-      // when the actual prompt is processed below — no need to send a
-      // separate "/skill-name" user message.
+      // Invoke skills before sending the prompt (--skill flag)
       if (cli.skill) {
-        console.log(`  ${C.info("📚")} Skills preloaded: ${C.tool(cli.skill)}`);
+        const skillNames = cli.skill.split(/\s+/).filter(Boolean);
+        for (const skillName of skillNames) {
+          console.log(
+            `${ANSI.bold}${ANSI.cyan}You: ${ANSI.reset}${C.dim(`(invoking skill: ${skillName})`)}`,
+          );
+          const handled = await handleSlashCommand(`/${skillName}`, rl);
+          if (!handled) {
+            // Skill detected but not a slash command — send to SDK
+            // so the session can load the skill instructions.
+            await processMessage(session, `/${skillName}`);
+          }
+        }
       }
       console.log(`${ANSI.bold}${ANSI.cyan}You: ${ANSI.reset}${cli.prompt}`);
       const response = await processMessage(session, cli.prompt);

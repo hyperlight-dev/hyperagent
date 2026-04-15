@@ -1,0 +1,8 @@
+# Namespace for HyperAgent jobs
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hyperagent
+  labels:
+    app.kubernetes.io/name: hyperagent
+    app.kubernetes.io/part-of: hyperagent
