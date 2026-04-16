@@ -52,6 +52,13 @@ const COMMANDS: readonly CommandEntry[] = Object.freeze([
       "Shows every event the agent receives from the Copilot SDK.",
   },
   {
+    completion: "/tokens",
+    help: "Show session token usage summary",
+    detail:
+      "Displays cumulative input/output/cache tokens, request count,\n" +
+      "and turn count for the current session. Also shown on exit.",
+  },
+  {
     completion: "/reasoning conversation ",
     help: "Set conversation reasoning effort (low|medium|high|xhigh)",
     detail:

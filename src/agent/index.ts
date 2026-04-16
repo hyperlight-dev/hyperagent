@@ -116,6 +116,7 @@ import {
   renderReasoningTransition,
   printUsageStats,
   printExtendedReasoningNotice,
+  formatTokenSummary,
 } from "./llm-output.js";
 
 // ── Session Timing ───────────────────────────────────────────────────
@@ -143,6 +144,19 @@ function formatSessionDuration(): string {
     return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
   }
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+/**
+ * Print session token summary to console.
+ * Called at all exit points (interactive, --prompt, SIGINT).
+ */
+function printExitTokenSummary(): void {
+  if (state.totalRequests === 0) return; // No LLM calls made
+  const lines = formatTokenSummary(state);
+  console.log(); // blank line before summary
+  for (const line of lines) {
+    console.log(`  ${line}`);
+  }
 }
 
 // ── Paths ────────────────────────────────────────────────────────────
@@ -4175,6 +4189,9 @@ function buildSessionConfig() {
       // Guidance is stored in state.lastGuidance and re-injected on
       // every turn so it survives compaction.
       onUserPromptSubmitted: async (input: { prompt: string }) => {
+        // Track turn count
+        state.totalTurns++;
+
         // Capture prompt and reset per-prompt tracking flags
         state.currentUserPrompt = input.prompt;
         state.hasCalledListModules = false;
@@ -4865,6 +4882,7 @@ async function main(): Promise<void> {
           await processMessage(session, "continue");
         }
       }
+      printExitTokenSummary();
       console.log(`\n✅ Prompt completed. (${formatSessionDuration()})\n`);
       cleanupCtrlR?.();
       rl.close();
@@ -4899,6 +4917,7 @@ async function main(): Promise<void> {
       // Exit — either bare 'exit' or '/exit'
       const lower = trimmed.toLowerCase();
       if (lower === "exit" || lower === "/exit") {
+        printExitTokenSummary();
         console.log(`\n👋 Goodbye! (session: ${formatSessionDuration()})\n`);
         break;
       }
@@ -5105,6 +5124,7 @@ const SHUTDOWN_TIMEOUT_MS = 5_000;
 
 // Graceful shutdown — clean up on SIGINT (Ctrl+C)
 process.on("SIGINT", async () => {
+  printExitTokenSummary();
   console.log(`\n\n👋 Goodbye! (session: ${formatSessionDuration()})\n`);
 
   // Stop transcript synchronously — async won't complete before exit

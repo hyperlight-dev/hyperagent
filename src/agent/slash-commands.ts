@@ -126,6 +126,16 @@ export async function handleSlashCommand(
       console.log();
       return true;
 
+    case "/tokens": {
+      const { formatTokenSummary } = await import("./llm-output.js");
+      const lines = formatTokenSummary(state);
+      for (const line of lines) {
+        console.log(`  ${line}`);
+      }
+      console.log();
+      return true;
+    }
+
     case "/reasoning": {
       // /reasoning conversation <level> — set conversation reasoning effort
       // /reasoning audit <level>        — set audit reasoning effort (min: medium)

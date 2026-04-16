@@ -429,6 +429,13 @@ export function registerEventHandler(
           cost?: number;
           duration?: number;
         };
+
+        // Accumulate session totals
+        state.totalInputTokens += usageData.inputTokens ?? 0;
+        state.totalOutputTokens += usageData.outputTokens ?? 0;
+        state.totalCacheReadTokens += usageData.cacheReadTokens ?? 0;
+        state.totalRequests += usageData.cost ?? 0;
+
         // Ensure stats appear on a new line — streamed
         // message_delta writes don't end with \n.
         if (state.streamedContent) {

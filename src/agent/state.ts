@@ -240,6 +240,23 @@ export interface AgentState {
    * additionalContext on every onUserPromptSubmitted.
    */
   lastGuidance: string | null;
+
+  // ── Token Tracking ───────────────────────────────────────────────
+
+  /** Cumulative input tokens across all LLM requests this session. */
+  totalInputTokens: number;
+
+  /** Cumulative output tokens across all LLM requests this session. */
+  totalOutputTokens: number;
+
+  /** Cumulative cache-read tokens across all LLM requests this session. */
+  totalCacheReadTokens: number;
+
+  /** Total number of LLM API requests this session. */
+  totalRequests: number;
+
+  /** Number of user turns (messages sent) this session. */
+  totalTurns: number;
 }
 
 // ── Factory ──────────────────────────────────────────────────────────
@@ -317,5 +334,12 @@ export function createAgentState(
     hasCalledListModules: false,
     modulesInspected: new Set<string>(),
     lastGuidance: null,
+
+    // Token tracking
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    totalCacheReadTokens: 0,
+    totalRequests: 0,
+    totalTurns: 0,
   };
 }

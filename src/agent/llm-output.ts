@@ -60,6 +60,37 @@ export function printUsageStats(stats: string, indent: string): void {
   console.log(`${indent}${C.dim("📊 " + stats)}`);
 }
 
+/**
+ * Format a session token summary for /tokens command or exit display.
+ * Returns an array of lines (without leading newline).
+ */
+export function formatTokenSummary(state: {
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCacheReadTokens: number;
+  totalRequests: number;
+  totalTurns: number;
+}): string[] {
+  const total = state.totalInputTokens + state.totalOutputTokens;
+  const lines: string[] = [];
+  lines.push(`${C.label("Token Usage")}  ${C.dim("(session total)")}`);
+  lines.push(
+    `  Input:       ${state.totalInputTokens.toLocaleString()} tokens`,
+  );
+  lines.push(
+    `  Output:      ${state.totalOutputTokens.toLocaleString()} tokens`,
+  );
+  if (state.totalCacheReadTokens > 0) {
+    lines.push(
+      `  Cache read:  ${state.totalCacheReadTokens.toLocaleString()} tokens`,
+    );
+  }
+  lines.push(`  Total:       ${total.toLocaleString()} tokens`);
+  lines.push(`  Requests:    ${state.totalRequests}`);
+  lines.push(`  Turns:       ${state.totalTurns}`);
+  return lines;
+}
+
 // ── Reasoning Rendering ──────────────────────────────────────────────
 
 /**
