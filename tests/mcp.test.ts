@@ -149,6 +149,41 @@ describe("computeMCPConfigHash", () => {
     const hash2 = computeMCPConfigHash("beta", config);
     expect(hash1).not.toBe(hash2);
   });
+
+  it("changes when allowTools change", () => {
+    const base = { command: "node" };
+    const hash1 = computeMCPConfigHash("test", {
+      ...base,
+      allowTools: ["a"],
+    });
+    const hash2 = computeMCPConfigHash("test", {
+      ...base,
+      allowTools: ["a", "b"],
+    });
+    expect(hash1).not.toBe(hash2);
+  });
+
+  it("changes when denyTools change", () => {
+    const base = { command: "node" };
+    const hash1 = computeMCPConfigHash("test", {
+      ...base,
+      denyTools: ["x"],
+    });
+    const hash2 = computeMCPConfigHash("test", { ...base, denyTools: [] });
+    expect(hash1).not.toBe(hash2);
+  });
+
+  it("changes when env keys change (not values)", () => {
+    const hash1 = computeMCPConfigHash("test", {
+      command: "node",
+      env: { TOKEN: "secret1" },
+    });
+    const hash2 = computeMCPConfigHash("test", {
+      command: "node",
+      env: { API_KEY: "secret2" },
+    });
+    expect(hash1).not.toBe(hash2);
+  });
 });
 
 // ── Sanitisation ─────────────────────────────────────────────────────

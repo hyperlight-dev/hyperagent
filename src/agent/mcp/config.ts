@@ -223,16 +223,22 @@ function substituteEnvVars(value: string): string {
 
 /**
  * Compute a config hash for approval validation.
- * Hash = SHA-256(name + command + JSON.stringify(args)).
- * Config changes invalidate the approval.
+ * Includes name, command, args, tool filtering, and env key names.
+ * Any execution-affecting config change invalidates the approval.
  */
 export function computeMCPConfigHash(
   name: string,
   config: MCPServerConfig,
 ): string {
-  return createHash("sha256")
-    .update(name, "utf8")
-    .update(config.command, "utf8")
-    .update(JSON.stringify(config.args ?? []), "utf8")
-    .digest("hex");
+  return (
+    createHash("sha256")
+      .update(name, "utf8")
+      .update(config.command, "utf8")
+      .update(JSON.stringify(config.args ?? []), "utf8")
+      .update(JSON.stringify(config.allowTools ?? []), "utf8")
+      .update(JSON.stringify(config.denyTools ?? []), "utf8")
+      // Hash env key names (not values — secrets stay out of the hash)
+      .update(JSON.stringify(Object.keys(config.env ?? {}).sort()), "utf8")
+      .digest("hex")
+  );
 }

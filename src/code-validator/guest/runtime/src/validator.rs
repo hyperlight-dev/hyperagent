@@ -923,10 +923,18 @@ fn strip_js_comments(source: &str) -> String {
                 }
             }
             // Single-line comment — replace with spaces (preserve line structure)
+            // Guard: if preceded by a backslash, this might be inside a regex
+            // literal (e.g. /https?:\/\//). Skip the comment treatment.
             b'/' if i + 1 < len && bytes[i + 1] == b'/' => {
-                while i < len && bytes[i] != b'\n' {
-                    out.push(' ');
+                if i > 0 && bytes[i - 1] == b'\\' {
+                    // Likely inside a regex literal — keep as-is
+                    out.push('/');
                     i += 1;
+                } else {
+                    while i < len && bytes[i] != b'\n' {
+                        out.push(' ');
+                        i += 1;
+                    }
                 }
             }
             // Block comment — replace with spaces, preserve newlines
@@ -1085,10 +1093,29 @@ fn check_handler_has_param(source: &str) -> bool {
             }
         }
         // Arrow: const handler = (event) => or handler = event =>
+        // Must verify it actually has a parameter, not just () =>
         if (trimmed.contains("const handler") || trimmed.contains("let handler"))
             && trimmed.contains("=>")
         {
-            return true;
+            // Check for non-empty parens: handler = (something) =>
+            if let Some(eq_pos) = trimmed.find('=') {
+                let after_eq = trimmed[eq_pos + 1..].trim_start();
+                // Skip any second '=' (==)
+                if after_eq.starts_with('=') {
+                    // Not an assignment — skip
+                } else if after_eq.starts_with('(') {
+                    // Parenthesised params: check for non-empty (x) vs ()
+                    if let Some(close) = after_eq.find(')') {
+                        let params = after_eq[1..close].trim();
+                        if !params.is_empty() {
+                            return true;
+                        }
+                    }
+                } else if !after_eq.starts_with("=>") {
+                    // Bare param without parens: handler = event => ...
+                    return true;
+                }
+            }
         }
     }
     false

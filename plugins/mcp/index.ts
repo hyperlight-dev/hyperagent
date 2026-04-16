@@ -56,12 +56,12 @@ Note: MCP servers are OS processes (not micro-VM sandboxed).
 // ── Host functions ───────────────────────────────────────────────────
 
 /**
- * The MCP gateway plugin provides no host functions.
- * Its hostModules array is empty — it exists solely to gate the
- * MCP subsystem via the plugin approval flow.
+ * The MCP gateway plugin provides a single sentinel host module,
+ * `mcp-gateway`, used to signal that the MCP subsystem is enabled
+ * via the plugin approval flow.
  *
  * Individual MCP servers register their own host modules dynamically
- * when enabled via /mcp enable.
+ * (`host:mcp-<name>`) when enabled via /mcp enable.
  */
 export function createHostFunctions(
   _config?: MCPGatewayConfig,

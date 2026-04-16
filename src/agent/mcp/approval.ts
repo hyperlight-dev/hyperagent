@@ -4,8 +4,8 @@
 // before a server can be connected. Approval is invalidated if the
 // server config (command + args) changes.
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 
 import type {
@@ -36,6 +36,11 @@ export function loadMCPApprovalStore(): MCPApprovalStore {
  */
 function saveMCPApprovalStore(store: MCPApprovalStore): void {
   try {
+    // Ensure directory exists (first-run case)
+    const dir = dirname(APPROVAL_FILE);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+    }
     writeFileSync(APPROVAL_FILE, JSON.stringify(store, null, 2), {
       mode: 0o600,
     });
@@ -53,12 +58,27 @@ export function isMCPApproved(
   name: string,
   config: MCPServerConfig,
   store: MCPApprovalStore,
+  currentTools?: string[],
 ): boolean {
   const record = store[name];
   if (!record) return false;
 
   const currentHash = computeMCPConfigHash(name, config);
-  return record.configHash === currentHash;
+  if (record.configHash !== currentHash) return false;
+
+  // If tool list is provided, verify it matches approval-time tools
+  if (currentTools && Array.isArray(record.approvedTools)) {
+    const approved = [...record.approvedTools].sort();
+    const current = [...currentTools].sort();
+    if (
+      approved.length !== current.length ||
+      !approved.every((t, i) => t === current[i])
+    ) {
+      return false; // Tool set changed — re-approval required
+    }
+  }
+
+  return true;
 }
 
 /**

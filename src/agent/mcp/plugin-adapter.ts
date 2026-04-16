@@ -138,7 +138,11 @@ function generateInputInterface(tool: MCPToolSchema): string | null {
     const desc = propSchema.description
       ? ` /** ${propSchema.description} */\n`
       : "";
-    lines.push(`${desc}  ${propName}${optional}: ${tsType};`);
+    // Quote property names that aren't valid JS identifiers
+    const safeName = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(propName)
+      ? propName
+      : `"${propName}"`;
+    lines.push(`${desc}  ${safeName}${optional}: ${tsType};`);
   }
 
   lines.push("}");

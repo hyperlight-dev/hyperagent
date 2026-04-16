@@ -3902,7 +3902,7 @@ const moduleInfoTool = defineTool("module_info", {
           return {
             name: `mcp-${serverName}`,
             description: `MCP server "${serverName}" — ${conn.tools.length} tool(s)`,
-            author: "mcp",
+            author: "system",
             importAs: `import { ... } from "host:mcp-${serverName}"`,
             exports: conn.tools.map((t) => ({
               name: t.name,
