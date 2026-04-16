@@ -449,7 +449,8 @@ describe("pptx theme-aware shape defaults", () => {
 const tables: any = await import("../builtin-modules/pptx-tables.js");
 
 describe("pptx-tables theme text colour", () => {
-  it("should use themeTextColor fallback when textColor not set", () => {
+  it("should auto-contrast text regardless of themeTextColor", () => {
+    // autoTextColor always wins — themeTextColor is ignored for contrast safety
     const xml = toXml(
       tables.table({
         headers: ["Name", "Value"],
@@ -457,11 +458,12 @@ describe("pptx-tables theme text colour", () => {
         style: { themeTextColor: "E6EDF3" },
       }),
     );
-    // The text colour E6EDF3 should appear in the output
-    expect(xml).toContain("E6EDF3");
+    // Default theme is light (no theme passed) → dark text auto-selected
+    expect(xml).toContain("333333");
   });
 
-  it("should prefer explicit textColor over themeTextColor", () => {
+  it("should auto-contrast text regardless of explicit textColor", () => {
+    // autoTextColor always wins — even explicit textColor is overridden
     const xml = toXml(
       tables.table({
         headers: ["Name", "Value"],
@@ -469,7 +471,8 @@ describe("pptx-tables theme text colour", () => {
         style: { textColor: "FF0000", themeTextColor: "E6EDF3" },
       }),
     );
-    expect(xml).toContain("FF0000");
+    // Default theme is light → dark text auto-selected, not red
+    expect(xml).toContain("333333");
   });
 
   it("should fall back to 333333 when neither is set", () => {
