@@ -569,3 +569,121 @@ k8s-smoke-test:
     echo "════════════════════════════════════════"
     echo ""
     [ "$FAIL" -eq 0 ]
+
+# ── MCP Setup Recipes ───────────────────────────────────────────────
+#
+# Helper recipes to configure MCP servers for testing and examples.
+# These write to ~/.hyperagent/config.json (gitignored).
+
+# Set up the MCP "everything" test server (reference/test server with echo, add, etc.)
+[unix]
+mcp-setup-everything:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    CONFIG_DIR="$HOME/.hyperagent"
+    CONFIG_FILE="$CONFIG_DIR/config.json"
+    mkdir -p "$CONFIG_DIR"
+
+    if [ -f "$CONFIG_FILE" ]; then
+      # Merge into existing config using node
+      node -e "
+        const fs = require('fs');
+        const cfg = JSON.parse(fs.readFileSync('$CONFIG_FILE', 'utf8'));
+        cfg.mcpServers = cfg.mcpServers || {};
+        cfg.mcpServers.everything = {
+          command: 'npx',
+          args: ['-y', '@modelcontextprotocol/server-everything']
+        };
+        fs.writeFileSync('$CONFIG_FILE', JSON.stringify(cfg, null, 2) + '\n');
+      "
+    else
+      echo '{ "mcpServers": { "everything": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-everything"] } } }' \
+        | node -e "process.stdout.write(JSON.stringify(JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')),null,2)+'\n')" \
+        > "$CONFIG_FILE"
+    fi
+    echo "✅ MCP 'everything' server configured in $CONFIG_FILE"
+    echo "   Start the agent and run: /plugin enable mcp && /mcp enable everything"
+
+# Set up the MCP GitHub server (requires GITHUB_TOKEN env var)
+[unix]
+mcp-setup-github:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    CONFIG_DIR="$HOME/.hyperagent"
+    CONFIG_FILE="$CONFIG_DIR/config.json"
+    mkdir -p "$CONFIG_DIR"
+
+    if [ -z "${GITHUB_TOKEN:-}" ]; then
+      echo "⚠️  GITHUB_TOKEN not set. The GitHub MCP server needs it at runtime."
+      echo "   export GITHUB_TOKEN=ghp_your_token_here"
+      echo "   Continuing with config anyway..."
+    fi
+
+    node -e "
+      const fs = require('fs');
+      const path = '$CONFIG_FILE';
+      const cfg = fs.existsSync(path) ? JSON.parse(fs.readFileSync(path, 'utf8')) : {};
+      cfg.mcpServers = cfg.mcpServers || {};
+      cfg.mcpServers.github = {
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-github'],
+        env: { GITHUB_PERSONAL_ACCESS_TOKEN: '\${GITHUB_TOKEN}' },
+        allowTools: [
+          'list_issues', 'get_issue', 'search_issues',
+          'list_pull_requests', 'get_pull_request',
+          'search_repositories', 'get_file_contents'
+        ],
+        denyTools: ['merge_pull_request', 'delete_branch', 'push_files']
+      };
+      fs.writeFileSync(path, JSON.stringify(cfg, null, 2) + '\n');
+    "
+    echo "✅ MCP 'github' server configured in $CONFIG_FILE"
+    echo "   Requires: export GITHUB_TOKEN=ghp_..."
+    echo "   Start the agent and run: /plugin enable mcp && /mcp enable github"
+
+# Set up the MCP filesystem server (read-only access to a directory)
+[unix]
+mcp-setup-filesystem dir="/tmp/mcp-fs":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    CONFIG_DIR="$HOME/.hyperagent"
+    CONFIG_FILE="$CONFIG_DIR/config.json"
+    DIR="{{ dir }}"
+    mkdir -p "$CONFIG_DIR" "$DIR"
+
+    node -e "
+      const fs = require('fs');
+      const path = '$CONFIG_FILE';
+      const cfg = fs.existsSync(path) ? JSON.parse(fs.readFileSync(path, 'utf8')) : {};
+      cfg.mcpServers = cfg.mcpServers || {};
+      cfg.mcpServers.filesystem = {
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-filesystem', '$DIR']
+      };
+      fs.writeFileSync(path, JSON.stringify(cfg, null, 2) + '\n');
+    "
+    echo "✅ MCP 'filesystem' server configured in $CONFIG_FILE"
+    echo "   Root directory: $DIR"
+    echo "   Start the agent and run: /plugin enable mcp && /mcp enable filesystem"
+
+# Show current MCP config (if any)
+[unix]
+mcp-show-config:
+    #!/usr/bin/env bash
+    CONFIG_FILE="$HOME/.hyperagent/config.json"
+    if [ -f "$CONFIG_FILE" ]; then
+      node -e "
+        const cfg = JSON.parse(require('fs').readFileSync('$CONFIG_FILE', 'utf8'));
+        if (cfg.mcpServers) {
+          console.log('Configured MCP servers:');
+          for (const [name, s] of Object.entries(cfg.mcpServers)) {
+            console.log('  ' + name + ': ' + s.command + ' ' + (s.args || []).join(' '));
+          }
+        } else {
+          console.log('No MCP servers configured.');
+        }
+      "
+    else
+      echo "No config file found at $CONFIG_FILE"
+      echo "Run: just mcp-setup-everything"
+    fi

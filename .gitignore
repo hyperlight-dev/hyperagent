@@ -26,6 +26,7 @@ Cargo.lock
 
 # User data — never commit (approvals, config, logs, cache)
 approved-plugins.json
+approved-mcp.json
 fetch-log.jsonl
 config.json
 *.jsonl

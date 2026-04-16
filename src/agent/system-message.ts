@@ -53,6 +53,7 @@ TEMPLATE — copy this structure every time:
 
 RULES:
   - function handler(event) — EXACTLY this signature, no exceptions
+  - MUST return a value — handler without return = runtime error
   - event is JSON in, return value is JSON out
   - One-shot: runs once, returns, done
   - Common rejection causes: wrong function name, missing return, unclosed braces
@@ -118,6 +119,22 @@ PLUGINS: Require explicit enable via manage_plugin.
   Host plugin functions return values directly (not Promises).
   You CAN use async/await — it works — but await on a plugin call
   is unnecessary since they already return synchronously.
+
+MCP (Model Context Protocol) SERVERS:
+  External tool servers can be enabled via the "mcp" gateway plugin.
+  MCP servers are configured by the operator in ~/.hyperagent/config.json.
+  You CANNOT enable MCP servers yourself — the user must run:
+    /plugin enable mcp       (enables the gateway)
+    /mcp enable <server>     (connects a specific server)
+  Once enabled, MCP tools appear as host:mcp-<server> modules:
+    import { tool_name } from "host:mcp-<server>";
+  Discovery workflow:
+    1. list_mcp_servers() — see configured servers and connection state
+    2. mcp_server_info(name) — get tool schemas and TypeScript declarations
+    3. Write handler code using the host:mcp-<name> module
+  manage_mcp(action, name) — connect/disconnect servers programmatically.
+  Do NOT try to manage_plugin("mcp:<name>") — MCP servers are NOT plugins.
+  Do NOT import from "host:mcp-gateway" — that is the gateway, not a server.
   async/await IS needed for libraries that use Promises internally.
 
 URLS: Do NOT guess URLs — they will 404. Discover via APIs or verify first.

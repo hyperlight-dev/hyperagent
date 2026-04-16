@@ -901,6 +901,40 @@ export async function deepAudit(
       trace(`Filtered ${filteredCount} canary finding(s)`);
     }
 
+    // Filter canary-related injectionAttempts — these are our test markers,
+    // not real injections found in the plugin source.
+    if (result.injectionAttempts) {
+      result.injectionAttempts = result.injectionAttempts.filter(
+        (a) => !a.excerpt.includes(uuid1) && !a.excerpt.includes(uuid2),
+      );
+      if (result.injectionAttempts.length === 0) {
+        result.injectionAttempts = undefined;
+      }
+    }
+
+    // Filter riskReasons that reference our canaries (the LLM sometimes
+    // paraphrases the canary detections into risk reasons)
+    if (canaryStatus === "OK") {
+      const beforeReasons = result.riskReasons.length;
+      result.riskReasons = result.riskReasons.filter(
+        (r) => !r.includes(uuid1) && !r.includes(uuid2),
+      );
+      // Also filter generic canary-mention reasons — if the LLM says
+      // "injection attempts found" but they're ALL our canaries, drop them
+      if (filteredCount > 0 && !result.injectionAttempts) {
+        result.riskReasons = result.riskReasons.filter(
+          (r) =>
+            !r.toLowerCase().includes("prompt injection") ||
+            r.toLowerCase().includes("compromised") ||
+            r.toLowerCase().includes("unreliable"),
+        );
+      }
+      const filteredReasons = beforeReasons - result.riskReasons.length;
+      if (filteredReasons > 0) {
+        trace(`Filtered ${filteredReasons} canary-related risk reason(s)`);
+      }
+    }
+
     progress("verify-canaries-done", "Canary verification passed");
     return result;
   } catch (err) {

@@ -1,0 +1,22 @@
+{
+  "name": "mcp",
+  "version": "1.0.0",
+  "description": "Model Context Protocol (MCP) gateway. Enables external MCP servers as sandbox modules. Configure servers in ~/.hyperagent/config.json.",
+  "hostModules": ["mcp-gateway"],
+  "companions": [],
+  "hints": {
+    "overview": "Gateway plugin for MCP server integration. Enable this plugin to unlock /mcp commands and connect external tool servers.",
+    "criticalRules": [
+      "Enable this plugin FIRST, then use /mcp list to discover configured servers",
+      "Each MCP server must be individually approved before use",
+      "MCP servers run as full OS processes — NOT sandboxed",
+      "Configure servers in ~/.hyperagent/config.json under mcpServers"
+    ],
+    "commonPatterns": [
+      "1. /plugin enable mcp",
+      "2. /mcp list (see configured servers)",
+      "3. /mcp enable github (approve and connect)",
+      "4. import { list_issues } from 'host:mcp-github' in handler code"
+    ]
+  }
+}

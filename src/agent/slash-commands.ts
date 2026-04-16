@@ -27,6 +27,19 @@ import {
   loadOperatorConfig,
   exceedsRiskThreshold,
 } from "../plugin-system/manager.js";
+import type { MCPClientManager } from "./mcp/client-manager.js";
+import {
+  loadMCPApprovalStore,
+  isMCPApproved,
+  approveMCPServer,
+  revokeMCPApproval,
+  auditMCPTools,
+} from "./mcp/approval.js";
+import { maskEnvValue } from "./mcp/sanitise.js";
+import {
+  createMCPPluginAdapter,
+  generateMCPDeclarations,
+} from "./mcp/plugin-adapter.js";
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -56,6 +69,10 @@ export interface SlashCommandDeps {
   registerEventHandler: (session: CopilotSession) => void;
   /** Drain buffered paste lines and warn user before critical prompts. */
   drainAndWarn: (rl: ReadlineInterface) => Promise<void>;
+  /** MCP client manager (null if MCP plugin not enabled). */
+  mcpManager: MCPClientManager | null;
+  /** Callback to sync plugins to sandbox after MCP changes. */
+  syncPlugins: () => Promise<void>;
 }
 
 // ── Handler ──────────────────────────────────────────────────────────
@@ -1193,18 +1210,18 @@ export async function handleSlashCommand(
               for (const line of configSummary) {
                 console.log(`    ${line}`);
               }
-            }
 
-            await drainAndWarn(rl);
-            const finalApprove = state.autoApprove
-              ? "y"
-              : await rl.question(
-                  `\n  ${C.dim("Enable with this configuration? [y/n] ")}`,
-                );
-            if (finalApprove.trim().toLowerCase() !== "y") {
-              console.log(`  ${C.dim("Plugin not enabled.")}`);
-              console.log();
-              break;
+              await drainAndWarn(rl);
+              const finalApprove = state.autoApprove
+                ? "y"
+                : await rl.question(
+                    `\n  ${C.dim("Enable with this configuration? [y/n] ")}`,
+                  );
+              if (finalApprove.trim().toLowerCase() !== "y") {
+                console.log(`  ${C.dim("Plugin not enabled.")}`);
+                console.log();
+                break;
+              }
             }
 
             // Load source before enabling — syncPluginsToSandbox needs
@@ -1515,18 +1532,18 @@ export async function handleSlashCommand(
             for (const line of configSummary) {
               console.log(`    ${line}`);
             }
-          }
 
-          await drainAndWarn(rl);
-          const finalApprove = state.autoApprove
-            ? "y"
-            : await rl.question(
-                `\n  ${C.dim("Enable with this configuration? [y/n] ")}`,
-              );
-          if (finalApprove.trim().toLowerCase() !== "y") {
-            console.log(`  ${C.dim("Plugin not enabled.")}`);
-            console.log();
-            break;
+            await drainAndWarn(rl);
+            const finalApprove = state.autoApprove
+              ? "y"
+              : await rl.question(
+                  `\n  ${C.dim("Enable with this configuration? [y/n] ")}`,
+                );
+            if (finalApprove.trim().toLowerCase() !== "y") {
+              console.log(`  ${C.dim("Plugin not enabled.")}`);
+              console.log();
+              break;
+            }
           }
 
           // ── Step 6: Enable ───────────────────────────
@@ -2247,6 +2264,293 @@ export async function handleSlashCommand(
         console.log();
       }
       return true;
+    }
+
+    // ── MCP Commands ─────────────────────────────────────────
+    //
+    // MCP server management. Only available when the mcp plugin is enabled.
+
+    case "/mcp": {
+      // Gate: MCP plugin must be enabled
+      const mcpPlugin = deps.pluginManager.getPlugin("mcp");
+      if (!mcpPlugin || mcpPlugin.state !== "enabled") {
+        console.log(
+          `  ${C.err("MCP plugin not enabled.")} Run ${C.info("/plugin enable mcp")} first.`,
+        );
+        console.log();
+        return true;
+      }
+
+      if (!deps.mcpManager) {
+        console.log(`  ${C.err("MCP manager not initialised.")}`);
+        console.log();
+        return true;
+      }
+
+      const mcpSubCmd = parts[1]?.toLowerCase();
+      const mcpName = parts[2];
+
+      switch (mcpSubCmd) {
+        // ── /mcp list ────────────────────────────────────
+        case "list": {
+          const servers = deps.mcpManager.listServers();
+          if (servers.length === 0) {
+            console.log(
+              `  No MCP servers configured. Add servers to ${C.dim("~/.hyperagent/config.json")}`,
+            );
+          } else {
+            console.log(`  ${C.label("MCP Servers")} (${servers.length}):\n`);
+            for (const s of servers) {
+              const stateColor =
+                s.state === "connected"
+                  ? C.ok(s.state)
+                  : s.state === "error"
+                    ? C.err(s.state)
+                    : C.dim(s.state);
+              const tools =
+                s.state === "connected" ? ` — ${s.tools.length} tool(s)` : "";
+              console.log(`  ${C.label(s.name)}  [${stateColor}]${tools}`);
+              console.log(
+                `    ${C.dim(`${s.config.command} ${(s.config.args ?? []).join(" ")}`)}`,
+              );
+            }
+          }
+          console.log();
+          return true;
+        }
+
+        // ── /mcp enable <name> ───────────────────────────
+        case "enable": {
+          if (!mcpName) {
+            console.log(`  Usage: ${C.info("/mcp enable <server-name>")}`);
+            console.log();
+            return true;
+          }
+
+          const conn = deps.mcpManager.getConnection(mcpName);
+          if (!conn) {
+            console.log(
+              `  ${C.err(`Unknown MCP server: "${mcpName}"`)}. Check ~/.hyperagent/config.json`,
+            );
+            console.log();
+            return true;
+          }
+
+          if (conn.state === "connected") {
+            console.log(`  ${C.ok(`"${mcpName}" is already connected.`)}`);
+            console.log();
+            return true;
+          }
+
+          try {
+            // Connect and discover tools
+            console.log(`  Connecting to ${C.label(mcpName)}...`);
+            const connected = await deps.mcpManager.connect(mcpName);
+
+            // Audit tool descriptions
+            const warnings = auditMCPTools(connected.tools);
+
+            // Check approval
+            const approvalStore = loadMCPApprovalStore();
+            const approved = isMCPApproved(mcpName, conn.config, approvalStore);
+
+            if (!approved) {
+              // Show approval prompt
+              console.log();
+              console.log(`  ${C.label("MCP Server Approval Required")}`);
+              console.log();
+              console.log(`  Server:  ${C.label(mcpName)}`);
+              console.log(
+                `  Command: ${C.dim(`${conn.config.command} ${(conn.config.args ?? []).join(" ")}`)}`,
+              );
+
+              if (conn.config.env) {
+                console.log(`  Env vars:`);
+                for (const [k, v] of Object.entries(conn.config.env)) {
+                  console.log(`    ${k}=${C.dim(maskEnvValue(v))}`);
+                }
+              }
+
+              console.log();
+              console.log(`  Tools (${connected.tools.length}):`);
+              for (const tool of connected.tools) {
+                console.log(
+                  `    ${C.label(tool.name)} — ${tool.description.slice(0, 80)}`,
+                );
+              }
+
+              if (warnings.length > 0) {
+                console.log();
+                console.log(`  ${C.err("⚠️  Audit Warnings:")}`);
+                for (const w of warnings) {
+                  console.log(`    ${C.err("•")} ${w}`);
+                }
+              }
+
+              console.log();
+              console.log(
+                `  ${C.err("⚠️  This MCP server runs as a full OS process with YOUR permissions.")}`,
+              );
+              console.log(`  ${C.err("   It is NOT sandboxed.")}`);
+              console.log();
+
+              // Auto-approve in auto-approve mode
+              if (deps.state.autoApprove) {
+                console.log(`  ${C.ok("Auto-approved")} (--auto-approve mode)`);
+              } else {
+                await deps.drainAndWarn(rl);
+                const answer = await rl.question(
+                  `  Approve "${mcpName}"? (y/n) `,
+                );
+                if (answer.trim().toLowerCase() !== "y") {
+                  console.log(`  ${C.dim("Cancelled.")}`);
+                  await deps.mcpManager.disconnect(mcpName);
+                  console.log();
+                  return true;
+                }
+              }
+
+              // Store approval
+              approveMCPServer(
+                mcpName,
+                conn.config,
+                connected.tools.map((t) => t.name),
+                warnings,
+                approvalStore,
+              );
+            }
+
+            // Sync to sandbox
+            await deps.syncPlugins();
+
+            console.log(
+              `  ${C.ok(`✓ "${mcpName}" enabled`)} — ${connected.tools.length} tool(s) available as ${C.dim(`host:mcp-${mcpName}`)}`,
+            );
+          } catch (err) {
+            console.log(
+              `  ${C.err(`Failed to enable "${mcpName}": ${(err as Error).message}`)}`,
+            );
+          }
+          console.log();
+          return true;
+        }
+
+        // ── /mcp disable <name> ──────────────────────────
+        case "disable": {
+          if (!mcpName) {
+            console.log(`  Usage: ${C.info("/mcp disable <server-name>")}`);
+            console.log();
+            return true;
+          }
+
+          await deps.mcpManager.disconnect(mcpName);
+          await deps.syncPlugins();
+          console.log(`  ${C.ok(`"${mcpName}" disconnected.`)}`);
+          console.log();
+          return true;
+        }
+
+        // ── /mcp info <name> ─────────────────────────────
+        case "info": {
+          if (!mcpName) {
+            console.log(`  Usage: ${C.info("/mcp info <server-name>")}`);
+            console.log();
+            return true;
+          }
+
+          const info = deps.mcpManager.getConnection(mcpName);
+          if (!info) {
+            console.log(`  ${C.err(`Unknown MCP server: "${mcpName}"`)}`);
+            console.log();
+            return true;
+          }
+
+          console.log(`  ${C.label(mcpName)}`);
+          console.log(`  State:   ${info.state}`);
+          console.log(
+            `  Command: ${info.config.command} ${(info.config.args ?? []).join(" ")}`,
+          );
+          if (info.config.allowTools) {
+            console.log(`  Allow:   ${info.config.allowTools.join(", ")}`);
+          }
+          if (info.config.denyTools) {
+            console.log(`  Deny:    ${info.config.denyTools.join(", ")}`);
+          }
+
+          if (info.tools.length > 0) {
+            console.log();
+            console.log(`  Tools (${info.tools.length}):`);
+            for (const tool of info.tools) {
+              console.log(`    ${C.label(tool.name)}`);
+              console.log(`      ${C.dim(tool.description.slice(0, 120))}`);
+            }
+
+            console.log();
+            console.log(`  ${C.dim("TypeScript declarations:")}`);
+            console.log(C.dim(generateMCPDeclarations(mcpName, info.tools)));
+          }
+          console.log();
+          return true;
+        }
+
+        // ── /mcp approve <name> ──────────────────────────
+        case "approve": {
+          if (!mcpName) {
+            console.log(`  Usage: ${C.info("/mcp approve <server-name>")}`);
+            console.log();
+            return true;
+          }
+
+          const conn2 = deps.mcpManager.getConnection(mcpName);
+          if (!conn2) {
+            console.log(`  ${C.err(`Unknown MCP server: "${mcpName}"`)}`);
+            console.log();
+            return true;
+          }
+
+          const store = loadMCPApprovalStore();
+          approveMCPServer(mcpName, conn2.config, [], [], store);
+          console.log(`  ${C.ok(`"${mcpName}" pre-approved.`)}`);
+          console.log();
+          return true;
+        }
+
+        // ── /mcp revoke <name> ───────────────────────────
+        case "revoke": {
+          if (!mcpName) {
+            console.log(`  Usage: ${C.info("/mcp revoke <server-name>")}`);
+            console.log();
+            return true;
+          }
+
+          const store2 = loadMCPApprovalStore();
+          if (revokeMCPApproval(mcpName, store2)) {
+            console.log(`  ${C.ok(`Approval revoked for "${mcpName}".`)}`);
+          } else {
+            console.log(`  ${C.dim(`"${mcpName}" was not approved.`)}`);
+          }
+          console.log();
+          return true;
+        }
+
+        default: {
+          console.log(`  ${C.label("MCP Commands:")}`);
+          console.log(
+            `  ${C.dim("/mcp list              — show configured servers")}`,
+          );
+          console.log(
+            `  ${C.dim("/mcp enable <name>     — approve and connect")}`,
+          );
+          console.log(`  ${C.dim("/mcp disable <name>    — disconnect")}`);
+          console.log(
+            `  ${C.dim("/mcp info <name>       — show tools and details")}`,
+          );
+          console.log(`  ${C.dim("/mcp approve <name>    — pre-approve")}`);
+          console.log(`  ${C.dim("/mcp revoke <name>     — remove approval")}`);
+          console.log();
+          return true;
+        }
+      }
     }
 
     case "/help": {

@@ -692,6 +692,48 @@ if (discoveredCount > 0) {
   console.error(`[plugins] Discovered ${discoveredCount} plugin(s)`);
 }
 
+// ── MCP Integration ──────────────────────────────────────────────────
+import { parseMCPConfig } from "./mcp/config.js";
+import {
+  createMCPClientManager,
+  type MCPClientManager,
+} from "./mcp/client-manager.js";
+import {
+  createMCPPluginAdapter,
+  generateMCPDeclarations,
+} from "./mcp/plugin-adapter.js";
+
+// Load MCP config from ~/.hyperagent/config.json
+let mcpManager: MCPClientManager | null = null;
+
+{
+  const configPath = join(homedir(), ".hyperagent", "config.json");
+  try {
+    if (existsSync(configPath)) {
+      const rawConfig = JSON.parse(readFileSync(configPath, "utf8"));
+      if (rawConfig.mcpServers) {
+        const { config: mcpConfig, errors } = parseMCPConfig(
+          rawConfig.mcpServers,
+        );
+        if (errors.length > 0) {
+          for (const e of errors) {
+            console.error(`[mcp] Config error (${e.server}): ${e.message}`);
+          }
+        }
+        if (mcpConfig.servers.size > 0) {
+          mcpManager = createMCPClientManager();
+          for (const [name, serverConfig] of mcpConfig.servers) {
+            mcpManager.registerServer(name, serverConfig);
+          }
+          console.error(`[mcp] ${mcpConfig.servers.size} server(s) configured`);
+        }
+      }
+    }
+  } catch (err) {
+    console.error(`[mcp] Failed to load config: ${(err as Error).message}`);
+  }
+}
+
 /**
  * Synchronise enabled plugins with the sandbox. Called whenever
  * the sandbox dirty flag is set (plugin enabled/disabled).
@@ -792,6 +834,19 @@ async function syncPluginsToSandbox(): Promise<void> {
     }
   }
 
+  // Add MCP server adapters for connected servers
+  if (mcpManager) {
+    const mcpPlugin = pluginManager.getPlugin("mcp");
+    if (mcpPlugin && mcpPlugin.state === "enabled") {
+      for (const conn of mcpManager.listServers()) {
+        if (conn.state === "connected" && conn.tools.length > 0) {
+          const adapter = createMCPPluginAdapter(conn, mcpManager);
+          registrations.push(adapter);
+        }
+      }
+    }
+  }
+
   // Hand the registrations to the sandbox — it will rebuild on next call
   // Await is important: saves shared-state before invalidating the sandbox
   await sandbox.setPlugins(registrations);
@@ -885,6 +940,8 @@ async function handleSlashCommand(
     buildSessionConfig,
     registerEventHandler,
     drainAndWarn,
+    mcpManager, // Real MCP manager (or null if no config)
+    syncPlugins: syncPluginsToSandbox,
   };
   return handleSlashCommandImpl(rawInput, rl, slashDeps);
 }
@@ -950,11 +1007,22 @@ function loadModuleFilesForValidator(
         moduleJsons[specifier] = readFileSync(jsonPath, "utf-8");
       }
     } else if (specifier.startsWith("host:")) {
-      // Host plugins run in Node.js (not sandbox) and have passed audit.
-      // Don't validate their source - only load host-modules.d.ts for type info.
-      const hostModulesDts = join(pluginsDir, "host-modules.d.ts");
-      if (existsSync(hostModulesDts) && !dtsSources[specifier]) {
-        dtsSources[specifier] = readFileSync(hostModulesDts, "utf-8");
+      if (specifier.startsWith("host:mcp-") && mcpManager) {
+        // MCP modules: dynamically generate .d.ts from connected server tools
+        const serverName = specifier.slice("host:mcp-".length);
+        const conn = mcpManager.getConnection(serverName);
+        if (conn && conn.state === "connected" && conn.tools.length > 0) {
+          dtsSources[specifier] = generateMCPDeclarations(
+            serverName,
+            conn.tools,
+          );
+        }
+      } else {
+        // Native host plugins: load host-modules.d.ts for type info
+        const hostModulesDts = join(pluginsDir, "host-modules.d.ts");
+        if (existsSync(hostModulesDts) && !dtsSources[specifier]) {
+          dtsSources[specifier] = readFileSync(hostModulesDts, "utf-8");
+        }
       }
       // Mark as resolved (empty source = skip deep validation, but not missing)
       sources[specifier] = "";
@@ -3252,6 +3320,190 @@ const pluginInfoTool = defineTool("plugin_info", {
   },
 });
 
+// ── MCP SDK Tools ────────────────────────────────────────────────────
+//
+// Three tools for LLM-driven MCP server management. Only available
+// when the gateway `mcp` plugin is enabled. The LLM discovers MCP
+// by first enabling `mcp` via manage_plugin, then using these tools.
+
+/**
+ * Check whether the MCP gateway plugin is enabled.
+ * All MCP SDK tools gate on this — returns an error message if not.
+ */
+function requireMCPEnabled(): string | null {
+  const mcpPlugin = pluginManager.getPlugin("mcp");
+  if (!mcpPlugin || mcpPlugin.state !== "enabled") {
+    return 'MCP is not enabled. Enable it first: use manage_plugin to enable "mcp", then retry.';
+  }
+  if (!mcpManager) {
+    return "No MCP servers configured. Add servers to ~/.hyperagent/config.json under mcpServers.";
+  }
+  return null;
+}
+
+const listMCPServersTool = defineTool("list_mcp_servers", {
+  description: [
+    "List all configured MCP servers with their connection state and available tools.",
+    "Use this to discover which external tool servers are available.",
+    "Requires the 'mcp' plugin to be enabled first.",
+  ].join("\n"),
+  parameters: {
+    type: "object",
+    properties: {},
+  },
+  handler: async () => {
+    const err = requireMCPEnabled();
+    if (err) return { error: err };
+
+    const servers = mcpManager!.listServers().map((conn) => ({
+      name: conn.name,
+      state: conn.state,
+      command: conn.config.command,
+      toolCount: conn.tools.length,
+      tools: conn.tools.map((t) => t.name),
+      module: `host:mcp-${conn.name}`,
+      lastError: conn.lastError ?? null,
+    }));
+
+    return { servers, total: servers.length };
+  },
+});
+
+const mcpServerInfoTool = defineTool("mcp_server_info", {
+  description: [
+    "Get detailed information about a specific MCP server including its",
+    "tool schemas, connection state, and TypeScript declarations.",
+    "Use list_mcp_servers first to see available server names.",
+    "CALL THIS before writing handler code that uses host:mcp-* modules.",
+  ].join("\n"),
+  parameters: {
+    type: "object",
+    properties: {
+      name: {
+        type: "string",
+        description: 'MCP server name (e.g. "github", "everything").',
+      },
+    },
+    required: ["name"],
+  },
+  handler: async ({ name }: { name: string }) => {
+    const err = requireMCPEnabled();
+    if (err) return { error: err };
+
+    // Also counts as API discovery (satisfies hasCalledListModules)
+    state.hasCalledListModules = true;
+
+    const conn = mcpManager!.getConnection(name);
+    if (!conn) {
+      const available = mcpManager!
+        .listServers()
+        .map((c) => c.name)
+        .join(", ");
+      return {
+        error: `MCP server "${name}" not found. Available: ${available || "(none)"}`,
+      };
+    }
+
+    // Generate TypeScript declarations for the server's tools
+    let declarations: string | null = null;
+    if (conn.tools.length > 0) {
+      declarations = generateMCPDeclarations(conn.name, conn.tools);
+    }
+
+    return {
+      name: conn.name,
+      state: conn.state,
+      command: conn.config.command,
+      args: conn.config.args ?? [],
+      toolCount: conn.tools.length,
+      tools: conn.tools.map((t) => ({
+        name: t.name,
+        description: t.description,
+        parameters: t.inputSchema,
+      })),
+      module: `host:mcp-${conn.name}`,
+      importPattern: `import { ${conn.tools.map((t) => t.name).join(", ")} } from "host:mcp-${conn.name}";`,
+      declarations,
+      lastError: conn.lastError ?? null,
+    };
+  },
+});
+
+const manageMCPTool = defineTool("manage_mcp", {
+  description: [
+    "Connect or disconnect an MCP server. Use list_mcp_servers to discover",
+    "available servers. Connecting spawns the server process and discovers",
+    "its tools. The user must approve new servers (security review).",
+    "",
+    "After connecting, the server's tools are available as host:mcp-<name>",
+    "modules in handler code.",
+  ].join("\n"),
+  parameters: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        description: "Action: 'connect' or 'disconnect'",
+        enum: ["connect", "disconnect"],
+      },
+      name: {
+        type: "string",
+        description: 'MCP server name (e.g. "github", "everything").',
+      },
+    },
+    required: ["action", "name"],
+  },
+  handler: async (params: {
+    action: "connect" | "disconnect";
+    name: string;
+  }) => {
+    const err = requireMCPEnabled();
+    if (err) return { error: err };
+
+    const conn = mcpManager!.getConnection(params.name);
+    if (!conn) {
+      const available = mcpManager!
+        .listServers()
+        .map((c) => c.name)
+        .join(", ");
+      return {
+        error: `MCP server "${params.name}" not found. Available: ${available || "(none)"}`,
+      };
+    }
+
+    if (params.action === "connect") {
+      if (conn.state === "connected") {
+        return {
+          success: true,
+          message: `"${params.name}" is already connected with ${conn.tools.length} tool(s).`,
+          tools: conn.tools.map((t) => t.name),
+        };
+      }
+
+      // Suggest the user use /mcp enable which handles approval
+      return {
+        success: false,
+        message: `Use /mcp enable ${params.name} to connect — it handles approval and security review.`,
+        hint: "Tell the user to run the /mcp enable command.",
+      };
+    }
+
+    // Disconnect
+    if (conn.state !== "connected") {
+      return {
+        success: true,
+        message: `"${params.name}" is already disconnected (state: ${conn.state}).`,
+      };
+    }
+
+    await mcpManager!.disconnect(params.name);
+    return {
+      success: true,
+      message: `"${params.name}" disconnected.`,
+    };
+  },
+});
+
 // ── Module Tools ─────────────────────────────────────────────────────
 //
 // Four tools for user module lifecycle: register, list, info, delete.
@@ -3496,17 +3748,39 @@ const listModulesTool = defineTool("list_modules", {
     try {
       // Filter out internal modules (names starting with _)
       const modules = listModules().filter((m) => !m.name.startsWith("_"));
+      const result = modules.map((m) => ({
+        name: m.name,
+        description: m.description,
+        exports: formatExports(m.exports),
+        author: m.author,
+        mutable: m.mutable,
+        sizeBytes: m.sizeBytes,
+        importAs: `import { ... } from "ha:${m.name}"`,
+      }));
+
+      // Include connected MCP server modules
+      if (mcpManager) {
+        const mcpPlugin = pluginManager.getPlugin("mcp");
+        if (mcpPlugin && mcpPlugin.state === "enabled") {
+          for (const conn of mcpManager.listServers()) {
+            if (conn.state === "connected" && conn.tools.length > 0) {
+              result.push({
+                name: `mcp-${conn.name}`,
+                description: `MCP server "${conn.name}" — ${conn.tools.length} tool(s)`,
+                exports: conn.tools.map((t) => t.name).join(", "),
+                author: "system" as const,
+                mutable: false,
+                sizeBytes: 0,
+                importAs: `import { ... } from "host:mcp-${conn.name}"`,
+              });
+            }
+          }
+        }
+      }
+
       return {
-        modules: modules.map((m) => ({
-          name: m.name,
-          description: m.description,
-          exports: formatExports(m.exports),
-          author: m.author,
-          mutable: m.mutable,
-          sizeBytes: m.sizeBytes,
-          importAs: `import { ... } from "ha:${m.name}"`,
-        })),
-        count: modules.length,
+        modules: result,
+        count: result.length,
       };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -3616,6 +3890,31 @@ const moduleInfoTool = defineTool("module_info", {
           error: `Module "${name}" not found. Available: ${available.join(", ") || "(none)"}`,
         };
       }
+      // Check if this is an MCP module
+      if (name.startsWith("mcp-") && mcpManager) {
+        const serverName = name.slice("mcp-".length);
+        const conn = mcpManager.getConnection(serverName);
+        if (conn && conn.state === "connected" && conn.tools.length > 0) {
+          const { generateMCPModuleHints, generateMCPDeclarations } =
+            await import("./mcp/plugin-adapter.js");
+          const hints = generateMCPModuleHints(serverName, conn.tools);
+          const decl = generateMCPDeclarations(serverName, conn.tools);
+          return {
+            name: `mcp-${serverName}`,
+            description: `MCP server "${serverName}" — ${conn.tools.length} tool(s)`,
+            author: "system",
+            importAs: `import { ... } from "host:mcp-${serverName}"`,
+            exports: conn.tools.map((t) => ({
+              name: t.name,
+              description: t.description,
+              parameters: t.inputSchema,
+            })),
+            hints,
+            typeDefinitions: decl,
+          };
+        }
+      }
+
       const info = await loadModuleAsync(name);
       if (!info) {
         const available = listModules()
@@ -3995,6 +4294,10 @@ function buildSessionConfig() {
       writeOutputTool,
       readInputTool,
       readOutputTool,
+      // MCP SDK tools — gated inside handlers, always registered
+      listMCPServersTool,
+      mcpServerInfoTool,
+      manageMCPTool,
       // Conditionally include tuning tool — only when --tune is active
       ...(state.tuneEnabled ? [llmThoughtTool] : []),
     ],
@@ -4026,6 +4329,10 @@ function buildSessionConfig() {
       "read_output",
       "ask_user",
       "report_intent",
+      // MCP tools — always listed, gated inside handler
+      "list_mcp_servers",
+      "mcp_server_info",
+      "manage_mcp",
       // Conditionally expose tuning tool
       ...(state.tuneEnabled ? ["llm_thought"] : []),
     ],

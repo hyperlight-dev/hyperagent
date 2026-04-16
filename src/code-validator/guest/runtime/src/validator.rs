@@ -471,6 +471,9 @@ pub fn validate_javascript(source: &str, context: &ValidationContext) -> Validat
     let mut warnings = Vec::new();
     let mut all_imports = Vec::new();
 
+    // Strip comments once — all subsequent checks use clean source
+    let clean = strip_js_comments(source);
+
     // 0. Validate module.json hashes (drift detection)
     // System module mismatches are errors (blocks registration).
     // User module mismatches are warnings (informational only).
@@ -478,11 +481,11 @@ pub fn validate_javascript(source: &str, context: &ValidationContext) -> Validat
     errors.extend(hash_errors);
     warnings.extend(hash_warnings);
 
-    // Extract imports and module info using simple string parsing
-    let imports = extract_imports(source);
-    let has_handler_export = check_handler_export(source);
-    let has_handler_function = check_handler_function(source);
-    let is_module = check_is_module(source);
+    // Extract imports and module info using comment-stripped source
+    let imports = extract_imports(&clean);
+    let has_handler_export = check_handler_export(&clean);
+    let has_handler_function = check_handler_function(&clean);
+    let is_module = check_is_module(&clean);
 
     // 1. Check handler name conflicts FIRST (cheap check)
     if context
@@ -556,10 +559,45 @@ pub fn validate_javascript(source: &str, context: &ValidationContext) -> Validat
     if context.expect_handler && !has_handler_export && !has_handler_function {
         errors.push(ValidationError {
             error_type: "structure".to_string(),
-            message: "Handler code must define a 'handler' function. Example: function handler(event) { ... }".to_string(),
+            message: concat!(
+                "Handler code MUST define: function handler(event) { ... return result; }\n",
+                "  The function MUST be named exactly 'handler' (not Handler, handle, main, run).\n",
+                "  It MUST accept one argument (event) and MUST return a value.\n",
+                "  Example:\n",
+                "    import * as pptx from 'ha:pptx';\n",
+                "    function handler(event) {\n",
+                "      const result = pptx.createPresentation();\n",
+                "      return { success: true, data: result };\n",
+                "    }"
+            ).to_string(),
             line: None,
             column: None,
         });
+    }
+
+    // 4b. If handler exists, check it has a return statement and correct signature
+    if context.expect_handler && (has_handler_export || has_handler_function) {
+        // Check for return statement inside handler (uses comment-stripped source)
+        let has_return = check_handler_has_return(&clean);
+        if !has_return {
+            errors.push(ValidationError {
+                error_type: "structure".to_string(),
+                message: "Handler function MUST return a value. Without 'return' you will get: 'The handler function did not return a value'. Fix: add 'return { ... };' at the end of your handler function.".to_string(),
+                line: None,
+                column: None,
+            });
+        }
+
+        // Check handler takes at least one parameter
+        let has_param = check_handler_has_param(&clean);
+        if !has_param {
+            errors.push(ValidationError {
+                error_type: "structure".to_string(),
+                message: "Handler function MUST accept an event parameter: function handler(event) { ... return result; }. Without it you cannot receive input from execute_javascript.".to_string(),
+                line: None,
+                column: None,
+            });
+        }
     }
 
     // 5. Parse with QuickJS to check syntax (using static runtime)
@@ -603,8 +641,8 @@ pub fn validate_javascript(source: &str, context: &ValidationContext) -> Validat
 
     let deep_validation_done = missing_sources.is_empty();
 
-    // 8. Check for QuickJS compatibility issues
-    check_compatibility_warnings(source, &mut warnings);
+    // 8. Check for QuickJS compatibility issues (errors for Node.js APIs, warnings for rare ones)
+    check_compatibility_issues(&clean, &mut errors, &mut warnings);
 
     // 9. Deep method validation (Phase 4.5)
     // Build metadata from .d.ts (preferred) or .js sources
@@ -837,6 +875,98 @@ fn check_syntax_with_quickjs(source: &str) -> Option<ValidationError> {
 }
 
 /// Extract import specifiers from source.
+/// Strip all JavaScript comments from source code.
+/// Replaces `// ...` and `/* ... */` with whitespace to preserve line numbers.
+/// Respects string literals — quotes inside comments don't matter, and
+/// comment-like sequences inside strings are left alone.
+fn strip_js_comments(source: &str) -> String {
+    let bytes = source.as_bytes();
+    let len = bytes.len();
+    let mut out = String::with_capacity(len);
+    let mut i = 0;
+
+    while i < len {
+        match bytes[i] {
+            // String literals — copy verbatim (skip comment-like content inside)
+            b'"' | b'\'' => {
+                let quote = bytes[i];
+                out.push(quote as char);
+                i += 1;
+                while i < len && bytes[i] != quote {
+                    if bytes[i] == b'\\' && i + 1 < len {
+                        out.push(bytes[i] as char);
+                        i += 1;
+                    }
+                    out.push(bytes[i] as char);
+                    i += 1;
+                }
+                if i < len {
+                    out.push(bytes[i] as char); // closing quote
+                    i += 1;
+                }
+            }
+            // Template literals — copy verbatim
+            b'`' => {
+                out.push('`');
+                i += 1;
+                while i < len && bytes[i] != b'`' {
+                    if bytes[i] == b'\\' && i + 1 < len {
+                        out.push(bytes[i] as char);
+                        i += 1;
+                    }
+                    out.push(bytes[i] as char);
+                    i += 1;
+                }
+                if i < len {
+                    out.push('`'); // closing backtick
+                    i += 1;
+                }
+            }
+            // Single-line comment — replace with spaces (preserve line structure)
+            // Guard: if preceded by a backslash, this might be inside a regex
+            // literal (e.g. /https?:\/\//). Skip the comment treatment.
+            b'/' if i + 1 < len && bytes[i + 1] == b'/' => {
+                if i > 0 && bytes[i - 1] == b'\\' {
+                    // Likely inside a regex literal — keep as-is
+                    out.push('/');
+                    i += 1;
+                } else {
+                    while i < len && bytes[i] != b'\n' {
+                        out.push(' ');
+                        i += 1;
+                    }
+                }
+            }
+            // Block comment — replace with spaces, preserve newlines
+            b'/' if i + 1 < len && bytes[i + 1] == b'*' => {
+                out.push(' ');
+                out.push(' ');
+                i += 2;
+                while i + 1 < len && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                    if bytes[i] == b'\n' {
+                        out.push('\n');
+                    } else {
+                        out.push(' ');
+                    }
+                    i += 1;
+                }
+                if i + 1 < len {
+                    out.push(' ');
+                    out.push(' ');
+                    i += 2; // skip */
+                }
+            }
+            // Everything else — copy as-is
+            _ => {
+                out.push(bytes[i] as char);
+                i += 1;
+            }
+        }
+    }
+
+    out
+}
+
 fn extract_imports(source: &str) -> Vec<String> {
     extract_all_imports(source)
 }
@@ -884,6 +1014,109 @@ fn check_handler_function(source: &str) -> bool {
         || source.contains("var handler")
     {
         return true;
+    }
+    false
+}
+
+/// Check if the handler function contains a return statement.
+/// Scans ONLY the handler function body (brace-matched) for 'return'.
+fn check_handler_has_return(source: &str) -> bool {
+    // Source is already comment-stripped — just brace-match the handler body
+    if let Some(handler_pos) = source.find("function handler") {
+        let rest = &source[handler_pos..];
+        if let Some(open_brace) = rest.find('{') {
+            let body_start = open_brace + 1;
+            let mut depth = 1;
+            let bytes = rest.as_bytes();
+            let mut i = body_start;
+            let mut found_return = false;
+
+            while i < bytes.len() && depth > 0 {
+                match bytes[i] {
+                    b'{' => depth += 1,
+                    b'}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    b'r' => {
+                        if rest[i..].starts_with("return ")
+                            || rest[i..].starts_with("return;")
+                            || rest[i..].starts_with("return\n")
+                            || rest[i..].starts_with("return}")
+                        {
+                            found_return = true;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+
+            return found_return;
+        }
+    }
+    // Arrow function: const handler = (event) => expr (implicit return)
+    if let Some(handler_pos) = source.find("const handler") {
+        let rest = &source[handler_pos..];
+        if let Some(arrow_pos) = rest.find("=>") {
+            let after_arrow = rest[arrow_pos + 2..].trim_start();
+            if !after_arrow.starts_with('{') {
+                return true; // expression body = implicit return
+            }
+            // Arrow with braces — check for return in body
+            if let Some(open) = after_arrow.find('{') {
+                let body = &after_arrow[open..];
+                return body.contains("return ");
+            }
+        }
+    }
+    false
+}
+
+/// Check if the handler function has at least one parameter.
+fn check_handler_has_param(source: &str) -> bool {
+    // Simple string search — more reliable than regex in no_std
+    for line in source.lines() {
+        let trimmed = line.trim();
+        // Match: function handler(something or export function handler(something
+        if trimmed.contains("function handler(") {
+            // Check if there's a non-empty param: handler( followed by non-) non-whitespace
+            if let Some(paren_pos) = trimmed.find("handler(") {
+                let after_paren = &trimmed[paren_pos + 8..];
+                if let Some(c) = after_paren.trim_start().chars().next()
+                    && c != ')'
+                {
+                    return true;
+                }
+            }
+        }
+        // Arrow: const handler = (event) => or handler = event =>
+        // Must verify it actually has a parameter, not just () =>
+        if (trimmed.contains("const handler") || trimmed.contains("let handler"))
+            && trimmed.contains("=>")
+        {
+            // Check for non-empty parens: handler = (something) =>
+            if let Some(eq_pos) = trimmed.find('=') {
+                let after_eq = trimmed[eq_pos + 1..].trim_start();
+                // Skip any second '=' (==)
+                if after_eq.starts_with('=') {
+                    // Not an assignment — skip
+                } else if after_eq.starts_with('(') {
+                    // Parenthesised params: check for non-empty (x) vs ()
+                    if let Some(close) = after_eq.find(')') {
+                        let params = after_eq[1..close].trim();
+                        if !params.is_empty() {
+                            return true;
+                        }
+                    }
+                } else if !after_eq.starts_with("=>") {
+                    // Bare param without parens: handler = event => ...
+                    return true;
+                }
+            }
+        }
     }
     false
 }
@@ -998,22 +1231,29 @@ fn clean_error_message(msg: &str) -> String {
 }
 
 /// Check for QuickJS compatibility issues.
-fn check_compatibility_warnings(source: &str, warnings: &mut Vec<ValidationWarning>) {
+/// Node.js APIs that will ALWAYS fail at runtime are errors, not warnings.
+fn check_compatibility_issues(
+    source: &str,
+    errors: &mut Vec<ValidationError>,
+    warnings: &mut Vec<ValidationWarning>,
+) {
     use regex_automata::meta::Regex;
 
     // Note: We avoid \b and \s because regex-automata in no_std
     // doesn't support unicode character classes without additional features.
     // Using ASCII equivalents: [ \t\n\r] instead of \s
-    let node_patterns = [
+
+    // Hard errors — these WILL fail at runtime, no point continuing
+    let error_patterns = [
+        (
+            r"require[ \t\n\r]*\(",
+            "require() is not available. Use ES module import syntax: import { x } from 'ha:module'",
+        ),
         (
             r"Buffer\.",
             "Buffer is not available in QuickJS sandbox. Use Uint8Array instead.",
         ),
         (r"process\.", "process is not available in QuickJS sandbox."),
-        (
-            r"require[ \t\n\r]*\(",
-            "require() is not available. Use ES module import syntax instead.",
-        ),
         (
             r"__dirname",
             "__dirname is not available in QuickJS sandbox.",
@@ -1022,6 +1262,10 @@ fn check_compatibility_warnings(source: &str, warnings: &mut Vec<ValidationWarni
             r"__filename",
             "__filename is not available in QuickJS sandbox.",
         ),
+    ];
+
+    // Soft warnings — less common, might be in dead code
+    let warning_patterns = [
         (
             r"setImmediate[ \t\n\r]*\(",
             "setImmediate is not available in QuickJS sandbox.",
@@ -1032,7 +1276,21 @@ fn check_compatibility_warnings(source: &str, warnings: &mut Vec<ValidationWarni
         ),
     ];
 
-    for (pattern, message) in node_patterns {
+    for (pattern, message) in error_patterns {
+        if let Ok(re) = Regex::new(pattern)
+            && re.is_match(source.as_bytes())
+        {
+            let line = find_pattern_line(source, &re);
+            errors.push(ValidationError {
+                error_type: "compatibility".to_string(),
+                message: message.to_string(),
+                line,
+                column: None,
+            });
+        }
+    }
+
+    for (pattern, message) in warning_patterns {
         if let Ok(re) = Regex::new(pattern)
             && re.is_match(source.as_bytes())
         {
@@ -1932,7 +2190,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compatibility_warning_buffer() {
+    fn test_compatibility_error_buffer() {
         let source = r#"
             function handler(event) {
                 const buf = Buffer.from("hello");
@@ -1940,22 +2198,19 @@ mod tests {
             }
         "#;
         let result = validate_javascript(source, &default_context());
-        assert!(result.warnings.iter().any(|w| w.message.contains("Buffer")));
+        assert!(!result.valid, "Buffer usage should be an error");
+        assert!(result.errors.iter().any(|e| e.message.contains("Buffer")));
     }
 
     #[test]
-    fn test_compatibility_warning_require() {
+    fn test_compatibility_error_require() {
         let source = r#"
             const fs = require('fs');
             function handler(event) { return fs.readFileSync('/etc/passwd'); }
         "#;
         let result = validate_javascript(source, &default_context());
-        assert!(
-            result
-                .warnings
-                .iter()
-                .any(|w| w.message.contains("require"))
-        );
+        assert!(!result.valid, "require() usage should be an error");
+        assert!(result.errors.iter().any(|e| e.message.contains("require")));
     }
 
     #[test]

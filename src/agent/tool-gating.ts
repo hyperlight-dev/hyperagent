@@ -30,6 +30,10 @@ export const ALLOWED_TOOLS = new Set<string>([
   "delete_module", // Delete a user module
   "write_output", // Write text content directly to fs-write base directory
   "read_input", // Read text content directly from fs-read base directory
+  "read_output", // Read content from a previously written output
   "report_intent", // SDK protocol — the model uses this to signal intent
   "ask_user", // SDK protocol — structured questions to the user
+  "list_mcp_servers", // List configured MCP servers + status
+  "mcp_server_info", // Detailed MCP server info + tool schemas
+  "manage_mcp", // Connect/disconnect MCP servers
 ]);

@@ -3,6 +3,7 @@
 > **Status**: Planned
 > **Author**: HyperAgent team
 > **Date**: April 2026
+> **Updated**: April 2026 — gap analysis, architecture decisions
 
 ## Overview
 
@@ -15,7 +16,37 @@ Users configure MCP servers in `~/.hyperagent/config.json` (accepting the same
 format as VS Code's `mcp.json`), and the system lazily spawns stdio server
 processes, discovers their tools, auto-generates TypeScript declarations and
 module metadata, and bridges calls through the existing plugin registration
-mechanism under the `mcp:<server-name>` namespace.
+mechanism under the `host:mcp-<server>` namespace.
+
+### Architecture Decisions
+
+1. **Gateway plugin**: A native `mcp` plugin in `plugins/mcp/` gates the
+   entire MCP subsystem. It goes through normal audit/approve/enable. The
+   MCP client manager, config parsing, and server lifecycle all live behind
+   this plugin — nothing MCP runs until the user approves it.
+
+2. **Separate `/mcp` commands**: MCP servers are managed via `/mcp list`,
+   `/mcp enable`, etc. — NOT via `/plugin`. The `/mcp` commands are only
+   available when the `mcp` plugin is enabled.
+
+3. **Per-tool filtering**: Each MCP server config supports `allowTools`
+   and `denyTools` arrays. If `allowTools` is set, only listed tools are
+   exposed. If only `denyTools` is set, all tools except denied ones are
+   exposed. If both are set, `allowTools` takes precedence (then deny
+   removes from that set). This prevents accidental exposure of destructive
+   tools (e.g. `merge_pull_request`, `delete_branch`).
+
+4. **Tool description auditing**: MCP tool descriptions are audited for
+   prompt injection risk before being surfaced to the LLM. Suspicious
+   patterns (instruction injection, role overrides) are flagged during
+   server approval.
+
+5. **v1 scope**: Tools only. MCP resources and prompts are backlogged
+   for v2. Server installation is out of band.
+
+6. **Namespace**: MCP modules use the `host:` prefix as `host:mcp-<name>`
+   (e.g. `host:mcp-weather`). The NAPI layer's `proto.hostModule()` only
+   supports the `host:` prefix — custom `mcp:` prefix is not supported.
 
 ### Why Code Mode?
 
@@ -86,7 +117,7 @@ and the `listTools` / `callTool` API.
 ┌──────────────────────────────────────────────────────────────┐
 │  Hyperlight Sandbox (micro-VM)                               │
 │                                                              │
-│  const weather = require("mcp:weather");                     │
+│  const weather = require("host:mcp-weather");                │
 │  const result = weather.get_forecast({ location: "Austin" });│
 │  // → { temperature: 93, conditions: "sunny" }              │
 │                                                              │
@@ -117,11 +148,18 @@ Add an `mcpServers` field to the operator config in
     "github": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": { "GITHUB_TOKEN": "${GITHUB_TOKEN}" }
+      "env": { "GITHUB_TOKEN": "${GITHUB_TOKEN}" },
+      "allowTools": ["list_pull_requests", "get_pull_request", "list_issues", "create_issue"],
+      "denyTools": ["merge_pull_request", "delete_branch"]
     }
   }
 }
 ```
+
+- `allowTools` — if set, only these tools are exposed to the sandbox.
+- `denyTools` — if set, these tools are hidden even if discovered.
+- If both are set, `allowTools` takes precedence (then deny removes from that set).
+- If neither is set, all discovered tools are exposed (with user approval).
 
 - Parse and validate at startup via the existing config loading path.
 - Support `${ENV_VAR}` substitution in `env` values so secrets stay in the
@@ -191,7 +229,7 @@ native plugins use):
 **Guest perspective** — sandbox code:
 
 ```javascript
-const weather = require("mcp:weather");
+const weather = require("host:mcp-weather");
 const result = weather.get_forecast({ location: "Austin, TX" });
 // result = { temperature: 93, conditions: "sunny" }
 ```
@@ -227,19 +265,18 @@ createHostFunctions(config) {
 
 - `src/agent/mcp/plugin-adapter.ts` — NEW
 
-#### Step 2.2 — `mcp:` Namespace Registration
+#### Step 2.2 — `host:mcp-<name>` Namespace Registration
 
-- Register MCP modules with `proto.hostModule(name)` where the module
-  name includes the `mcp:` prefix.
-- **Investigation needed**: does the NAPI layer (`deps/js-host-api/`)
-  hardcode a `host:` prefix? If so, register under `host:` with an
-  `mcp-` name prefix (`host:mcp-weather`) and adjust generated
-  declarations to match.
-- `declaredModules` in the `PluginRegistration` lists the server name.
+- Register MCP modules with `proto.hostModule("mcp-" + serverName)`
+  which exposes them as `host:mcp-<name>` in the sandbox.
+- The NAPI layer (`deps/js-host-api/`) hardcodes the `host:` prefix —
+  custom prefixes are not supported. Using `mcp-` as a name prefix
+  under `host:` gives a clear namespace without NAPI changes.
+- `declaredModules` in the `PluginRegistration` lists `"mcp-" + serverName`.
+- Guest code imports as: `import { tool } from "host:mcp-weather";`
 
-**Files to investigate/modify**:
+**Files**:
 
-- `deps/js-host-api/` — NAPI namespace handling
 - `src/sandbox/tool.js` — `hostModule()` name → guest `require()` path
 
 ---
@@ -254,7 +291,7 @@ module declarations at runtime (not committed).
 Example output for a weather server:
 
 ```typescript
-declare module "mcp:weather" {
+declare module "host:mcp-weather" {
   interface GetForecastInput {
     location: string;
   }
@@ -296,11 +333,17 @@ declare module "mcp:weather" {
 - Approval stored in `~/.hyperagent/approved-mcp.json`.
 - Hash = SHA-256(`name + command + JSON.stringify(args)`) — config
   change invalidates the approval.
-- No LLM audit (there is no source code to audit).
+- **Tool description auditing**: on first connection, tool descriptions
+  are scanned for prompt injection patterns (instruction injection,
+  role overrides, hidden directives). Suspicious descriptions are
+  flagged in the approval prompt with a warning.
 - Approval prompt displays: server name, full command + args, env var
-  **names** (values masked), discovered tools, and the explicit warning
-  that the process runs with full OS permissions (see Phase 6 / T2).
+  **names** (values masked), discovered tools with descriptions,
+  any audit warnings, and the explicit warning that the process runs
+  with full OS permissions (see Phase 6 / T2).
 - `/mcp approve <name>` and `/mcp revoke <name>` commands.
+- The `/mcp` commands are only available when the gateway `mcp` plugin
+  is enabled.
 
 **Files**:
 
@@ -351,10 +394,31 @@ Follow the existing `/plugin` command patterns.
 
 #### Step 5.2 — SDK Tool Integration
 
-- `manage_mcp` — LLM-callable tool for MCP server management (mirrors
-  `manage_plugin`).
-- `list_mcp_servers` / `mcp_server_info` — or extend existing
-  `list_plugins` / `plugin_info` to show MCP servers alongside plugins.
+- `manage_mcp` — LLM-callable tool for MCP server management.
+- `list_mcp_servers` — list configured servers, status, available tools.
+- `mcp_server_info` — show server details, tool schemas, filtering.
+- These tools are only registered when the gateway `mcp` plugin is
+  enabled. The LLM discovers MCP by first enabling the `mcp` plugin
+  via `manage_plugin`, then using these MCP-specific tools.
+
+#### Step 5.3 — Gateway Plugin
+
+- Native plugin at `plugins/mcp/index.ts` — goes through normal
+  audit/approve/enable lifecycle.
+- Enabling the `mcp` plugin:
+  1. Loads MCP config from `~/.hyperagent/config.json`
+  2. Registers `/mcp` slash commands
+  3. Registers `manage_mcp` / `list_mcp_servers` / `mcp_server_info` tools
+  4. Makes MCP servers discoverable to the LLM
+- Disabling the `mcp` plugin closes all MCP connections and removes
+  all `host:mcp-*` modules from the sandbox.
+
+### Backlog (v2)
+
+- **MCP Resources**: expose server resources as read-only data sources.
+- **MCP Prompts**: surface server prompt templates to the agent.
+- **Server installation**: CLI commands to install/manage MCP servers.
+  Currently out of band — users install servers themselves.
 
 ---
 
@@ -431,7 +495,7 @@ Centralised in `src/agent/mcp/sanitise.ts`.
   `${ENV_VAR}` substitution syntax.
 - Usage: `/mcp list`, `/mcp enable`, `/mcp info`, profile integration.
 - Examples: GitHub, filesystem, everything-server.
-- Calling MCP tools from sandbox code: `require("mcp:<name>")`,
+- Calling MCP tools from sandbox code: `require("host:mcp-<name>")`,
   synchronous calling convention.
 - Debugging: connection states, error messages, logs.
 
@@ -529,11 +593,11 @@ Centralised in `src/agent/mcp/sanitise.ts`.
    suite).
 4. Manual: configure a real MCP server
    (`@modelcontextprotocol/server-everything`), call tools from sandbox.
-5. Lazy lifecycle: server NOT spawned until first `require("mcp:*")`.
+5. Lazy lifecycle: server NOT spawned until first `require("host:mcp-*")`.
 6. Approval flow: first use prompts (full command, masked env vars,
    warning), second use skips.
 7. Profile integration: MCP servers activate/deactivate with profiles.
-8. Type generation: `module_info("mcp:<name>")` shows tool descriptions.
+8. Type generation: `module_info("host:mcp-<name>")` shows tool descriptions.
 9. Security:
    - Env var values never in logs (`~/.hyperagent/logs/`).
    - Env var values never in approval prompt output.
