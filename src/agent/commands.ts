@@ -313,6 +313,60 @@ const COMMANDS: readonly CommandEntry[] = Object.freeze([
       "plugin source code. Add --verbose or -v for detailed findings.",
   },
 
+  // ── MCP Servers ───────────────────────────────────────────
+  {
+    completion: "/mcp list",
+    help: "List configured MCP servers with connection state",
+    group: "MCP Servers",
+    detail:
+      "Shows all MCP servers from ~/.hyperagent/config.json with\n" +
+      "their current state (idle, connected, error) and tool count.\n" +
+      "Requires the 'mcp' plugin to be enabled first.",
+  },
+  {
+    completion: "/mcp enable ",
+    help: "Approve and connect to an MCP server",
+    group: "MCP Servers",
+    detail:
+      "Connects to the named MCP server, spawning its process and\n" +
+      "discovering available tools. First connection requires approval\n" +
+      "(command/args shown, env vars masked). Once approved, the\n" +
+      "server's tools are available as host:mcp-<name> modules.",
+  },
+  {
+    completion: "/mcp disable ",
+    help: "Disconnect from an MCP server",
+    group: "MCP Servers",
+    detail:
+      "Disconnects from the named server for this session.\n" +
+      "The server process is terminated. Approval is preserved.",
+  },
+  {
+    completion: "/mcp info ",
+    help: "Show MCP server tools, schemas, and details",
+    group: "MCP Servers",
+    detail:
+      "Displays the server's discovered tools with their input\n" +
+      "schemas and descriptions. Useful for understanding what\n" +
+      "functions are available before writing handler code.",
+  },
+  {
+    completion: "/mcp approve ",
+    help: "Pre-approve an MCP server without connecting",
+    group: "MCP Servers",
+    detail:
+      "Approves the server's config (command + args hash) so that\n" +
+      "future /mcp enable calls skip the approval prompt.",
+  },
+  {
+    completion: "/mcp revoke ",
+    help: "Revoke approval for an MCP server",
+    group: "MCP Servers",
+    detail:
+      "Removes the stored approval. Next /mcp enable will require\n" +
+      "re-approval with full command/args review.",
+  },
+
   // ── General ──────────────────────────────────────────────
   {
     completion: "/profile list",
@@ -404,7 +458,7 @@ const COMMANDS: readonly CommandEntry[] = Object.freeze([
     help: "Show this help (or /help <topic> for details)",
     detail:
       "Use /help alone for the full list.\n" +
-      "Use /help <group> for a group (e.g. /help plugin, /help timeout).\n" +
+      "Use /help <group> for a group (e.g. /help plugin, /help mcp, /help timeout).\n" +
       "Use /help <command> for one command (e.g. /help show-code).",
   },
   {
@@ -462,6 +516,7 @@ const GROUP_ALIASES: Readonly<Record<string, string>> = Object.freeze({
   sessions: "Session",
   plugin: "Plugins",
   plugins: "Plugins",
+  mcp: "MCP Servers",
   general: "General",
 });
 
