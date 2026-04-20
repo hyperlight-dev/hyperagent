@@ -27,6 +27,10 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: update-golden-${{ inputs.branch }}
+  cancel-in-progress: true
+
 jobs:
   update-goldens:
     name: Regenerate PDF Goldens
@@ -78,24 +82,45 @@ jobs:
             git diff --stat tests/golden/
           fi
 
-      - name: Create Pull Request
+      - name: Create golden update PR
         if: steps.diff.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@v7
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "test: update PDF golden baselines from CI"
-          branch: update-golden/${{ inputs.branch }}
-          base: ${{ inputs.branch }}
-          title: "test: update PDF golden baselines"
-          body: |
-            🖼️ **Automated golden baseline update**
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="update-golden/${{ inputs.branch }}"
 
-            Regenerated PDF visual regression baselines on the CI runner
-            (`hld-kvm-amd` pool with `fonts-dejavu-core`).
+          # Configure git for the commit
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-            **Source branch**: `${{ inputs.branch }}`
-            **Triggered by**: @${{ github.actor }}
+          # Stage ONLY golden files — nothing else (e.g. package-lock.json from setup)
+          git add tests/golden/
 
-            Review the PNG diffs below to verify the visual changes are expected.
-          labels: test,automated
-          delete-branch: true
+          # Create or update the golden update branch
+          git checkout -B "$BRANCH"
+          git commit -m "test: update PDF golden baselines from CI"
+          git push --force-with-lease origin "$BRANCH"
+
+          # Create PR if one doesn't already exist for this branch
+          if ! gh pr view "$BRANCH" --json state -q '.state' 2>/dev/null | grep -q OPEN; then
+            gh pr create \
+              --base "${{ inputs.branch }}" \
+              --head "$BRANCH" \
+              --title "test: update PDF golden baselines" \
+              --body "$(cat <<'EOF'
+          🖼️ **Automated golden baseline update**
+
+          Regenerated PDF visual regression baselines on the CI runner
+          (`hld-kvm-amd` pool with `fonts-dejavu-core`).
+
+          **Source branch**: `${{ inputs.branch }}`
+          **Triggered by**: @${{ github.actor }}
+
+          Review the PNG diffs below to verify the visual changes are expected.
+          EOF
+          )" \
+              --label "test" \
+              --label "automated"
+          else
+            echo "ℹ️ PR already exists for $BRANCH — pushed updated goldens."
+          fi
