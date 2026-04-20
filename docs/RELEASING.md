@@ -50,8 +50,24 @@ git push origin v0.1.1
 The [publish workflow](../.github/workflows/publish.yml) automatically:
 
 1. Runs tests on all hypervisors (KVM, MSHV, WHP)
-2. Publishes npm package to [npmjs.org](https://www.npmjs.com/package/@hyperlight-dev/hyperagent)
+2. Publishes npm package to [npmjs.org](https://www.npmjs.com/package/@hyperlight-dev/hyperagent) with [npm provenance](https://docs.npmjs.com/generating-provenance-statements) via OIDC trusted publishing
 3. Publishes Docker image to GitHub Container Registry (`ghcr.io/hyperlight-dev/hyperagent`)
+
+#### npm Trusted Publishing
+
+Release-triggered publishes use **OIDC trusted publishing** instead of an `NPM_TOKEN` secret:
+
+- The workflow requests an OIDC `id-token` from GitHub Actions and exchanges it with npmjs.org
+- npm attaches a **provenance attestation** (`--provenance`) linking the published package to its source commit and build
+- No long-lived npm API key is required for release publishes
+
+**Prerequisites** (one-time setup on npmjs.com):
+
+1. Go to the [@hyperlight-dev/hyperagent](https://www.npmjs.com/package/@hyperlight-dev/hyperagent) package settings
+2. Under "Publishing access", add a GitHub Actions trusted publisher:
+   - **Organization**: `hyperlight-dev`
+   - **Repository**: `hyperagent`
+   - **Workflow**: `publish.yml`
 
 ## Manual Release (workflow_dispatch)
 
@@ -60,6 +76,8 @@ For testing or hotfixes without creating a git tag:
 1. Go to Actions → Publish → Run workflow
 2. Enter version (e.g., `0.1.1-beta.1`)
 3. Click "Run workflow"
+
+> **Note**: Manual dispatches fall back to the `NPM_TOKEN` repository secret (no provenance attestation). This is the emergency path only — prefer tagged releases for production.
 
 ## Verifying a Release
 

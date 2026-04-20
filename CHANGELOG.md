@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Trusted npm publishing** — Publish workflow now uses OIDC trusted publishing with `--provenance` for release-triggered publishes, eliminating the need for a long-lived `NPM_TOKEN` secret. Manual `workflow_dispatch` publishes fall back to `NPM_TOKEN`.
+
 ## [v0.1.6] - 2026-03-27
 
 ### Added
