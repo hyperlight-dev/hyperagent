@@ -17,11 +17,11 @@ license = "Apache-2.0"
 repository = "https://github.com/anthropics/hyperagent"
 
 [workspace.dependencies]
-# Hyperlight dependencies - pinned to same revision as hyperlight-js
-hyperlight-common = { git = "https://github.com/hyperlight-dev/hyperlight", rev = "620339aa95d508e8cbd1d38b4374f09090aade7b", default-features = false }
-hyperlight-guest-bin = { git = "https://github.com/hyperlight-dev/hyperlight", rev = "620339aa95d508e8cbd1d38b4374f09090aade7b" }
-hyperlight-guest = { git = "https://github.com/hyperlight-dev/hyperlight", rev = "620339aa95d508e8cbd1d38b4374f09090aade7b" }
-hyperlight-host = { git = "https://github.com/hyperlight-dev/hyperlight", rev = "620339aa95d508e8cbd1d38b4374f09090aade7b", default-features = false, features = ["executable_heap", "init-paging", "kvm", "mshv3"] }
+# Hyperlight dependencies - aligned with deps/hyperlight-js
+hyperlight-common = { git = "https://github.com/simongdavies/hyperlight", branch = "update-surrogate", default-features = false }
+hyperlight-guest-bin = { git = "https://github.com/simongdavies/hyperlight", branch = "update-surrogate" }
+hyperlight-guest = { git = "https://github.com/simongdavies/hyperlight", branch = "update-surrogate" }
+hyperlight-host = { git = "https://github.com/simongdavies/hyperlight", branch = "update-surrogate", default-features = false, features = ["executable_heap", "kvm", "mshv3"] }
 
 [profile.dev]
 panic = "abort"

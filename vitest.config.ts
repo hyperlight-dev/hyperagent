@@ -9,6 +9,12 @@ export default defineConfig({
     include: ["tests/**/*.test.ts"],
     // Exclude compiled build artefacts and dependency clones
     exclude: ["dist/**", "node_modules/**", "deps/**"],
+    // On Windows, two SurrogateProcessManagers each pre-create a pool of
+    // surrogate processes. Keep the initial pool small — on-demand growth
+    // up to the default 512 max handles spikes without wasting resources.
+    env: {
+      HYPERLIGHT_INITIAL_SURROGATES: "4",
+    },
   },
   resolve: {
     alias: {
