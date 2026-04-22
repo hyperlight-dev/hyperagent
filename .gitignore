@@ -19,7 +19,6 @@ builtin-modules/*.d.ts.map
 
 # Rust build artifacts
 target/
-Cargo.lock
 *.node
 
 # Log files are written to ~/.hyperagent/logs/ (not in the repo)
@@ -43,7 +42,6 @@ iteration-logs/
 
 # Hyperagent runtime build artifacts
 src/sandbox/runtime/target/
-src/sandbox/runtime/Cargo.lock
 
 # Generated plugin files (compiled from *.ts)
 # These are regenerated via `npm run build:modules`
