@@ -132,8 +132,16 @@ jobs:
 
       # Trusted publishing requires npm >=11.5.1 for OIDC token exchange.
       # Pin to ^11.5.1 so we don't silently get an older 11.x that lacks OIDC.
+      #
+      # Bootstrap via `npx` rather than `npm install -g npm@...` — the latter
+      # hits a long-standing npm self-upgrade bug on self-hosted runners where
+      # mid-reify npm unlinks its own `promise-retry` dep and dies with
+      # MODULE_NOT_FOUND. Using a fresh npx-fetched npm to install itself
+      # globally sidesteps the half-upgraded state entirely.
       - name: Upgrade npm for trusted publishing
-        run: npm install -g npm@^11.5.1 && npm --version
+        run: |
+          npx --yes npm@^11.5.1 install -g --force npm@^11.5.1
+          npm --version
 
       - uses: hyperlight-dev/ci-setup-workflow@v1.9.0
         with:
