@@ -98,17 +98,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
-name = "async-trait"
-version = "0.1.89"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9035ad2d096bed7955a320ee7e2230574d28fd3c3a0f186cbea1ff3c7eed5dbb"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -202,12 +191,6 @@ name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d20789868f4b01b2f2caec9f5c4e0213b41e3e5702a50157d699ae31ced2fcb"
-
-[[package]]
-name = "bytes"
-version = "1.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "cargo-hyperlight"
@@ -390,6 +373,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "convert_case"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "affbf0190ed2caf063e3def54ff444b449371d55c58e513a95ab98eca50adb49"
+dependencies = [
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -452,6 +444,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctor"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83cf0d42651b16c6dfe68685716d18480d18a9c39c62d76e8cf3eb6ed5d8bcbf"
+dependencies = [
+ "ctor-proc-macro",
+ "dtor",
+]
+
+[[package]]
+name = "ctor-proc-macro"
+version = "0.0.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a949c44fcacbbbb7ada007dc7acb34603dd97cd47de5d054f2b6493ecebb483"
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -494,24 +502,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "dtor"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edf234dd1594d6dd434a8fb8cada51ddbbc593e40e4a01556a0b31c62da2775b"
+dependencies = [
+ "dtor-proc-macro",
+]
+
+[[package]]
+name = "dtor-proc-macro"
+version = "0.0.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2647271c92754afcb174e758003cfd1cbf1e43e5a7853d7b1813e63e19e39a73"
+
+[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
-
-[[package]]
-name = "elfcore"
-version = "2.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fdaa3d1c27119b3394513f4596894a40cd53cb4acec7fce636a9ca0c4abb171"
-dependencies = [
- "libc",
- "nix",
- "smallvec",
- "thiserror",
- "tracing",
- "zerocopy",
-]
 
 [[package]]
 name = "encode_unicode"
@@ -686,7 +695,7 @@ dependencies = [
  "hyperlight-host",
  "napi",
  "napi-build",
- "napi-derive",
+ "napi-derive 3.5.4",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -716,8 +725,8 @@ dependencies = [
 
 [[package]]
 name = "hyperlight-common"
-version = "0.12.0"
-source = "git+https://github.com/hyperlight-dev/hyperlight?rev=620339aa95d508e8cbd1d38b4374f09090aade7b#620339aa95d508e8cbd1d38b4374f09090aade7b"
+version = "0.13.1"
+source = "git+https://github.com/simongdavies/hyperlight?branch=update-surrogate#5f1912b4ce8a8d83e6ce63425d766bd50f511ef8"
 dependencies = [
  "anyhow",
  "flatbuffers",
@@ -725,12 +734,13 @@ dependencies = [
  "spin",
  "thiserror",
  "tracing",
+ "tracing-core",
 ]
 
 [[package]]
 name = "hyperlight-guest"
-version = "0.12.0"
-source = "git+https://github.com/hyperlight-dev/hyperlight?rev=620339aa95d508e8cbd1d38b4374f09090aade7b#620339aa95d508e8cbd1d38b4374f09090aade7b"
+version = "0.13.1"
+source = "git+https://github.com/simongdavies/hyperlight?branch=update-surrogate#5f1912b4ce8a8d83e6ce63425d766bd50f511ef8"
 dependencies = [
  "anyhow",
  "flatbuffers",
@@ -741,8 +751,8 @@ dependencies = [
 
 [[package]]
 name = "hyperlight-guest-bin"
-version = "0.12.0"
-source = "git+https://github.com/hyperlight-dev/hyperlight?rev=620339aa95d508e8cbd1d38b4374f09090aade7b#620339aa95d508e8cbd1d38b4374f09090aade7b"
+version = "0.13.1"
+source = "git+https://github.com/simongdavies/hyperlight?branch=update-surrogate#5f1912b4ce8a8d83e6ce63425d766bd50f511ef8"
 dependencies = [
  "buddy_system_allocator",
  "cc",
@@ -761,8 +771,8 @@ dependencies = [
 
 [[package]]
 name = "hyperlight-guest-macro"
-version = "0.12.0"
-source = "git+https://github.com/hyperlight-dev/hyperlight?rev=620339aa95d508e8cbd1d38b4374f09090aade7b#620339aa95d508e8cbd1d38b4374f09090aade7b"
+version = "0.13.1"
+source = "git+https://github.com/simongdavies/hyperlight?branch=update-surrogate#5f1912b4ce8a8d83e6ce63425d766bd50f511ef8"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -772,8 +782,8 @@ dependencies = [
 
 [[package]]
 name = "hyperlight-guest-tracing"
-version = "0.12.0"
-source = "git+https://github.com/hyperlight-dev/hyperlight?rev=620339aa95d508e8cbd1d38b4374f09090aade7b#620339aa95d508e8cbd1d38b4374f09090aade7b"
+version = "0.13.1"
+source = "git+https://github.com/simongdavies/hyperlight?branch=update-surrogate#5f1912b4ce8a8d83e6ce63425d766bd50f511ef8"
 dependencies = [
  "hyperlight-common",
  "spin",
@@ -783,8 +793,8 @@ dependencies = [
 
 [[package]]
 name = "hyperlight-host"
-version = "0.12.0"
-source = "git+https://github.com/hyperlight-dev/hyperlight?rev=620339aa95d508e8cbd1d38b4374f09090aade7b#620339aa95d508e8cbd1d38b4374f09090aade7b"
+version = "0.13.1"
+source = "git+https://github.com/simongdavies/hyperlight?branch=update-surrogate#5f1912b4ce8a8d83e6ce63425d766bd50f511ef8"
 dependencies = [
  "anyhow",
  "bitflags 2.11.0",
@@ -792,7 +802,6 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "crossbeam-channel",
- "elfcore",
  "flatbuffers",
  "goblin",
  "hyperlight-common",
@@ -808,7 +817,6 @@ dependencies = [
  "rand",
  "rust-embed",
  "serde_json",
- "sha256",
  "termcolor",
  "thiserror",
  "tracing",
@@ -1023,8 +1031,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55740c4ae1d8696773c78fdafd5d0e5fe9bc9f1b071c7ba493ba5c413a9184f3"
 dependencies = [
  "bitflags 2.11.0",
- "ctor",
- "napi-derive",
+ "ctor 0.2.9",
+ "napi-derive 2.16.13",
  "napi-sys",
  "once_cell",
  "tokio",
@@ -1044,7 +1052,21 @@ checksum = "7cbe2585d8ac223f7d34f13701434b9d5f4eb9c332cccce8dee57ea18ab8ab0c"
 dependencies = [
  "cfg-if",
  "convert_case 0.6.0",
- "napi-derive-backend",
+ "napi-derive-backend 1.0.75",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "napi-derive"
+version = "3.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7430702d3cc05cf55f0a2c9e41d991c3b7a53f91e6146a8f282b1bfc7f3fd133"
+dependencies = [
+ "convert_case 0.11.0",
+ "ctor 0.10.1",
+ "napi-derive-backend 5.0.3",
  "proc-macro2",
  "quote",
  "syn",
@@ -1060,7 +1082,18 @@ dependencies = [
  "once_cell",
  "proc-macro2",
  "quote",
- "regex",
+ "syn",
+]
+
+[[package]]
+name = "napi-derive-backend"
+version = "5.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ca5a083f2c9b49a0c7d33ec75c083498849c6fcc46f5497317faa39ea77f5d5"
+dependencies = [
+ "convert_case 0.11.0",
+ "proc-macro2",
+ "quote",
  "semver",
  "syn",
 ]
@@ -1072,18 +1105,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "427802e8ec3a734331fec1035594a210ce1ff4dc5bc1950530920ab717964ea3"
 dependencies = [
  "libloading",
-]
-
-[[package]]
-name = "nix"
-version = "0.31.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d6d0705320c1e6ba1d912b5e37cf18071b6c2e9b7fa8215a1e8a7651966f5d3"
-dependencies = [
- "bitflags 2.11.0",
- "cfg-if",
- "cfg_aliases",
- "libc",
 ]
 
 [[package]]
@@ -1506,19 +1527,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sha256"
-version = "1.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f880fc8562bdeb709793f00eb42a2ad0e672c4f883bbe59122b926eca935c8f6"
-dependencies = [
- "async-trait",
- "bytes",
- "hex",
- "sha2 0.10.9",
- "tokio",
-]
-
-[[package]]
 name = "shellexpand"
 version = "3.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1532,12 +1540,6 @@ name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
-
-[[package]]
-name = "smallvec"
-version = "1.15.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "spin"
@@ -1600,7 +1602,6 @@ version = "1.50.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27ad5e34374e03cfffefc301becb44e9dc3c17584f414349ebe29ed26661822d"
 dependencies = [
- "bytes",
  "pin-project-lite",
 ]
 
