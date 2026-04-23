@@ -3015,8 +3015,6 @@ export interface TableStyle {
   borderColor: string;
   /** Border line width in points. */
   borderWidth: number;
-  /** Page background colour (set internally for contrast checking). */
-  _pageBg?: string;
 }
 
 /** Built-in table styles matching PPTX table styles. */
@@ -3378,9 +3376,11 @@ export function comparisonTable(opts: ComparisonTableOptions): PdfElement {
   return _createPdfElement("comparisonTable", data);
 }
 
-/** Resolve a style name or object to a TableStyle. */
+/** Resolve a style name or object to a TableStyle.
+ *  Preset styles are shallow-cloned so that contrast auto-correction
+ *  in renderTable never mutates the shared TABLE_STYLES singletons. */
 function resolveTableStyle(style?: string | TableStyle): TableStyle {
-  if (!style) return TABLE_STYLES.default;
+  if (!style) return { ...TABLE_STYLES.default };
   if (typeof style === "string") {
     const resolved = TABLE_STYLES[style];
     if (!resolved) {
@@ -3389,7 +3389,7 @@ function resolveTableStyle(style?: string | TableStyle): TableStyle {
         `Unknown table style "${style}". Valid styles: ${valid}.`,
       );
     }
-    return resolved;
+    return { ...resolved };
   }
   return style;
 }
@@ -3487,16 +3487,13 @@ function renderTable(
   const rowH = tableRowHeight(fontSize, compact);
   const headerH = rowH;
 
-  // Ensure page background is available for contrast checking
-  if (!style._pageBg) {
-    style._pageBg = doc.theme.bg;
-  }
-
   // ── Contrast auto-correction ─────────────────────────────────────
   // Automatically fix text colors that have poor contrast against the
   // page background. No errors — just silently correct to readable.
+  // Use a local pageBg derived from the current doc theme rather than
+  // caching on the style object (which could be stale across renders).
   const MIN_CONTRAST = 3.0;
-  const pageBg = style._pageBg || "FFFFFF";
+  const pageBg = doc.theme.bg || "FFFFFF";
 
   // If headerBg is too similar to pageBg, the header row won't stand out.
   // Swap to theme accent1 so the header is visually distinct.
@@ -3652,11 +3649,12 @@ function renderTable(
 
     // EVERY row gets an explicit fill — no transparent rows, no guessing
     const isAlt = !!(style.altRowBg && r % 2 === 1);
-    const rowBg = isAlt ? style.altRowBg : (style._pageBg || "FFFFFF");
+    const rowBg = isAlt ? style.altRowBg : pageBg;
     doc.drawRect(x, curY, totalWidth, rowH, { fill: rowBg });
 
-    // Text color computed against the ACTUAL fill we just drew
-    const rowFg = autoTextColor(rowBg);
+    // Prefer the validated body text color; fall back to an automatic
+    // contrast color if no explicit body foreground is configured.
+    const rowFg = style.bodyFg ?? autoTextColor(rowBg);
 
     // Cell text AFTER background
     const isBoldRow = rowBold?.[r] ?? false;

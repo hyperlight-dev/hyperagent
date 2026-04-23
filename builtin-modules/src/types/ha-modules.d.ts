@@ -1102,8 +1102,6 @@ declare module "ha:pdf" {
       borderColor: string;
       /** Border line width in points. */
       borderWidth: number;
-      /** Page background colour (set internally for contrast checking). */
-      _pageBg?: string;
   }
   /** Built-in table styles matching PPTX table styles. */
   export declare const TABLE_STYLES: Record<string, TableStyle>;

@@ -21,25 +21,38 @@ const pdf: any = await import("../builtin-modules/pdf.js");
 // ── Config ───────────────────────────────────────────────────────────
 
 const GOLDEN_DIR = join(__dirname, "golden", "pdf");
-const TEMP_DIR = "/tmp/pdf-visual-test";
+const TEMP_DIR = join(
+  process.platform === "win32" ? process.env.TEMP || "C:\\Temp" : "/tmp",
+  "pdf-visual-test",
+);
 const UPDATE_GOLDEN = process.env.UPDATE_GOLDEN === "1";
 const PIXEL_THRESHOLD = 0.1; // per-pixel colour distance threshold
 const MAX_DIFF_PIXELS = 50; // fail if more than this many pixels differ
 
 // ── Tool Availability ────────────────────────────────────────────────
 
+// On Windows, WSL commands target a specific distro via PDF_WSL_DISTRO
+// to ensure the same poppler/font versions as CI (e.g. Ubuntu-22.04).
+const WSL_DISTRO = process.env.PDF_WSL_DISTRO;
+const WSL_CMD = WSL_DISTRO ? `wsl -d ${WSL_DISTRO}` : "wsl";
+
 /** Check if a command-line tool is available (cross-platform). */
 function hasCommand(cmd: string): boolean {
-  if (process.platform === "win32") return false;
   try {
-    execSync(`which ${cmd}`, { stdio: "ignore" });
+    if (process.platform === "win32") {
+      execSync(`${WSL_CMD} which ${cmd}`, { stdio: "ignore" });
+    } else {
+      execSync(`which ${cmd}`, { stdio: "ignore" });
+    }
     return true;
   } catch {
     return false;
   }
 }
 
-const HAS_PDFTOPPM = process.platform !== "win32" && hasCommand("pdftoppm");
+// On Linux: run when pdftoppm is installed (always on CI, opt-in locally).
+// On Windows: run when WSL has pdftoppm. Set PDF_WSL_DISTRO to match CI.
+const HAS_PDFTOPPM = hasCommand("pdftoppm");
 
 // Lazy-load comparison deps (only imported when pdftoppm is available)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -53,12 +66,10 @@ if (HAS_PDFTOPPM) {
   pixelmatch = pm.default ?? pm;
 }
 
-// ── Warn loudly on Linux if pdftoppm is missing ──────────────────────
-
-if (process.platform !== "win32" && !HAS_PDFTOPPM) {
+if (!HAS_PDFTOPPM && process.platform !== "win32") {
   console.warn(
-    "\n⚠️  WARNING: pdftoppm not installed — skipping visual regression tests." +
-      "\n   Install with: sudo apt-get install poppler-utils\n",
+    "\n⚠️  WARNING: pdftoppm not available — skipping visual regression tests." +
+      "\n   Install with: sudo apt-get install poppler-utils fonts-dejavu-core\n",
   );
 }
 
@@ -69,15 +80,37 @@ function ensureTempDir(): void {
   if (!existsSync(TEMP_DIR)) mkdirSync(TEMP_DIR, { recursive: true });
 }
 
+/** Convert a Windows path to a WSL path (e.g. C:\foo → /mnt/c/foo). */
+function toWslPath(winPath: string): string {
+  const resolved = winPath.replace(/\\/g, "/");
+  const match = resolved.match(/^([A-Za-z]):\/(.*)/);
+  if (!match) return resolved;
+  return `/mnt/${match[1].toLowerCase()}/${match[2]}`;
+}
+
 /** Write PDF bytes to file and render page 1 to PNG via pdftoppm. */
 function renderPage1(pdfBytes: Uint8Array, name: string): Buffer {
   ensureTempDir();
   const pdfPath = join(TEMP_DIR, `${name}.pdf`);
   const pngPrefix = join(TEMP_DIR, `${name}`);
   writeFileSync(pdfPath, pdfBytes);
-  execSync(`pdftoppm -png -r 150 -singlefile "${pdfPath}" "${pngPrefix}"`, {
-    timeout: 10000,
-  });
+
+  if (process.platform === "win32") {
+    // Run pdftoppm via WSL, converting Windows paths to Linux paths
+    const wslPdf = toWslPath(pdfPath);
+    const wslPrefix = toWslPath(pngPrefix);
+    execSync(
+      `${WSL_CMD} pdftoppm -png -r 150 -singlefile "${wslPdf}" "${wslPrefix}"`,
+      {
+        timeout: 10000,
+      },
+    );
+  } else {
+    execSync(`pdftoppm -png -r 150 -singlefile "${pdfPath}" "${pngPrefix}"`, {
+      timeout: 10000,
+    });
+  }
+
   const pngPath = `${pngPrefix}.png`;
   return readFileSync(pngPath);
 }

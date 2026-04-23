@@ -74,9 +74,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install PDF test dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq poppler-utils qpdf fonts-dejavu-core
+        run: just install-pdf-deps
 
       - name: Setup
         run: just setup

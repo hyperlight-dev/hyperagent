@@ -256,13 +256,36 @@ fmt-all: fmt fmt-analysis-guest fmt-runtime
 test-all: test test-analysis-guest
     @echo "✅ All tests passed"
 
-# PDF visual regression tests
+# Install PDF visual test dependencies (poppler-utils + fonts-dejavu-core).
+# On Windows, installs into WSL. Pass a distro name to target a specific one
+# that matches the CI runner (e.g. just install-pdf-deps Ubuntu-22.04).
+[linux]
+install-pdf-deps:
+    sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils qpdf fonts-dejavu-core
+
+[windows]
+install-pdf-deps distro="":
+    {{ if distro == "" { "wsl" } else { "wsl -d " + distro } }} bash -c "sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils qpdf fonts-dejavu-core"
+
+# PDF visual regression tests.
+# On Windows, pass a WSL distro name to match CI (e.g. just test-pdf-visual Ubuntu-22.04).
+[linux]
 test-pdf-visual:
     npx vitest run tests/pdf-visual.test.ts
 
-# Update PDF golden baselines (run after intentional visual changes)
+[windows]
+test-pdf-visual distro="":
+    {{ if distro == "" { "" } else { "$env:PDF_WSL_DISTRO = '" + distro + "';" } }} npx vitest run tests/pdf-visual.test.ts
+
+# Update PDF golden baselines (run after intentional visual changes).
+# On Windows, pass a WSL distro name to match CI (e.g. just update-pdf-golden Ubuntu-22.04).
+[linux]
 update-pdf-golden:
     UPDATE_GOLDEN=1 npx vitest run tests/pdf-visual.test.ts
+
+[windows]
+update-pdf-golden distro="":
+    {{ if distro == "" { "" } else { "$env:PDF_WSL_DISTRO = '" + distro + "';" } }} $env:UPDATE_GOLDEN = "1"; npx vitest run tests/pdf-visual.test.ts
 
 # ── OOXML Validation ─────────────────────────────────────────────────
 
