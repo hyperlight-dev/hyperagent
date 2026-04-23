@@ -423,20 +423,21 @@ dependencies = [
 
 [[package]]
 name = "hyperlight-common"
-version = "0.12.0"
-source = "git+https://github.com/hyperlight-dev/hyperlight?rev=620339aa95d508e8cbd1d38b4374f09090aade7b#620339aa95d508e8cbd1d38b4374f09090aade7b"
+version = "0.13.1"
+source = "git+https://github.com/simongdavies/hyperlight?branch=update-surrogate#5f1912b4ce8a8d83e6ce63425d766bd50f511ef8"
 dependencies = [
  "anyhow",
  "flatbuffers",
  "log",
  "spin",
  "thiserror",
+ "tracing-core",
 ]
 
 [[package]]
 name = "hyperlight-guest"
-version = "0.12.0"
-source = "git+https://github.com/hyperlight-dev/hyperlight?rev=620339aa95d508e8cbd1d38b4374f09090aade7b#620339aa95d508e8cbd1d38b4374f09090aade7b"
+version = "0.13.1"
+source = "git+https://github.com/simongdavies/hyperlight?branch=update-surrogate#5f1912b4ce8a8d83e6ce63425d766bd50f511ef8"
 dependencies = [
  "anyhow",
  "flatbuffers",
@@ -447,8 +448,8 @@ dependencies = [
 
 [[package]]
 name = "hyperlight-guest-bin"
-version = "0.12.0"
-source = "git+https://github.com/hyperlight-dev/hyperlight?rev=620339aa95d508e8cbd1d38b4374f09090aade7b#620339aa95d508e8cbd1d38b4374f09090aade7b"
+version = "0.13.1"
+source = "git+https://github.com/simongdavies/hyperlight?branch=update-surrogate#5f1912b4ce8a8d83e6ce63425d766bd50f511ef8"
 dependencies = [
  "buddy_system_allocator",
  "cc",
@@ -467,8 +468,8 @@ dependencies = [
 
 [[package]]
 name = "hyperlight-guest-macro"
-version = "0.12.0"
-source = "git+https://github.com/hyperlight-dev/hyperlight?rev=620339aa95d508e8cbd1d38b4374f09090aade7b#620339aa95d508e8cbd1d38b4374f09090aade7b"
+version = "0.13.1"
+source = "git+https://github.com/simongdavies/hyperlight?branch=update-surrogate#5f1912b4ce8a8d83e6ce63425d766bd50f511ef8"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -478,8 +479,8 @@ dependencies = [
 
 [[package]]
 name = "hyperlight-guest-tracing"
-version = "0.12.0"
-source = "git+https://github.com/hyperlight-dev/hyperlight?rev=620339aa95d508e8cbd1d38b4374f09090aade7b#620339aa95d508e8cbd1d38b4374f09090aade7b"
+version = "0.13.1"
+source = "git+https://github.com/simongdavies/hyperlight?branch=update-surrogate#5f1912b4ce8a8d83e6ce63425d766bd50f511ef8"
 dependencies = [
  "hyperlight-common",
  "spin",
@@ -490,12 +491,12 @@ dependencies = [
 [[package]]
 name = "hyperlight-js-common"
 version = "0.1.1"
-source = "git+https://github.com/simongdavies/hyperlight-js.git?branch=hyperagent#227ab171dd60e0c1ff4f5ed1e7c883ffa1668855"
+source = "git+https://github.com/simongdavies/hyperlight-js.git?branch=hyperagent#a0f13c57e0d5ec143e3b205afa8e1c837690ca7c"
 
 [[package]]
 name = "hyperlight-js-runtime"
 version = "0.1.1"
-source = "git+https://github.com/simongdavies/hyperlight-js.git?branch=hyperagent#227ab171dd60e0c1ff4f5ed1e7c883ffa1668855"
+source = "git+https://github.com/simongdavies/hyperlight-js.git?branch=hyperagent#a0f13c57e0d5ec143e3b205afa8e1c837690ca7c"
 dependencies = [
  "anyhow",
  "base64",
