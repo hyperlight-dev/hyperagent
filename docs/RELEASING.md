@@ -49,9 +49,9 @@ git push origin v0.1.1
 
 The [publish workflow](../.github/workflows/publish.yml) automatically:
 
-1. Runs tests on all hypervisors (KVM, MSHV, WHP)
-2. Publishes npm package to [npmjs.org](https://www.npmjs.com/package/@hyperlight-dev/hyperagent) with [npm provenance](https://docs.npmjs.com/generating-provenance-statements) via OIDC trusted publishing
-3. Publishes Docker image to GitHub Container Registry (`ghcr.io/hyperlight-dev/hyperagent`)
+1. Builds native addons on Linux (KVM, glibc + musl) and Windows (WHP) self-hosted runners; runs tests on the KVM and WHP builds (musl is cross-compiled so it can't execute on the glibc host).
+2. Packs a single cross-platform npm tarball on a self-hosted runner (needs the hyperlight toolchain), then publishes it from a **github-hosted** runner with [npm provenance](https://docs.npmjs.com/generating-provenance-statements) via OIDC trusted publishing. npm's sigstore backend rejects provenance from self-hosted runners (`E422 Unsupported GitHub Actions runner environment`), which is why the pack and publish steps are split.
+3. Publishes a Docker image to GitHub Container Registry (`ghcr.io/hyperlight-dev/hyperagent`).
 
 #### npm Trusted Publishing
 
@@ -118,7 +118,13 @@ The version is displayed:
 - Via `--version` / `-v` flag
 - In the startup banner
 
-The version is injected at build time via esbuild's `--define` flag. In development mode (running via `tsx`), it's calculated from git at runtime.
+It is injected into the binary at build time via esbuild's `--define` flag from `scripts/build-binary.js`:
+
+- **Release / dispatch builds**: the workflow sets `VERSION=<tag or input>` (e.g. `v0.2.1`). The build script strips a leading `v` and uses that exact string.
+- **Local / dev builds (`VERSION` unset)**: calculated from `git describe --tags --long --always --dirty` using the MinVer-style rules in the table above.
+- **`tsx` / dev mode (no compile step)**: the same git-describe fallback runs at startup.
+
+The npm tarball's `package.json` version comes from a separate step: `npm version <tag> --no-git-tag-version --allow-same-version` just before `npm pack`. `npm version` normalises semver input, so `v0.2.1` is written as `0.2.1` without any explicit stripping on our side.
 
 ## Troubleshooting
 
