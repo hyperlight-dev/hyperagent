@@ -35,7 +35,7 @@ hyperlight-guest = { workspace = true }
 hyperlight-guest-bin = { workspace = true }
 
 [target.'cfg(not(hyperlight))'.dependencies]
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.6", features = ["derive"] }
 
 [build-dependencies]
 bindgen = "0.72"
