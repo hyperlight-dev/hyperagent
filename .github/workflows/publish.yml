@@ -175,10 +175,9 @@ jobs:
   publish-npm:
     name: Publish to npmjs.org
     needs: [pack-npm]
-    # id-token: write is required for npm OIDC trusted publishing;
-    # contents: read for checkout. Scoped to this job only (least privilege).
+    # id-token: write is required for npm OIDC trusted publishing.
+    # Scoped to this job only (least privilege).
     permissions:
-      contents: read
       id-token: write
     runs-on: ubuntu-latest
     steps:
