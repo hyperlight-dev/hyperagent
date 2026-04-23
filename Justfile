@@ -574,6 +574,11 @@ k8s-smoke-test:
 #
 # Helper recipes to configure MCP servers for testing and examples.
 # These write to ~/.hyperagent/config.json (gitignored).
+#
+# For Work IQ (Microsoft 365), the sanctioned setup is the Microsoft-published
+# stdio MCP server:
+#   just mcp-setup-workiq
+# See the "Work IQ (Microsoft 365)" section below for prerequisites.
 
 # Set up the MCP "everything" test server (reference/test server with echo, add, etc.)
 [unix]
@@ -677,7 +682,7 @@ mcp-show-config:
         if (cfg.mcpServers) {
           console.log('Configured MCP servers:');
           for (const [name, s] of Object.entries(cfg.mcpServers)) {
-            console.log('  ' + name + ': ' + s.command + ' ' + (s.args || []).join(' '));
+            console.log('  ' + name + ': ' + (s.command || '?') + ' ' + (s.args || []).join(' '));
           }
         } else {
           console.log('No MCP servers configured.');
@@ -687,3 +692,68 @@ mcp-show-config:
       echo "No config file found at $CONFIG_FILE"
       echo "Run: just mcp-setup-everything"
     fi
+
+# ── Work IQ (Microsoft 365) ──────────────────────────────────────────
+#
+# Adds the Microsoft-published Work IQ MCP stdio server
+# (https://github.com/microsoft/work-iq) to your HyperAgent config.
+#
+# The server is spawned on demand via `npx -y @microsoft/workiq@latest mcp`.
+# It exposes the `ask_work_iq`, `accept_eula`, and `get_debug_link` tools,
+# which speak to the Microsoft 365 Copilot Chat API on your behalf.
+#
+# Prerequisites:
+#   • Node.js 22+ (required by HyperAgent; also satisfies workiq's 18+ minimum)
+#   • A Microsoft 365 Copilot licence on the signing-in user
+#   • Tenant admin consent for the "Work IQ CLI" enterprise app. Admins: see
+#     https://github.com/microsoft/work-iq/blob/main/ADMIN-INSTRUCTIONS.md
+#   • Run `npx -y @microsoft/workiq@latest accept-eula` once (interactive) to
+#     accept the EULA before the MCP server will serve requests.
+#
+# Auth: the `workiq` binary performs its own Entra interactive sign-in on
+# first call and caches tokens in the user's MSAL cache. HyperAgent does
+# NOT need to be told about clientId/tenantId.
+
+# Set up the Microsoft Work IQ MCP stdio server
+[unix]
+mcp-setup-workiq:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    CONFIG_DIR="$HOME/.hyperagent"
+    CONFIG_FILE="$CONFIG_DIR/config.json"
+    mkdir -p "$CONFIG_DIR"
+
+    echo "▸ Pre-fetching @microsoft/workiq (~188 MB on first run)…"
+    # Primes the npx cache and downloads the platform binary so the first
+    # /mcp enable workiq inside HyperAgent doesn't block for minutes.
+    npx -y @microsoft/workiq@latest version
+
+    echo "▸ Accepting EULA (interactive)…"
+    # accept-eula writes per-user acceptance state. Safe to re-run; idempotent.
+    npx -y @microsoft/workiq@latest accept-eula
+
+    echo "▸ Writing MCP config entry…"
+    node -e "
+      const fs = require('fs');
+      const path = '$CONFIG_FILE';
+      const cfg = fs.existsSync(path) ? JSON.parse(fs.readFileSync(path, 'utf8')) : {};
+      cfg.mcpServers = cfg.mcpServers || {};
+      // Remove any stale HTTP Work IQ entries from previous setups
+      for (const k of Object.keys(cfg.mcpServers)) {
+        if (k.startsWith('work-iq-')) delete cfg.mcpServers[k];
+      }
+      cfg.mcpServers.workiq = {
+        command: 'npx',
+        args: ['-y', '@microsoft/workiq@latest', 'mcp']
+      };
+      fs.writeFileSync(path, JSON.stringify(cfg, null, 2) + '\n');
+    "
+    echo ""
+    echo "✅ Work IQ stdio MCP server ready in $CONFIG_FILE"
+    echo ""
+    echo "   Next:"
+    echo "     just start"
+    echo "     /plugin enable mcp"
+    echo "     /mcp enable workiq"
+    echo ""
+    echo "   First tool call opens a browser for Microsoft sign-in."

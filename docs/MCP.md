@@ -273,6 +273,108 @@ with sandboxed document generation in a single typed JavaScript handler.**
 
 ---
 
+## Work IQ (Microsoft 365)
+
+Microsoft publishes a first-party stdio MCP server,
+[`@microsoft/workiq`](https://github.com/microsoft/work-iq), that exposes the
+Microsoft 365 Copilot Chat API as MCP tools (emails, meetings, documents,
+Teams messages, people). HyperAgent spawns it like any other stdio server —
+no HTTP transport, no OAuth config in HyperAgent, no per-tenant app
+registration.
+
+### Prerequisites
+
+- **Node.js 22+** — required by HyperAgent (`just start`); also satisfies the
+  Work IQ CLI's own Node.js 18+ minimum.
+- **Microsoft 365 Copilot licence** on the signing-in user.
+- **Tenant admin consent** for the "Work IQ CLI" enterprise application.
+  See the [Tenant Administrator Enablement Guide][wiq-admin] — admins can
+  grant consent in one click via the URL at the top of that page, or run the
+  published `Enable-WorkIQToolsForTenant.ps1` script for tenants where the
+  Work IQ Tools service principal hasn't been auto-provisioned.
+- **Accept the EULA once** (interactive, in your own shell):
+
+  ```bash
+  npx -y @microsoft/workiq@latest accept-eula
+  ```
+
+[wiq-admin]: https://github.com/microsoft/work-iq/blob/main/ADMIN-INSTRUCTIONS.md
+
+### One-shot setup
+
+```bash
+just mcp-setup-workiq
+```
+
+This writes the following entry to `~/.hyperagent/config.json`:
+
+```json
+{
+  "mcpServers": {
+    "workiq": {
+      "command": "npx",
+      "args": ["-y", "@microsoft/workiq@latest", "mcp"]
+    }
+  }
+}
+```
+
+### Connecting
+
+```
+/plugin enable mcp
+/mcp enable workiq
+```
+
+On the first tool call the `workiq` binary opens a browser for Microsoft
+sign-in (MSAL interactive flow). Tokens are cached in the standard MSAL
+cache under the user's home directory — not in `~/.hyperagent/`. Subsequent
+sessions reuse the cache silently.
+
+### Available tools
+
+The Work IQ MCP server exposes three tools:
+
+| Tool             | Purpose                                                                 |
+|------------------|-------------------------------------------------------------------------|
+| `ask_work_iq`    | Natural-language query against M365 (mail, calendar, files, Teams, people). |
+| `accept_eula`    | Accept the EULA from inside an agent session (alternative to the CLI).  |
+| `get_debug_link` | Return a support link for reporting issues.                             |
+
+Most real work happens through `ask_work_iq` with prompts like:
+
+- "What are my upcoming meetings this week?"
+- "Summarise emails from Sarah about the budget."
+- "Find documents I worked on yesterday."
+
+### Running in a container / AKS
+
+Because auth is interactive, a long-running pod can't sign in on its own.
+Two options, ordered by how fragile they are:
+
+1. **Prime the cache locally, then mount it** — run `workiq ask -q hi`
+   once on a workstation, copy the MSAL token cache file(s) into a
+   Kubernetes Secret, mount it into the pod at the path `workiq` expects.
+   The refresh token will eventually expire (typically days).
+2. **Device-code flow** — if `workiq` ever exposes it (check
+   `npx -y @microsoft/workiq mcp --help` in the version you have), run it
+   once inside the pod with kubectl attach, auth from another browser, let
+   the refresh token take over.
+
+At time of writing, the sanctioned path is **desktop use only**. There is
+no documented service-principal / client-credentials flow for Work IQ.
+
+### Troubleshooting
+
+| Symptom                                      | Fix                                                                           |
+|----------------------------------------------|-------------------------------------------------------------------------------|
+| "Admin approval required" on sign-in         | Tenant admin must grant consent — see [admin guide][wiq-admin].               |
+| EULA prompt blocks MCP session startup       | Run `npx -y @microsoft/workiq@latest accept-eula` once in an interactive shell. |
+| `/mcp enable workiq` hangs                   | First run downloads ~188 MB of platform binaries via `npx`. Be patient.        |
+| "AADSTS650052" / "Access denied" on consent URL | Work IQ Tools service principal not provisioned. Run the admin PS script.   |
+
+---
+
 ## Debugging
 
 ### Connection states
