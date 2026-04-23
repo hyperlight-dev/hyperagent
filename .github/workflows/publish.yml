@@ -110,38 +110,22 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # Combine native addons from all platforms and publish a single npm package.
-  # Runs on a self-hosted Linux runner (not ubuntu-latest) because just setup
-  # needs to build the Rust runtime which requires hyperlight toolchain.
-  publish-npm:
-    name: Publish to npmjs.org
+  # Assemble the final npm package tarball on a self-hosted Linux runner
+  # (needs `just setup` for the hyperlight toolchain to build the binary).
+  # The resulting tarball is uploaded as an artifact, then published from a
+  # github-hosted runner — npm sigstore provenance *requires* github-hosted.
+  pack-npm:
+    name: Pack npm tarball
     needs: [build-native]
-    # id-token: write is required for npm OIDC trusted publishing;
-    # contents: read for checkout. Scoped to this job only (least privilege).
     permissions:
       contents: read
-      id-token: write
-    runs-on: [self-hosted, Linux, X64, "1ES.Pool=hld-kvm-amd","JobId=hyperagent-publish-npm-${{ github.run_id }}-${{ github.run_number }}-${{ github.run_attempt }}"]
+    runs-on: [self-hosted, Linux, X64, "1ES.Pool=hld-kvm-amd","JobId=hyperagent-pack-npm-${{ github.run_id }}-${{ github.run_number }}-${{ github.run_attempt }}"]
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
-          registry-url: "https://registry.npmjs.org"
-
-      # Trusted publishing requires npm >=11.5.1 for OIDC token exchange.
-      # Pin to ^11.5.1 so we don't silently get an older 11.x that lacks OIDC.
-      #
-      # Bootstrap via `npx` rather than `npm install -g npm@...` — the latter
-      # hits a long-standing npm self-upgrade bug on self-hosted runners where
-      # mid-reify npm unlinks its own `promise-retry` dep and dies with
-      # MODULE_NOT_FOUND. Using a fresh npx-fetched npm to install itself
-      # globally sidesteps the half-upgraded state entirely.
-      - name: Upgrade npm for trusted publishing
-        run: |
-          npx --yes npm@^11.5.1 install -g --force npm@^11.5.1
-          npm --version
 
       - uses: hyperlight-dev/ci-setup-workflow@v1.9.0
         with:
@@ -172,6 +156,47 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: npm version ${{ inputs.version }} --no-git-tag-version --allow-same-version
 
+      - name: Pack npm tarball
+        run: npm pack
+
+      - name: Upload npm tarball
+        uses: actions/upload-artifact@v7
+        with:
+          name: npm-tarball
+          path: "*.tgz"
+          if-no-files-found: error
+          retention-days: 1
+
+  # Publish the prebuilt tarball from a github-hosted runner.
+  # npm sigstore provenance (--provenance) only accepts github-hosted runners;
+  # self-hosted is rejected with:
+  #   E422 Unsupported GitHub Actions runner environment: "self-hosted"
+  # This job does no building — it just takes the tarball and pushes it.
+  publish-npm:
+    name: Publish to npmjs.org
+    needs: [pack-npm]
+    # id-token: write is required for npm OIDC trusted publishing;
+    # contents: read for checkout. Scoped to this job only (least privilege).
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      # Trusted publishing requires npm >=11.5.1 for OIDC token exchange.
+      # Pin to ^11.5.1 so we don't silently get an older 11.x that lacks OIDC.
+      - name: Upgrade npm for trusted publishing
+        run: npm install -g npm@^11.5.1 && npm --version
+
+      - name: Download npm tarball
+        uses: actions/download-artifact@v8
+        with:
+          name: npm-tarball
+
       # OIDC trusted publishing for release events; NPM_TOKEN fallback for workflow_dispatch
       - name: Set publish flags
         id: publish-flags
@@ -183,7 +208,7 @@ jobs:
           fi
 
       - name: Publish to npmjs.org
-        run: npm publish --access public ${{ steps.publish-flags.outputs.provenance }}
+        run: npm publish *.tgz --access public ${{ steps.publish-flags.outputs.provenance }}
         env:
           NODE_AUTH_TOKEN: ${{ github.event_name == 'workflow_dispatch' && secrets.NPM_TOKEN || '' }}
 
