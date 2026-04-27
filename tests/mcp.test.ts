@@ -16,6 +16,15 @@ import {
   generateMCPModuleHints,
 } from "../src/agent/mcp/plugin-adapter.js";
 import type { MCPToolSchema } from "../src/agent/mcp/types.js";
+import {
+  isMCPHttpConfig,
+  isMCPStdioConfig,
+  mcpConfigDisplayString,
+} from "../src/agent/mcp/types.js";
+import type {
+  MCPStdioServerConfig,
+  MCPHttpServerConfig,
+} from "../src/agent/mcp/types.js";
 
 // ── Config parser ────────────────────────────────────────────────────
 
@@ -32,8 +41,12 @@ describe("parseMCPConfig", () => {
     expect(errors).toHaveLength(0);
     expect(config.servers.size).toBe(1);
     const server = config.servers.get("weather");
-    expect(server?.command).toBe("node");
-    expect(server?.args).toEqual(["weather-server.js"]);
+    expect(server).toBeDefined();
+    expect(isMCPStdioConfig(server!)).toBe(true);
+    if (isMCPStdioConfig(server!)) {
+      expect(server!.command).toBe("node");
+      expect(server!.args).toEqual(["weather-server.js"]);
+    }
   });
 
   it("returns empty config for undefined input", () => {
@@ -96,7 +109,10 @@ describe("parseMCPConfig", () => {
     });
 
     const server = config.servers.get("weather");
-    expect(server?.env?.API_KEY).toBe("secret-value");
+    expect(isMCPStdioConfig(server!)).toBe(true);
+    if (isMCPStdioConfig(server!)) {
+      expect(server!.env?.API_KEY).toBe("secret-value");
+    }
     delete process.env.TEST_MCP_KEY;
   });
 
@@ -114,6 +130,232 @@ describe("parseMCPConfig", () => {
     const server = config.servers.get("github");
     expect(server?.allowTools).toEqual(["list_issues", "create_issue"]);
     expect(server?.denyTools).toEqual(["delete_branch"]);
+  });
+
+  // ── HTTP transport configs ────────────────────────────────────────
+
+  it("parses valid HTTP config (no auth)", () => {
+    const { config, errors } = parseMCPConfig({
+      "remote-server": {
+        type: "http",
+        url: "https://example.com/mcp",
+      },
+    });
+
+    expect(errors).toHaveLength(0);
+    expect(config.servers.size).toBe(1);
+    const server = config.servers.get("remote-server");
+    expect(server).toBeDefined();
+    expect(isMCPHttpConfig(server!)).toBe(true);
+    expect((server as MCPHttpServerConfig).url).toBe("https://example.com/mcp");
+  });
+
+  it("parses HTTP config with OAuth auth", () => {
+    const { config, errors } = parseMCPConfig({
+      "work-iq-mail": {
+        type: "http",
+        url: "https://agent365.svc.cloud.microsoft/mcp",
+        auth: {
+          method: "oauth",
+          clientId: "18f4deab-76fc-406d-b9d8-3cc0377fa30d",
+          tenantId: "9c23c1e3-15be-4744-a3d7-027089c33654",
+          scopes: ["Mail.Read"],
+          callbackPort: 8080,
+        },
+      },
+    });
+
+    expect(errors).toHaveLength(0);
+    const server = config.servers.get("work-iq-mail") as MCPHttpServerConfig;
+    expect(server.type).toBe("http");
+    expect(server.auth).toBeDefined();
+    expect(server.auth!.method).toBe("oauth");
+    if (server.auth!.method === "oauth") {
+      expect(server.auth!.clientId).toBe(
+        "18f4deab-76fc-406d-b9d8-3cc0377fa30d",
+      );
+      expect(server.auth!.tenantId).toBe(
+        "9c23c1e3-15be-4744-a3d7-027089c33654",
+      );
+      expect(server.auth!.scopes).toEqual(["Mail.Read"]);
+      expect(server.auth!.callbackPort).toBe(8080);
+    }
+  });
+
+  it("parses HTTP config with workload-identity auth", () => {
+    const { config, errors } = parseMCPConfig({
+      "work-iq-calendar": {
+        type: "http",
+        url: "https://agent365.svc.cloud.microsoft/mcp/calendar",
+        auth: {
+          method: "workload-identity",
+        },
+      },
+    });
+
+    expect(errors).toHaveLength(0);
+    const server = config.servers.get(
+      "work-iq-calendar",
+    ) as MCPHttpServerConfig;
+    expect(server.auth?.method).toBe("workload-identity");
+  });
+
+  it("parses HTTP config with client-credentials auth", () => {
+    const { config, errors } = parseMCPConfig({
+      "service-api": {
+        type: "http",
+        url: "https://api.example.com/mcp",
+        auth: {
+          method: "client-credentials",
+          clientId: "app-id-123",
+          tenantId: "tenant-456",
+          clientSecretEnv: "MY_CLIENT_SECRET",
+          scopes: ["https://api.example.com/.default"],
+        },
+      },
+    });
+
+    expect(errors).toHaveLength(0);
+    const server = config.servers.get("service-api") as MCPHttpServerConfig;
+    expect(server.auth?.method).toBe("client-credentials");
+    if (server.auth?.method === "client-credentials") {
+      expect(server.auth.clientSecretEnv).toBe("MY_CLIENT_SECRET");
+    }
+  });
+
+  it("parses HTTP config with headers", () => {
+    const { config, errors } = parseMCPConfig({
+      "custom-server": {
+        type: "http",
+        url: "https://mcp.example.com",
+        headers: { "X-Api-Key": "test-key" },
+      },
+    });
+
+    expect(errors).toHaveLength(0);
+    const server = config.servers.get("custom-server") as MCPHttpServerConfig;
+    expect(server.headers).toEqual({ "X-Api-Key": "test-key" });
+  });
+
+  it("parses HTTP config with allowTools/denyTools", () => {
+    const { config, errors } = parseMCPConfig({
+      "filtered-http": {
+        type: "http",
+        url: "https://example.com/mcp",
+        allowTools: ["read_mail"],
+        denyTools: ["delete_mail"],
+      },
+    });
+
+    expect(errors).toHaveLength(0);
+    const server = config.servers.get("filtered-http");
+    expect(server?.allowTools).toEqual(["read_mail"]);
+    expect(server?.denyTools).toEqual(["delete_mail"]);
+  });
+
+  it("defaults to stdio when type is omitted", () => {
+    const { config, errors } = parseMCPConfig({
+      legacy: { command: "node", args: ["server.js"] },
+    });
+
+    expect(errors).toHaveLength(0);
+    const server = config.servers.get("legacy");
+    expect(isMCPStdioConfig(server!)).toBe(true);
+    expect(isMCPHttpConfig(server!)).toBe(false);
+  });
+
+  it("rejects HTTP config with missing url", () => {
+    const { errors } = parseMCPConfig({
+      "no-url": { type: "http" },
+    });
+    expect(errors.some((e) => e.message.includes("url"))).toBe(true);
+  });
+
+  it("rejects HTTP config with invalid URL", () => {
+    const { errors } = parseMCPConfig({
+      "bad-url": { type: "http", url: "not-a-url" },
+    });
+    expect(errors.some((e) => e.message.includes("Invalid URL"))).toBe(true);
+  });
+
+  it("rejects HTTP config with non-http protocol", () => {
+    const { errors } = parseMCPConfig({
+      "ftp-url": { type: "http", url: "ftp://example.com/mcp" },
+    });
+    expect(errors.some((e) => e.message.includes("http://"))).toBe(true);
+  });
+
+  it("rejects invalid transport type", () => {
+    const { errors } = parseMCPConfig({
+      "bad-type": { type: "websocket", url: "ws://example.com" },
+    });
+    expect(
+      errors.some((e) => e.message.includes("Invalid transport type")),
+    ).toBe(true);
+  });
+
+  it("rejects invalid auth method", () => {
+    const { errors } = parseMCPConfig({
+      "bad-auth": {
+        type: "http",
+        url: "https://example.com/mcp",
+        auth: { method: "magic" },
+      },
+    });
+    expect(errors.some((e) => e.message.includes("auth.method"))).toBe(true);
+  });
+
+  it("rejects OAuth auth missing clientId", () => {
+    const { errors } = parseMCPConfig({
+      "no-client-id": {
+        type: "http",
+        url: "https://example.com/mcp",
+        auth: { method: "oauth" },
+      },
+    });
+    expect(errors.some((e) => e.message.includes("auth.clientId"))).toBe(true);
+  });
+
+  it("rejects OAuth auth with invalid callbackPort", () => {
+    const { errors } = parseMCPConfig({
+      "bad-port": {
+        type: "http",
+        url: "https://example.com/mcp",
+        auth: { method: "oauth", clientId: "abc", callbackPort: 99999 },
+      },
+    });
+    expect(errors.some((e) => e.message.includes("callbackPort"))).toBe(true);
+  });
+
+  it("rejects client-credentials auth missing required fields", () => {
+    const { errors } = parseMCPConfig({
+      "bad-creds": {
+        type: "http",
+        url: "https://example.com/mcp",
+        auth: { method: "client-credentials" },
+      },
+    });
+    expect(errors.some((e) => e.message.includes("auth.clientId"))).toBe(true);
+    expect(errors.some((e) => e.message.includes("auth.tenantId"))).toBe(true);
+    expect(errors.some((e) => e.message.includes("auth.clientSecretEnv"))).toBe(
+      true,
+    );
+  });
+
+  it("allows mixed stdio and HTTP servers", () => {
+    const { config, errors } = parseMCPConfig({
+      "local-weather": { command: "node", args: ["weather.js"] },
+      "remote-mail": {
+        type: "http",
+        url: "https://agent365.svc.cloud.microsoft/mcp",
+        auth: { method: "oauth", clientId: "abc" },
+      },
+    });
+
+    expect(errors).toHaveLength(0);
+    expect(config.servers.size).toBe(2);
+    expect(isMCPStdioConfig(config.servers.get("local-weather")!)).toBe(true);
+    expect(isMCPHttpConfig(config.servers.get("remote-mail")!)).toBe(true);
   });
 });
 
@@ -183,6 +425,444 @@ describe("computeMCPConfigHash", () => {
       env: { API_KEY: "secret2" },
     });
     expect(hash1).not.toBe(hash2);
+  });
+
+  // ── HTTP config hashes ───────────────────────────────────────────
+
+  it("produces consistent hash for HTTP config", () => {
+    const config: MCPHttpServerConfig = {
+      type: "http",
+      url: "https://example.com/mcp",
+    };
+    const hash1 = computeMCPConfigHash("test", config);
+    const hash2 = computeMCPConfigHash("test", config);
+    expect(hash1).toBe(hash2);
+  });
+
+  it("changes when HTTP url changes", () => {
+    const hash1 = computeMCPConfigHash("test", {
+      type: "http" as const,
+      url: "https://a.example.com/mcp",
+    });
+    const hash2 = computeMCPConfigHash("test", {
+      type: "http" as const,
+      url: "https://b.example.com/mcp",
+    });
+    expect(hash1).not.toBe(hash2);
+  });
+
+  it("changes when HTTP auth method changes", () => {
+    const hash1 = computeMCPConfigHash("test", {
+      type: "http" as const,
+      url: "https://example.com/mcp",
+      auth: { method: "oauth" as const, clientId: "abc" },
+    });
+    const hash2 = computeMCPConfigHash("test", {
+      type: "http" as const,
+      url: "https://example.com/mcp",
+      auth: { method: "workload-identity" as const },
+    });
+    expect(hash1).not.toBe(hash2);
+  });
+
+  it("changes when HTTP auth clientId changes", () => {
+    const hash1 = computeMCPConfigHash("test", {
+      type: "http" as const,
+      url: "https://example.com/mcp",
+      auth: { method: "oauth" as const, clientId: "abc" },
+    });
+    const hash2 = computeMCPConfigHash("test", {
+      type: "http" as const,
+      url: "https://example.com/mcp",
+      auth: { method: "oauth" as const, clientId: "xyz" },
+    });
+    expect(hash1).not.toBe(hash2);
+  });
+
+  it("produces different hashes for stdio vs HTTP with same name", () => {
+    const hash1 = computeMCPConfigHash("test", { command: "node" });
+    const hash2 = computeMCPConfigHash("test", {
+      type: "http" as const,
+      url: "https://example.com/mcp",
+    });
+    expect(hash1).not.toBe(hash2);
+  });
+});
+
+// ── Type guards & display helpers ────────────────────────────────────
+
+describe("isMCPHttpConfig / isMCPStdioConfig", () => {
+  it("identifies HTTP config", () => {
+    const config: MCPHttpServerConfig = {
+      type: "http",
+      url: "https://example.com/mcp",
+    };
+    expect(isMCPHttpConfig(config)).toBe(true);
+    expect(isMCPStdioConfig(config)).toBe(false);
+  });
+
+  it("identifies stdio config (explicit type)", () => {
+    const config: MCPStdioServerConfig = {
+      type: "stdio",
+      command: "node",
+    };
+    expect(isMCPStdioConfig(config)).toBe(true);
+    expect(isMCPHttpConfig(config)).toBe(false);
+  });
+
+  it("identifies stdio config (type omitted)", () => {
+    const config: MCPStdioServerConfig = { command: "node" };
+    expect(isMCPStdioConfig(config)).toBe(true);
+    expect(isMCPHttpConfig(config)).toBe(false);
+  });
+});
+
+describe("mcpConfigDisplayString", () => {
+  it("returns command + args for stdio", () => {
+    expect(
+      mcpConfigDisplayString({ command: "npx", args: ["-y", "server"] }),
+    ).toBe("npx -y server");
+  });
+
+  it("returns command only when no args", () => {
+    expect(mcpConfigDisplayString({ command: "node" })).toBe("node");
+  });
+
+  it("returns url for HTTP", () => {
+    expect(
+      mcpConfigDisplayString({
+        type: "http",
+        url: "https://example.com/mcp",
+      }),
+    ).toBe("https://example.com/mcp");
+  });
+});
+
+// ── Client manager (HTTP transport) ──────────────────────────────────
+
+import { createMCPClientManager } from "../src/agent/mcp/client-manager.js";
+
+describe("createMCPClientManager — HTTP transport", () => {
+  it("registers HTTP server without connecting", () => {
+    const manager = createMCPClientManager();
+    manager.registerServer("remote", {
+      type: "http",
+      url: "https://example.com/mcp",
+    });
+
+    const servers = manager.listServers();
+    expect(servers).toHaveLength(1);
+    expect(servers[0].name).toBe("remote");
+    expect(servers[0].state).toBe("idle");
+    expect(isMCPHttpConfig(servers[0].config)).toBe(true);
+  });
+
+  it("registers mixed stdio and HTTP servers", () => {
+    const manager = createMCPClientManager();
+    manager.registerServer("local", {
+      command: "node",
+      args: ["server.js"],
+    });
+    manager.registerServer("remote", {
+      type: "http",
+      url: "https://example.com/mcp",
+    });
+
+    const servers = manager.listServers();
+    expect(servers).toHaveLength(2);
+    expect(isMCPStdioConfig(servers[0].config)).toBe(true);
+    expect(isMCPHttpConfig(servers[1].config)).toBe(true);
+  });
+
+  it("HTTP connect fails gracefully for unreachable server", async () => {
+    const manager = createMCPClientManager();
+    manager.registerServer("unreachable", {
+      type: "http",
+      url: "https://localhost:19999/mcp-does-not-exist",
+    });
+
+    await expect(manager.connect("unreachable")).rejects.toThrow(
+      /Failed to connect/,
+    );
+
+    const conn = manager.getConnection("unreachable");
+    expect(conn?.state).toBe("error");
+    expect(conn?.retryCount).toBe(1);
+  });
+
+  it("HTTP + OAuth fails with clear message when no TTY and no cached tokens", async () => {
+    // Save original isTTY and override
+    const originalIsTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: false,
+      configurable: true,
+    });
+
+    const manager = createMCPClientManager();
+    manager.registerServer("oauth-headless", {
+      type: "http",
+      url: "https://localhost:19999/mcp",
+      auth: { method: "oauth", clientId: "test-id" },
+    });
+
+    await expect(manager.connect("oauth-headless")).rejects.toThrow(
+      /no cached tokens.*no interactive terminal/i,
+    );
+
+    // Restore
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: originalIsTTY,
+      configurable: true,
+    });
+  });
+
+  it("HTTP + non-OAuth auth (workload-identity) connects without browser flow", async () => {
+    const manager = createMCPClientManager();
+    manager.registerServer("wi-server", {
+      type: "http",
+      url: "https://localhost:19999/mcp-wi",
+      auth: { method: "workload-identity" },
+    });
+
+    // Will fail (no server) but should NOT trigger the OAuth flow —
+    // should fail with a connection error, not an auth error
+    await expect(manager.connect("wi-server")).rejects.toThrow(
+      /Failed to connect/,
+    );
+  });
+
+  it("disconnect on unconnected HTTP server is safe", async () => {
+    const manager = createMCPClientManager();
+    manager.registerServer("remote", {
+      type: "http",
+      url: "https://example.com/mcp",
+    });
+
+    // Should not throw
+    await manager.disconnect("remote");
+    const conn = manager.getConnection("remote");
+    expect(conn?.state).toBe("closed");
+  });
+});
+
+// ── Token cache ──────────────────────────────────────────────────────
+
+import {
+  loadCachedTokens,
+  saveCachedTokens,
+  deleteCachedTokens,
+  hasCachedTokens,
+} from "../src/agent/mcp/auth/token-cache.js";
+import { mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
+import { tmpdir } from "node:os";
+
+describe("token cache", () => {
+  // Use a unique server name per test to avoid conflicts
+  const testServer = `test-cache-${Date.now()}`;
+
+  afterEach(() => {
+    // Clean up test tokens
+    deleteCachedTokens(testServer);
+  });
+
+  it("returns undefined for non-existent cache", () => {
+    expect(loadCachedTokens("non-existent-server-xyz")).toBeUndefined();
+  });
+
+  it("saves and loads tokens", () => {
+    const tokens = {
+      access_token: "test-access-token",
+      token_type: "Bearer",
+      refresh_token: "test-refresh-token",
+      expires_in: 3600,
+    };
+
+    saveCachedTokens(testServer, tokens);
+    expect(hasCachedTokens(testServer)).toBe(true);
+
+    const loaded = loadCachedTokens(testServer);
+    expect(loaded).toBeDefined();
+    expect(loaded!.access_token).toBe("test-access-token");
+    expect(loaded!.token_type).toBe("Bearer");
+    expect(loaded!.refresh_token).toBe("test-refresh-token");
+  });
+
+  it("deletes cached tokens", () => {
+    saveCachedTokens(testServer, {
+      access_token: "deleteme",
+      token_type: "Bearer",
+    });
+    expect(hasCachedTokens(testServer)).toBe(true);
+
+    deleteCachedTokens(testServer);
+    expect(hasCachedTokens(testServer)).toBe(false);
+    expect(loadCachedTokens(testServer)).toBeUndefined();
+  });
+
+  it("delete is safe for non-existent cache", () => {
+    // Should not throw
+    deleteCachedTokens("does-not-exist-xyz");
+  });
+
+  it("overwrites existing tokens on save", () => {
+    saveCachedTokens(testServer, {
+      access_token: "old-token",
+      token_type: "Bearer",
+    });
+    saveCachedTokens(testServer, {
+      access_token: "new-token",
+      token_type: "Bearer",
+    });
+
+    const loaded = loadCachedTokens(testServer);
+    expect(loaded!.access_token).toBe("new-token");
+  });
+});
+
+// ── Browser OAuth provider ───────────────────────────────────────────
+
+import { createBrowserOAuthProvider } from "../src/agent/mcp/auth/browser-oauth.js";
+import { afterEach } from "vitest";
+
+describe("createBrowserOAuthProvider", () => {
+  const testServer = `test-oauth-${Date.now()}`;
+
+  afterEach(() => {
+    deleteCachedTokens(testServer);
+  });
+
+  it("creates a provider with correct client metadata", () => {
+    const { provider, stopCallbackServer } = createBrowserOAuthProvider(
+      testServer,
+      {
+        method: "oauth",
+        clientId: "test-client-id",
+        scopes: ["Mail.Read", "Calendar.Read"],
+        callbackPort: 9999,
+      },
+    );
+
+    const metadata = provider.clientMetadata;
+    expect(metadata.client_name).toBe("HyperAgent");
+    expect(metadata.grant_types).toContain("authorization_code");
+    expect(metadata.grant_types).toContain("refresh_token");
+    expect(metadata.scope).toBe("Mail.Read Calendar.Read");
+
+    const redirectUrl = provider.redirectUrl;
+    expect(redirectUrl).toBeDefined();
+    expect(redirectUrl!.toString()).toContain("localhost:9999");
+
+    stopCallbackServer();
+  });
+
+  it("returns static client information", async () => {
+    const { provider, stopCallbackServer } = createBrowserOAuthProvider(
+      testServer,
+      {
+        method: "oauth",
+        clientId: "my-app-id",
+      },
+    );
+
+    const info = await provider.clientInformation();
+    expect(info).toBeDefined();
+    expect(info!.client_id).toBe("my-app-id");
+
+    stopCallbackServer();
+  });
+
+  it("stores and retrieves code verifier", () => {
+    const { provider, stopCallbackServer } = createBrowserOAuthProvider(
+      testServer,
+      {
+        method: "oauth",
+        clientId: "test-id",
+      },
+    );
+
+    provider.saveCodeVerifier("test-verifier-123");
+    expect(provider.codeVerifier()).toBe("test-verifier-123");
+
+    stopCallbackServer();
+  });
+
+  it("saves and loads tokens via cache", async () => {
+    const { provider, stopCallbackServer } = createBrowserOAuthProvider(
+      testServer,
+      {
+        method: "oauth",
+        clientId: "test-id",
+      },
+    );
+
+    // Initially no tokens
+    expect(await provider.tokens()).toBeUndefined();
+
+    // Save tokens
+    provider.saveTokens({
+      access_token: "cached-access",
+      token_type: "Bearer",
+      refresh_token: "cached-refresh",
+    });
+
+    // Should load from cache
+    const loaded = await provider.tokens();
+    expect(loaded).toBeDefined();
+    expect(loaded!.access_token).toBe("cached-access");
+
+    stopCallbackServer();
+  });
+
+  it("invalidateCredentials clears tokens", async () => {
+    const { provider, stopCallbackServer } = createBrowserOAuthProvider(
+      testServer,
+      {
+        method: "oauth",
+        clientId: "test-id",
+      },
+    );
+
+    provider.saveTokens({
+      access_token: "to-be-cleared",
+      token_type: "Bearer",
+    });
+    expect(await provider.tokens()).toBeDefined();
+
+    provider.invalidateCredentials!("tokens");
+    expect(await provider.tokens()).toBeUndefined();
+
+    stopCallbackServer();
+  });
+
+  it("uses default callback port when not specified", () => {
+    const { provider, stopCallbackServer } = createBrowserOAuthProvider(
+      testServer,
+      {
+        method: "oauth",
+        clientId: "test-id",
+      },
+    );
+
+    const redirectUrl = provider.redirectUrl;
+    expect(redirectUrl!.toString()).toContain("localhost:8080");
+
+    stopCallbackServer();
+  });
+
+  it("omits scope when not configured", () => {
+    const { provider, stopCallbackServer } = createBrowserOAuthProvider(
+      testServer,
+      {
+        method: "oauth",
+        clientId: "test-id",
+      },
+    );
+
+    expect(provider.clientMetadata.scope).toBeUndefined();
+
+    stopCallbackServer();
   });
 });
 

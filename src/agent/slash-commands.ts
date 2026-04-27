@@ -37,6 +37,11 @@ import {
 } from "./mcp/approval.js";
 import { maskEnvValue } from "./mcp/sanitise.js";
 import {
+  isMCPHttpConfig,
+  isMCPStdioConfig,
+  mcpConfigDisplayString,
+} from "./mcp/types.js";
+import {
   createMCPPluginAdapter,
   generateMCPDeclarations,
 } from "./mcp/plugin-adapter.js";
@@ -2320,9 +2325,7 @@ export async function handleSlashCommand(
               const tools =
                 s.state === "connected" ? ` — ${s.tools.length} tool(s)` : "";
               console.log(`  ${C.label(s.name)}  [${stateColor}]${tools}`);
-              console.log(
-                `    ${C.dim(`${s.config.command} ${(s.config.args ?? []).join(" ")}`)}`,
-              );
+              console.log(`    ${C.dim(mcpConfigDisplayString(s.config))}`);
             }
           }
           console.log();
@@ -2371,10 +2374,10 @@ export async function handleSlashCommand(
               console.log();
               console.log(`  Server:  ${C.label(mcpName)}`);
               console.log(
-                `  Command: ${C.dim(`${conn.config.command} ${(conn.config.args ?? []).join(" ")}`)}`,
+                `  ${isMCPStdioConfig(conn.config) ? "Command" : "URL"}:    ${C.dim(mcpConfigDisplayString(conn.config))}`,
               );
 
-              if (conn.config.env) {
+              if (isMCPStdioConfig(conn.config) && conn.config.env) {
                 console.log(`  Env vars:`);
                 for (const [k, v] of Object.entries(conn.config.env)) {
                   console.log(`    ${k}=${C.dim(maskEnvValue(v))}`);
@@ -2478,7 +2481,7 @@ export async function handleSlashCommand(
           console.log(`  ${C.label(mcpName)}`);
           console.log(`  State:   ${info.state}`);
           console.log(
-            `  Command: ${info.config.command} ${(info.config.args ?? []).join(" ")}`,
+            `  ${isMCPStdioConfig(info.config) ? "Command" : "URL"}:    ${mcpConfigDisplayString(info.config)}`,
           );
           if (info.config.allowTools) {
             console.log(`  Allow:   ${info.config.allowTools.join(", ")}`);

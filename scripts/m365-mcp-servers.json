@@ -1,0 +1,108 @@
+{
+  "_comment": "Catalog of Microsoft 365 / Agent 365 MCP servers. Refresh via 'just mcp-m365-refresh-servers' (requires a cached OAuth token from a prior /mcp enable). Each server stores its discovered url and scope verbatim. Tenant-custom OOB_* servers are excluded.",
+  "resourceId": "ea9ffc3e-8a23-4a7d-836d-234d7c7565c1",
+  "discoverEndpoint": "https://agent365.svc.cloud.microsoft/agents/discoverToolServers",
+  "callbackPort": 8080,
+  "servers": {
+    "admin": {
+      "id": "mcp_AdminTools",
+      "url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_AdminTools",
+      "scope": "McpServers.M365Admin.All"
+    },
+    "admin365-graph": {
+      "id": "mcp_Admin365_GraphTools",
+      "url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_Admin365_GraphTools",
+      "scope": "McpServers.Admin365Graph.All"
+    },
+    "calendar": {
+      "id": "mcp_CalendarTools",
+      "url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_CalendarTools",
+      "scope": "McpServers.Calendar.All"
+    },
+    "copilot": {
+      "id": "mcp_M365Copilot",
+      "url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_M365Copilot",
+      "scope": "McpServers.CopilotMCP.All"
+    },
+    "dasearch": {
+      "id": "mcp_DASearch",
+      "url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_DASearch",
+      "scope": "McpServers.DASearch.All"
+    },
+    "excel": {
+      "id": "mcp_ExcelServer",
+      "url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_ExcelServer",
+      "scope": "McpServers.Excel.All"
+    },
+    "knowledge": {
+      "id": "mcp_KnowledgeTools",
+      "url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_KnowledgeTools",
+      "scope": "McpServers.Knowledge.All"
+    },
+    "mail": {
+      "id": "mcp_MailTools",
+      "url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_MailTools",
+      "scope": "McpServers.Mail.All"
+    },
+    "odsp": {
+      "id": "mcp_ODSPRemoteServer",
+      "url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_ODSPRemoteServer",
+      "scope": "McpServers.OneDriveSharepoint.All"
+    },
+    "onedrive": {
+      "id": "mcp_OneDriveRemoteServer",
+      "url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_OneDriveRemoteServer",
+      "scope": "McpServers.OneDrive.All"
+    },
+    "planner": {
+      "id": "mcp_PlannerServer",
+      "url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_PlannerServer",
+      "scope": "McpServers.Planner.All"
+    },
+    "sharepoint": {
+      "id": "mcp_SharePointRemoteServer",
+      "url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_SharePointRemoteServer",
+      "scope": "McpServers.SharePoint.All"
+    },
+    "sharepoint-lists": {
+      "id": "mcp_SharePointListsTools",
+      "url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_SharePointListsTools",
+      "scope": "McpServers.SharepointLists.All"
+    },
+    "task-personalization": {
+      "id": "mcp_TaskPersonalizationServer",
+      "url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_TaskPersonalizationServer",
+      "scope": "McpServers.TaskPersonalization.All"
+    },
+    "teams": {
+      "id": "mcp_TeamsServer",
+      "url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_TeamsServer",
+      "scope": "McpServers.Teams.All"
+    },
+    "teams-canary": {
+      "id": "mcp_TeamsCanaryServer",
+      "url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_TeamsCanaryServer",
+      "scope": "McpServers.Teams.All"
+    },
+    "teams-v1": {
+      "id": "mcp_TeamsServerV1",
+      "url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_TeamsServerV1",
+      "scope": "McpServers.Teams.All"
+    },
+    "w365-computer-use": {
+      "id": "mcp_W365ComputerUse",
+      "url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_W365ComputerUse",
+      "scope": "McpServers.W365ComputerUse.All"
+    },
+    "websearch": {
+      "id": "mcp_WebSearchTools",
+      "url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_WebSearchTools",
+      "scope": "McpServers.WebSearch.All"
+    },
+    "word": {
+      "id": "mcp_WordServer",
+      "url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_WordServer",
+      "scope": "McpServers.Word.All"
+    }
+  }
+}

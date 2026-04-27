@@ -712,7 +712,12 @@ mcp-show-config:
         if (cfg.mcpServers) {
           console.log('Configured MCP servers:');
           for (const [name, s] of Object.entries(cfg.mcpServers)) {
-            console.log('  ' + name + ': ' + (s.command || '?') + ' ' + (s.args || []).join(' '));
+            if (s.type === 'http') {
+              const auth = s.auth ? ' [' + s.auth.method + ']' : '';
+              console.log('  ' + name + ': ' + s.url + auth);
+            } else {
+              console.log('  ' + name + ': ' + (s.command || '?') + ' ' + (s.args || []).join(' '));
+            }
           }
         } else {
           console.log('No MCP servers configured.');
@@ -787,3 +792,83 @@ mcp-setup-workiq:
     echo "     /mcp enable workiq"
     echo ""
     echo "   First tool call opens a browser for Microsoft sign-in."
+
+# ── Generic HTTP MCP server recipe ───────────────────────────────────
+#
+# Adds a single HTTP MCP server entry to ~/.hyperagent/config.json. Used
+# directly for ad-hoc HTTP MCP servers, and also called per-service by
+# `mcp-setup-m365` below.
+#
+# Args:
+#   NAME           Config key (becomes the alias for /mcp enable <NAME>).
+#   URL            HTTPS endpoint of the MCP server.
+#   CLIENT_ID      Optional. If set, OAuth (browser+PKCE) is configured.
+#   TENANT_ID      Optional. Defaults to the auth-side default ('organizations').
+#   SCOPES         Optional, comma-separated. If empty + CLIENT_ID set,
+#                  defaults to '<URL-origin>/.default'.
+#   CALLBACK_PORT  Optional. Defaults to 8080.
+#
+# Add an HTTP MCP server entry to ~/.hyperagent/config.json. Used by
+# `mcp-setup-m365` and intended for direct use when wiring custom HTTP
+# MCP servers (any vendor — not M365-specific).
+#
+# Examples:
+#   just mcp-add-http example https://mcp.example.com/sse
+#   just mcp-add-http work-iq-mail \
+#       https://agent365.svc.cloud.microsoft/agents/servers/mcp_MailRemoteServer \
+#       <client-id> <tenant-id>
+mcp-add-http NAME URL CLIENT_ID="" TENANT_ID="" SCOPES="" CALLBACK_PORT="8080":
+    npx tsx scripts/mcp-add-http.ts "{{ NAME }}" "{{ URL }}" "{{ CLIENT_ID }}" "{{ TENANT_ID }}" "{{ SCOPES }}" "{{ CALLBACK_PORT }}"
+
+# ── Microsoft 365 / Agent 365 HTTP MCP servers ───────────────────────
+#
+# Alternative to the stdio `mcp-setup-workiq` recipe above: direct
+# HTTP+OAuth to the Agent 365 per-service MCP endpoints (mail, calendar,
+# teams, sharepoint, onedrive, user, copilot, word, …). Requires either
+# a per-tenant Entra app registration (`mcp-m365-create-app`) or a
+# pre-existing client id passed explicitly.
+#
+# Flow:
+#   1. just mcp-m365-create-app           # one-time: Entra app registration
+#   2. just mcp-m365-setup                # writes one entry per M365 service
+#   3. just start → /plugin enable mcp → /mcp enable work-iq-<service>
+#
+# State lives at ~/.hyperagent/m365.json (clientId, tenantId, callbackPort).
+# The server catalog (alias → mcp_* id mapping) lives at
+# scripts/m365-mcp-servers.json — refresh via `just mcp-m365-refresh-servers`.
+
+# Create (or reuse) the Entra app registration for the Agent 365 MCP servers.
+# Optional: --service-ref GUID for corporate tenants that require one.
+# Optional: --client-id ID to adopt an existing app.
+# Requires `az` CLI installed and `az login`'d. Cross-platform (Linux,
+# macOS, Windows native, Git Bash, WSL) — runs via tsx.
+mcp-m365-create-app *ARGS:
+    npx tsx scripts/setup-m365-app.ts {{ ARGS }}
+
+# Write the M365 HTTP MCP server entries into ~/.hyperagent/config.json
+# by looping over scripts/m365-mcp-servers.json. Reads clientId/tenantId
+# from ~/.hyperagent/m365.json by default; override with explicit args.
+#
+# Each server uses the URL and per-server scope discovered from
+# Agent 365 (see catalog file). The Agent 365 gateway uses the
+# /agents/servers/<name> URL pattern — NOT /tenants/<tid>/servers/<name>
+# from the MS Learn docs (verified against discoverToolServers).
+#
+# Args:
+#   SERVICES        "all" (default), or comma-separated alias list ("mail,teams")
+#   CLIENT_ID       Override Entra app client id
+#   TENANT_ID       Override Entra tenant id (used for OAuth authority)
+#   SCOPE_OVERRIDE  Optional: force a single scope for every server
+#                   (default: each server uses its catalogued scope)
+mcp-setup-m365 SERVICES="all" CLIENT_ID="" TENANT_ID="" SCOPE_OVERRIDE="":
+    npx tsx scripts/m365-setup.ts "{{ SERVICES }}" "{{ CLIENT_ID }}" "{{ TENANT_ID }}" "{{ SCOPE_OVERRIDE }}"
+
+# Refresh scripts/m365-mcp-servers.json from the live Agent 365 catalog.
+# Existing alias→server-id mappings are preserved; new server ids appear
+# under a derived alias.
+mcp-m365-refresh-servers *ARGS:
+    npx tsx scripts/m365-refresh-servers.ts {{ ARGS }}
+
+# Print the saved M365 app details (if any).
+mcp-m365-show:
+    npx tsx scripts/m365-show.ts

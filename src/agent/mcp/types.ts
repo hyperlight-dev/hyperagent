@@ -4,23 +4,15 @@
 // tool discovery. These are internal to the agent — guest code never
 // sees these types directly.
 
-/**
- * MCP server configuration as specified in ~/.hyperagent/config.json.
- * Accepts the same format as VS Code's mcp.json for familiarity.
- */
-export interface MCPServerConfig {
-  /** Command to spawn the MCP server process. */
-  command: string;
+// ── Transport types ──────────────────────────────────────────────────
 
-  /** Arguments passed to the command. */
-  args?: string[];
+/** Transport type discriminator. */
+export type MCPTransportType = "stdio" | "http";
 
-  /**
-   * Environment variables for the server process.
-   * Supports `${ENV_VAR}` substitution from the host environment.
-   */
-  env?: Record<string, string>;
+// ── Tool filtering (shared across transports) ────────────────────────
 
+/** Fields common to both stdio and HTTP server configs. */
+interface MCPServerConfigBase {
   /**
    * Allowlist of tool names to expose. If set, only these tools are
    * available in the sandbox. Takes precedence over denyTools.
@@ -33,6 +25,151 @@ export interface MCPServerConfig {
    * after allow (intersection minus denied).
    */
   denyTools?: string[];
+}
+
+// ── stdio transport ──────────────────────────────────────────────────
+
+/**
+ * Configuration for an MCP server running as a child process (stdio).
+ * This is the original transport and the default when "type" is omitted.
+ */
+export interface MCPStdioServerConfig extends MCPServerConfigBase {
+  /** Transport type — "stdio" or omitted (defaults to "stdio"). */
+  type?: "stdio";
+
+  /** Command to spawn the MCP server process. */
+  command: string;
+
+  /** Arguments passed to the command. */
+  args?: string[];
+
+  /**
+   * Environment variables for the server process.
+   * Supports `${ENV_VAR}` substitution from the host environment.
+   */
+  env?: Record<string, string>;
+}
+
+// ── HTTP transport ───────────────────────────────────────────────────
+
+/** Supported authentication methods for HTTP MCP servers. */
+export type MCPAuthMethod =
+  | "oauth"
+  | "workload-identity"
+  | "client-credentials";
+
+/**
+ * OAuth 2.0 browser-based authentication (PKCE).
+ * Used for interactive local sessions — opens a browser for sign-in.
+ */
+export interface MCPOAuthConfig {
+  method: "oauth";
+
+  /** OAuth client (application) ID. */
+  clientId: string;
+
+  /** Entra ID tenant ID (for Microsoft identity). */
+  tenantId?: string;
+
+  /** Requested OAuth scopes (e.g. ["Mail.Read"]). */
+  scopes?: string[];
+
+  /** Local port for the OAuth callback server. @default 8080 */
+  callbackPort?: number;
+}
+
+/**
+ * Azure Workload Identity authentication for K8s/AKS pods.
+ * Uses the projected service account token to obtain an Entra access token.
+ * Requires: AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_FEDERATED_TOKEN_FILE
+ * environment variables (injected by the workload identity webhook).
+ */
+export interface MCPWorkloadIdentityConfig {
+  method: "workload-identity";
+}
+
+/**
+ * OAuth 2.0 client credentials flow (service-to-service, no user).
+ * Uses a client secret to obtain an app-level access token.
+ */
+export interface MCPClientCredentialsConfig {
+  method: "client-credentials";
+
+  /** OAuth client (application) ID. */
+  clientId: string;
+
+  /** Entra ID tenant ID. */
+  tenantId: string;
+
+  /**
+   * Name of the environment variable holding the client secret.
+   * The actual secret is never stored in config — only the env var name.
+   */
+  clientSecretEnv: string;
+
+  /** Requested scopes (e.g. ["https://graph.microsoft.com/.default"]). */
+  scopes?: string[];
+}
+
+/** Discriminated union of all auth configurations. */
+export type MCPAuthConfig =
+  | MCPOAuthConfig
+  | MCPWorkloadIdentityConfig
+  | MCPClientCredentialsConfig;
+
+/**
+ * Configuration for an MCP server accessible over HTTP (Streamable HTTP).
+ * Used for remote servers like Microsoft Work IQ / Office 365.
+ */
+export interface MCPHttpServerConfig extends MCPServerConfigBase {
+  /** Transport type — must be "http". */
+  type: "http";
+
+  /** Server URL (must be https:// in production). */
+  url: string;
+
+  /** Static HTTP headers to include in every request. */
+  headers?: Record<string, string>;
+
+  /** Authentication configuration (omit for unauthenticated servers). */
+  auth?: MCPAuthConfig;
+}
+
+// ── Union type ───────────────────────────────────────────────────────
+
+/**
+ * MCP server configuration — discriminated union on the `type` field.
+ * When `type` is omitted, defaults to stdio transport.
+ */
+export type MCPServerConfig = MCPStdioServerConfig | MCPHttpServerConfig;
+
+/**
+ * Type guard: returns true if the config uses HTTP transport.
+ */
+export function isMCPHttpConfig(
+  config: MCPServerConfig,
+): config is MCPHttpServerConfig {
+  return config.type === "http";
+}
+
+/**
+ * Type guard: returns true if the config uses stdio transport.
+ */
+export function isMCPStdioConfig(
+  config: MCPServerConfig,
+): config is MCPStdioServerConfig {
+  return config.type !== "http";
+}
+
+/**
+ * Get a human-readable connection string for display purposes.
+ * Returns "command args..." for stdio or the URL for HTTP servers.
+ */
+export function mcpConfigDisplayString(config: MCPServerConfig): string {
+  if (isMCPHttpConfig(config)) {
+    return config.url;
+  }
+  return `${config.command} ${(config.args ?? []).join(" ")}`.trim();
 }
 
 /** Parsed and validated MCP configuration (all servers). */

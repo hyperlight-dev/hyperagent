@@ -373,6 +373,107 @@ no documented service-principal / client-credentials flow for Work IQ.
 | `/mcp enable workiq` hangs                   | First run downloads ~188 MB of platform binaries via `npx`. Be patient.        |
 | "AADSTS650052" / "Access denied" on consent URL | Work IQ Tools service principal not provisioned. Run the admin PS script.   |
 
+### Alternative: HTTP path (Agent 365 per-service servers)
+
+Instead of the single stdio `workiq` server you can wire up the
+per-service Agent 365 HTTP endpoints directly. This gives you finer
+`/mcp enable` control per M365 service but requires a per-tenant Entra
+app registration. Use the stdio path above unless you specifically need
+per-service scoping.
+
+Servers registered (names verified against the
+[Work IQ MCP reference](https://learn.microsoft.com/en-us/microsoft-agent-365/mcp-server-reference/)):
+
+| Config entry         | Agent 365 server id           | Service                          |
+|----------------------|-------------------------------|----------------------------------|
+| `work-iq-mail`       | `mcp_MailTools`               | Outlook mail                     |
+| `work-iq-calendar`   | `mcp_CalendarTools`           | Calendar & scheduling            |
+| `work-iq-teams`      | `mcp_TeamsServer`             | Teams chats & channels           |
+| `work-iq-sharepoint` | `mcp_SharePointRemoteServer`  | SharePoint sites, lists, files   |
+| `work-iq-onedrive`   | `mcp_OneDriveRemoteServer`    | Personal OneDrive                |
+| `work-iq-user`       | `mcp_MeServer`                | User profiles, org chart         |
+| `work-iq-copilot`    | `mcp_M365Copilot`             | M365 Copilot search              |
+| `work-iq-word`       | `mcp_WordServer`              | Word documents                   |
+
+Each entry is wired to `https://agent365.svc.cloud.microsoft/agents/tenants/<tenantId>/servers/<serverId>`.
+
+#### Setup
+
+```bash
+# 1. One-time: create (or reuse) the Entra app registration.
+#    Requires Azure CLI logged in; reuses any existing app in the tenant.
+just mcp-workiq-create-app
+# Add --service-ref <GUID> if your tenant requires a Service Tree ref:
+just mcp-workiq-create-app --service-ref 00000000-0000-0000-0000-000000000000
+
+# 2. Write the HTTP config entries. Reads the saved clientId/tenantId
+#    from ~/.hyperagent/workiq.json (populated by step 1).
+just mcp-setup-workiq-http             # all services
+just mcp-setup-workiq-http mail        # just mail
+just mcp-setup-workiq-http mail,teams  # selected subset
+
+# 3. Enable whichever services you need.
+just start
+# /plugin enable mcp
+# /mcp enable work-iq-mail
+# /mcp enable work-iq-calendar
+# ...
+
+# See stored app details any time:
+just mcp-workiq-show
+```
+
+The eight Work IQ servers above are the complete public catalogue as of
+the [MS Learn Tooling servers overview](https://learn.microsoft.com/en-us/microsoft-agent-365/tooling-servers-overview).
+Microsoft is adding more (Dataverse/Dynamics 365 is already listed but
+ships on a different URL pattern) — when a new one lands, add it to the
+`MAP` in the `mcp-setup-workiq-http` recipe in the `Justfile`.
+
+The app registration is **single-tenant** (`AzureADMyOrg`) and grants the
+Agent 365 delegated scopes required for the per-service token exchange.
+Tenant admin consent is attempted automatically; if you aren't an admin,
+the script prints an admin-consent URL to hand off.
+
+State file `~/.hyperagent/workiq.json` (not committed) holds the
+resolved `clientId`, `tenantId`, and `callbackPort`. A second developer on
+the same tenant can re-run `just mcp-workiq-create-app` — the script
+looks up the existing app by saved clientId first, then by display name,
+and only creates a new one as a last resort.
+
+## HTTP Transport & OAuth (generic remote MCP servers)
+
+HyperAgent supports remote MCP servers over HTTP with OAuth 2.0 (PKCE) for
+cases where a hosted MCP endpoint requires bearer-token auth.
+
+Config shape:
+
+```json
+{
+  "mcpServers": {
+    "my-remote": {
+      "type": "http",
+      "url": "https://example.com/mcp",
+      "auth": {
+        "method": "oauth",
+        "clientId": "<client-id>",
+        "tenantId": "<tenant-id-or-common>",
+        "callbackPort": 8080
+      }
+    }
+  }
+}
+```
+
+On first connect HyperAgent starts a short-lived callback listener on
+`http://localhost:<callbackPort>/callback`, opens the system browser to the
+authorisation endpoint advertised by the server's OAuth metadata, performs
+PKCE, and persists the resulting tokens to
+`~/.hyperagent/mcp-tokens/<server>.json` (mode `0600` on Unix).
+
+Subsequent sessions reuse the cached token and refresh silently. Deleting
+the token file forces a fresh sign-in. Tokens are **never** written to the
+transcript log.
+
 ---
 
 ## Debugging

@@ -708,6 +708,7 @@ if (discoveredCount > 0) {
 
 // ── MCP Integration ──────────────────────────────────────────────────
 import { parseMCPConfig } from "./mcp/config.js";
+import { isMCPHttpConfig, mcpConfigDisplayString } from "./mcp/types.js";
 import {
   createMCPClientManager,
   type MCPClientManager,
@@ -3372,7 +3373,8 @@ const listMCPServersTool = defineTool("list_mcp_servers", {
     const servers = mcpManager!.listServers().map((conn) => ({
       name: conn.name,
       state: conn.state,
-      command: conn.config.command,
+      transport: isMCPHttpConfig(conn.config) ? "http" : "stdio",
+      endpoint: mcpConfigDisplayString(conn.config),
       toolCount: conn.tools.length,
       tools: conn.tools.map((t) => t.name),
       module: `host:mcp-${conn.name}`,
@@ -3427,8 +3429,8 @@ const mcpServerInfoTool = defineTool("mcp_server_info", {
     return {
       name: conn.name,
       state: conn.state,
-      command: conn.config.command,
-      args: conn.config.args ?? [],
+      transport: isMCPHttpConfig(conn.config) ? "http" : "stdio",
+      endpoint: mcpConfigDisplayString(conn.config),
       toolCount: conn.tools.length,
       tools: conn.tools.map((t) => ({
         name: t.name,
