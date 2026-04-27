@@ -1087,10 +1087,6 @@ export async function handleSlashCommand(
           if (targetPlugin.state === "enabled") {
             if (!hasInlineConfig) {
               console.log(`  ℹ️  "${pluginName}" is already enabled.`);
-              console.log(`     To reconfigure, pass key=value overrides:`);
-              console.log(
-                `     /plugin enable ${pluginName} allowedContentTypes=[application/json,text/plain,text/html]`,
-              );
               console.log();
               break;
             }

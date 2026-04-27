@@ -73,28 +73,40 @@ function parseArgs(argv: readonly string[]): CliArgs {
 }
 
 /**
- * Load the most recent OAuth access token from any cached MCP server.
+ * Load the most recent OAuth access token from the MSAL cache.
+ *
+ * MSAL cache files are named *.msal.json and contain an AccessToken
+ * map with {secret, expires_on} entries. We pick the freshest
+ * non-expired token — any Agent 365 server token works for discovery
+ * since they all share the same audience.
+ *
  * Returns undefined if no usable token is found.
  */
 function loadTokenFromCache(): string | undefined {
   if (!existsSync(TOKENS_DIR)) return undefined;
-  const files = readdirSync(TOKENS_DIR).filter((f) => f.endsWith(".json"));
+  const files = readdirSync(TOKENS_DIR).filter((f) =>
+    f.endsWith(".msal.json"),
+  );
   if (files.length === 0) return undefined;
 
-  // Pick the most recently saved token (largest savedAt). Any Agent 365
-  // server token works for discovery — they all share the same audience.
-  let best: { token: string; savedAt: string } | undefined;
+  let best: { token: string; expiresOn: number } | undefined;
+
   for (const f of files) {
     try {
       const raw = readFileSync(join(TOKENS_DIR, f), "utf8");
-      const parsed = JSON.parse(raw) as {
-        savedAt?: string;
-        tokens?: { access_token?: string };
-      };
-      const tok = parsed.tokens?.access_token;
-      const savedAt = parsed.savedAt;
-      if (typeof tok !== "string" || typeof savedAt !== "string") continue;
-      if (!best || savedAt > best.savedAt) best = { token: tok, savedAt };
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const atMap = parsed["AccessToken"] as
+        | Record<string, { secret?: string; expires_on?: string }>
+        | undefined;
+      if (!atMap) continue;
+      for (const entry of Object.values(atMap)) {
+        if (typeof entry.secret !== "string") continue;
+        const expiresOn = Number(entry.expires_on ?? "0");
+        if (expiresOn * 1000 < Date.now()) continue; // expired
+        if (!best || expiresOn > best.expiresOn) {
+          best = { token: entry.secret, expiresOn };
+        }
+      }
     } catch {
       // skip corrupt files
     }
