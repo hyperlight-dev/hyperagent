@@ -483,9 +483,17 @@ const COMMANDS: readonly CommandEntry[] = Object.freeze([
 ]);
 
 /** Pre-computed completion strings for the readline completer. */
-export const COMPLETION_STRINGS: readonly string[] = COMMANDS.map(
-  (c) => c.completion,
-);
+export const COMPLETION_STRINGS: readonly string[] = [
+  ...COMMANDS.map((c) => c.completion),
+  // Aliases — /plugins is shorthand for /plugin
+  "/plugins list",
+  "/plugins info ",
+  "/plugins enable ",
+  "/plugins disable ",
+  "/plugins approve ",
+  "/plugins unapprove ",
+  "/plugins audit ",
+];
 
 /**
  * Render the full help text from the COMMANDS registry.

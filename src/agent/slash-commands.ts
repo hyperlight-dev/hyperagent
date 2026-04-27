@@ -806,7 +806,9 @@ export async function handleSlashCommand(
     // ── Plugin Commands ──────────────────────────────────────
     //
     // All plugin operations live under /plugin <sub>.
+    // /plugins is an alias for /plugin.
 
+    case "/plugins":
     case "/plugin": {
       const subCmd = parts[1]?.toLowerCase();
       // Plugin name sits at parts[2], args at parts[3]+.
