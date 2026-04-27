@@ -78,6 +78,10 @@ Key rules:
 - All MCP tool calls are async — use `await`
 - Tools return `{ content: [{type, text}] }` — parse the text field as needed
 - Some servers return embedded JSON (status text + JSON) — extract the JSON part
+- **Write operations** (tools not marked `readOnlyHint: true`) may prompt the
+  user for approval before executing. If denied, the tool returns
+  `{ error: "Operation denied..." }` — handle this gracefully and explain
+  to the user what happened. Do NOT retry denied operations.
 
 ### Server name patterns
 

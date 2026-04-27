@@ -721,6 +721,7 @@ import {
 import {
   createMCPPluginAdapter,
   generateMCPDeclarations,
+  type WriteSafetyGate,
 } from "./mcp/plugin-adapter.js";
 import {
   loadMCPApprovalStore,
@@ -777,6 +778,63 @@ let mcpManager: MCPClientManager | null = null;
  * function from ever executing if dangerous code was detected. This
  * closes GAP 2 where malicious code could run in host context.
  */
+
+/**
+ * MCP write-safety gate.
+ *
+ * Intercepts non-read-only MCP tool calls before execution.
+ * Read-only tools (readOnlyHint === true) bypass the gate entirely.
+ *
+ * Behaviour:
+ *   - autoApprove mode → allow silently
+ *   - interactive TTY  → prompt user "[y/n]"
+ *   - no TTY           → refuse
+ *
+ * The gate runs on the host while the guest VM is paused, so prompting
+ * the user is safe — there's no timeout risk from the sandbox side.
+ */
+const mcpWriteSafetyGate: WriteSafetyGate = async (
+  serverName,
+  toolName,
+  args,
+  annotations,
+) => {
+  // Auto-approve mode → allow everything
+  if (state.autoApprove) return true;
+
+  // Build a concise summary of the args for the prompt
+  const argSummary = Object.entries(args)
+    .slice(0, 5) // Don't dump huge arg lists
+    .map(([k, v]) => {
+      const val = typeof v === "string" ? v.slice(0, 80) : JSON.stringify(v);
+      return `   ${k}: ${val}`;
+    })
+    .join("\n");
+
+  const label = annotations?.destructiveHint
+    ? C.err("⚠️  MCP DESTRUCTIVE operation")
+    : C.warn("⚠️  MCP write operation");
+
+  console.log();
+  console.log(`  ${label}: ${C.label(serverName)}.${C.label(toolName)}`);
+  if (argSummary) {
+    console.log(argSummary);
+  }
+
+  const rl = state.readlineInstance;
+  if (!rl || !process.stdin.isTTY) {
+    console.log(
+      `  ${C.err("Refused")} — no interactive terminal to approve write operations.`,
+    );
+    return false;
+  }
+
+  await drainAndWarn(rl);
+  const answer = await promptUser(rl, `  Allow? [y/n] `);
+  const normalised = answer.trim().toLowerCase();
+  return normalised === "y" || normalised === "yes";
+};
+
 async function syncPluginsToSandbox(): Promise<void> {
   const enabled = pluginManager.getEnabledPlugins();
 
@@ -867,7 +925,11 @@ async function syncPluginsToSandbox(): Promise<void> {
     if (mcpPlugin && mcpPlugin.state === "enabled") {
       for (const conn of mcpManager.listServers()) {
         if (conn.state === "connected" && conn.tools.length > 0) {
-          const adapter = createMCPPluginAdapter(conn, mcpManager);
+          const adapter = createMCPPluginAdapter(
+            conn,
+            mcpManager,
+            mcpWriteSafetyGate,
+          );
           registrations.push(adapter);
         }
       }

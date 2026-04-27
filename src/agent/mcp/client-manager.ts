@@ -244,6 +244,26 @@ export function createMCPClientManager() {
       originalName: tool.name,
       description: sanitiseDescription(tool.description ?? ""),
       inputSchema: (tool.inputSchema as Record<string, unknown>) ?? {},
+      // Capture behavioural annotations if the server provides them.
+      // These are hints (not guarantees) used by the write-safety gate.
+      ...(tool.annotations
+        ? {
+            annotations: {
+              ...(tool.annotations.readOnlyHint !== undefined
+                ? { readOnlyHint: tool.annotations.readOnlyHint }
+                : {}),
+              ...(tool.annotations.destructiveHint !== undefined
+                ? { destructiveHint: tool.annotations.destructiveHint }
+                : {}),
+              ...(tool.annotations.idempotentHint !== undefined
+                ? { idempotentHint: tool.annotations.idempotentHint }
+                : {}),
+              ...(tool.annotations.openWorldHint !== undefined
+                ? { openWorldHint: tool.annotations.openWorldHint }
+                : {}),
+            },
+          }
+        : {}),
     }));
 
     conn.client = client;

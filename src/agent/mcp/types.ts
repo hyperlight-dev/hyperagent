@@ -202,6 +202,18 @@ export interface MCPConfig {
   servers: Map<string, MCPServerConfig>;
 }
 
+/** MCP tool annotations — hints about tool behaviour (from MCP spec). */
+export interface MCPToolAnnotations {
+  /** Tool only reads data, no side effects. */
+  readOnlyHint?: boolean;
+  /** Tool can delete or destroy data. */
+  destructiveHint?: boolean;
+  /** Tool is safe to retry (same input → same effect). */
+  idempotentHint?: boolean;
+  /** Tool interacts with the external world. */
+  openWorldHint?: boolean;
+}
+
 /** MCP tool schema as returned by listTools(). */
 export interface MCPToolSchema {
   /** Tool name (sanitised to valid JS identifier). */
@@ -215,6 +227,9 @@ export interface MCPToolSchema {
 
   /** JSON Schema for the tool's input parameters. */
   inputSchema: Record<string, unknown>;
+
+  /** Behavioural annotations from the server (hints, not guarantees). */
+  annotations?: MCPToolAnnotations;
 }
 
 /** Connection state for an MCP server. */

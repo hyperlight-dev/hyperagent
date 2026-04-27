@@ -32,10 +32,13 @@ Or use the setup script:
 just mcp-setup-everything   # sets up the MCP everything test server
 ```
 
-### 2. Enable the MCP gateway plugin
+### 2. Start HyperAgent
 
-```
-/plugin enable mcp
+The MCP gateway plugin auto-enables when servers are configured — no
+manual `/plugin enable mcp` needed.
+
+```bash
+just start
 ```
 
 ### 3. Connect a server
@@ -43,6 +46,9 @@ just mcp-setup-everything   # sets up the MCP everything test server
 ```
 /mcp enable everything
 ```
+
+Or just ask a question — the LLM will discover configured servers and
+connect them automatically (prompting for approval if needed).
 
 ### 4. Use MCP tools in your prompt
 
@@ -86,7 +92,7 @@ function handler(event) {
 
 - Names must match `/^[a-z][a-z0-9-]*$/` (lowercase, alphanumeric, hyphens).
 - Cannot collide with native plugin names (`fs-read`, `fs-write`, `fetch`).
-- Maximum 20 configured servers.
+- Maximum 50 configured servers.
 
 ### Tool filtering
 
@@ -140,11 +146,14 @@ are shown during approval.
 | `mcp_server_info(name)`| Detailed info + TypeScript declarations               |
 | `manage_mcp(action, name)` | Connect/disconnect servers                        |
 
-The LLM discovers MCP by:
-1. Enabling the `mcp` plugin via `manage_plugin`
-2. Calling `list_mcp_servers()` to see what's available
-3. Calling `mcp_server_info(name)` for tool schemas
-4. Writing handler code with `import { tool } from "host:mcp-<name>"`
+The LLM discovers MCP automatically:
+1. MCP gateway auto-enables on startup when servers are configured
+2. Calls `list_mcp_servers()` to discover available servers
+3. Calls `manage_mcp("connect", name)` — pre-approved servers connect silently,
+   others prompt the user for approval. OAuth servers that need first-time
+   browser auth will direct the user to run `/mcp enable <name>`.
+4. Calls `mcp_server_info(name)` for tool schemas
+5. Writes handler code with `import { tool } from "host:mcp-<name>"`
 
 ---
 
@@ -193,6 +202,35 @@ Suspicious descriptions are flagged during approval.
 - Tool descriptions are truncated to 2,000 chars, `*/` escaped for JSDoc
 - Env var values are **never** logged anywhere
 - MCP responses are capped at 1 MB
+
+### Write-safety gate
+
+MCP tools that are not read-only are intercepted before execution. The
+gate uses the MCP spec's `ToolAnnotations` (hints from the server):
+
+| Scenario                         | `readOnlyHint=true` | No annotations / write | `destructiveHint=true` |
+|----------------------------------|---------------------|------------------------|------------------------|
+| **Interactive TTY**              | Execute ✅           | Prompt `[y/n]`         | Prompt `[y/n]` ⚠️      |
+| **`--auto-approve` (yolo)**      | Execute ✅           | Execute ✅              | Execute ✅              |
+| **No TTY, no auto-approve**      | Execute ✅           | Refuse ❌               | Refuse ❌               |
+
+The gate runs on the **host side** while the guest VM is paused — the
+LLM's handler code sees either a normal result or
+`{ error: "Operation denied..." }`. The LLM doesn't need to know about
+the gate; it writes code normally.
+
+Example prompt shown to the user:
+
+```
+⚠️  MCP write operation: work-iq-mail.SendEmail
+   to: boss@contoso.com
+   subject: Q4 Report
+  Allow? [y/n]
+```
+
+Note: annotations are **hints from untrusted servers** (per MCP spec).
+Tools without annotations are treated as writes (prompted). Use
+`allowTools`/`denyTools` in config for hard enforcement.
 
 ---
 
@@ -375,75 +413,97 @@ no documented service-principal / client-credentials flow for Work IQ.
 
 ### Alternative: HTTP path (Agent 365 per-service servers)
 
-Instead of the single stdio `workiq` server you can wire up the
+Instead of the single stdio `workiq` server you can connect to the
 per-service Agent 365 HTTP endpoints directly. This gives you finer
-`/mcp enable` control per M365 service but requires a per-tenant Entra
-app registration. Use the stdio path above unless you specifically need
-per-service scoping.
+`/mcp enable` control per M365 service and uses MSAL for OAuth.
 
-Servers registered (names verified against the
-[Work IQ MCP reference](https://learn.microsoft.com/en-us/microsoft-agent-365/mcp-server-reference/)):
+The setup script uses the VS Code MCP extension's pre-registered client ID
+(`aebc6443-...`) which has `McpServers.*` scopes admin-consented in all
+M365 Copilot tenants — no per-tenant app registration needed.
 
-| Config entry         | Agent 365 server id           | Service                          |
-|----------------------|-------------------------------|----------------------------------|
-| `work-iq-mail`       | `mcp_MailTools`               | Outlook mail                     |
-| `work-iq-calendar`   | `mcp_CalendarTools`           | Calendar & scheduling            |
-| `work-iq-teams`      | `mcp_TeamsServer`             | Teams chats & channels           |
-| `work-iq-sharepoint` | `mcp_SharePointRemoteServer`  | SharePoint sites, lists, files   |
-| `work-iq-onedrive`   | `mcp_OneDriveRemoteServer`    | Personal OneDrive                |
-| `work-iq-user`       | `mcp_MeServer`                | User profiles, org chart         |
-| `work-iq-copilot`    | `mcp_M365Copilot`             | M365 Copilot search              |
-| `work-iq-word`       | `mcp_WordServer`              | Word documents                   |
+21 servers are available (see the full list with `just mcp-setup-m365 list`).
+Common ones:
 
-Each entry is wired to `https://agent365.svc.cloud.microsoft/agents/tenants/<tenantId>/servers/<serverId>`.
+| Config entry         | Service                          |
+|----------------------|----------------------------------|
+| `work-iq-mail`       | Outlook mail                     |
+| `work-iq-calendar`   | Calendar & scheduling            |
+| `work-iq-teams`      | Teams chats & channels           |
+| `work-iq-planner`    | Planner tasks & plans            |
+| `work-iq-sharepoint` | SharePoint sites & files         |
+| `work-iq-onedrive`   | Personal OneDrive                |
+| `work-iq-copilot`    | M365 Copilot search              |
 
 #### Setup
 
 ```bash
-# 1. One-time: create (or reuse) the Entra app registration.
-#    Requires Azure CLI logged in; reuses any existing app in the tenant.
-just mcp-workiq-create-app
-# Add --service-ref <GUID> if your tenant requires a Service Tree ref:
-just mcp-workiq-create-app --service-ref 00000000-0000-0000-0000-000000000000
+# Configure all M365 servers with browser auth (one-time)
+just mcp-setup-m365 all \
+  aebc6443-996d-45c2-90f0-388ff96faa56 \
+  <your-tenant-id> \
+  "" browser
 
-# 2. Write the HTTP config entries. Reads the saved clientId/tenantId
-#    from ~/.hyperagent/workiq.json (populated by step 1).
-just mcp-setup-workiq-http             # all services
-just mcp-setup-workiq-http mail        # just mail
-just mcp-setup-workiq-http mail,teams  # selected subset
+# Or a subset
+just mcp-setup-m365 "mail,teams,planner" \
+  aebc6443-996d-45c2-90f0-388ff96faa56 \
+  <your-tenant-id> \
+  "" browser
 
-# 3. Enable whichever services you need.
-just start
-# /plugin enable mcp
-# /mcp enable work-iq-mail
-# /mcp enable work-iq-calendar
-# ...
-
-# See stored app details any time:
-just mcp-workiq-show
+# List available services
+just mcp-setup-m365 list
 ```
 
-The eight Work IQ servers above are the complete public catalogue as of
-the [MS Learn Tooling servers overview](https://learn.microsoft.com/en-us/microsoft-agent-365/tooling-servers-overview).
-Microsoft is adding more (Dataverse/Dynamics 365 is already listed but
-ships on a different URL pattern) — when a new one lands, add it to the
-`MAP` in the `mcp-setup-workiq-http` recipe in the `Justfile`.
+This writes config entries AND pre-approves all configured servers so the
+LLM can connect them without interactive prompts.
 
-The app registration is **single-tenant** (`AzureADMyOrg`) and grants the
-Agent 365 delegated scopes required for the per-service token exchange.
-Tenant admin consent is attempted automatically; if you aren't an admin,
-the script prints an admin-consent URL to hand off.
+#### Auth flows
 
-State file `~/.hyperagent/workiq.json` (not committed) holds the
-resolved `clientId`, `tenantId`, and `callbackPort`. A second developer on
-the same tenant can re-run `just mcp-workiq-create-app` — the script
-looks up the existing app by saved clientId first, then by display name,
-and only creates a new one as a last resort.
+The `FLOW` argument (last positional) is **required**:
 
-## HTTP Transport & OAuth (generic remote MCP servers)
+| Flow | When to use |
+|------|-------------|
+| `browser` | Workstation with a browser. MSAL opens `http://localhost` (ephemeral port). |
+| `device-code` | SSH, containers, no browser. Prints a code + URL to enter on any device. |
 
-HyperAgent supports remote MCP servers over HTTP with OAuth 2.0 (PKCE) for
-cases where a hosted MCP endpoint requires bearer-token auth.
+First connect opens the browser / shows the device code. Tokens are cached
+in `~/.hyperagent/mcp-tokens/<server>.msal.json` and refreshed silently on
+subsequent sessions.
+
+#### Auth safety in `--auto-approve` mode
+
+If the LLM tries to connect an OAuth server with no cached token in
+`--auto-approve` (yolo) mode, it refuses immediately instead of opening a
+browser nobody's watching. Authenticate interactively first, then yolo
+works with cached tokens.
+
+#### Custom Entra app registration
+
+If your tenant blocks the VS Code client ID, create your own app:
+
+```bash
+just mcp-m365-create-app
+# Then use your app's client ID:
+just mcp-setup-m365 all <your-client-id> <your-tenant-id> "" browser
+```
+
+#### Scope
+
+All servers use `ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/.default` (the Agent 365
+resource app ID with `.default`), which requests all pre-consented scopes in
+one shot. This matches what [a365cli](https://github.com/sozercan/a365cli) uses.
+
+#### Refreshing the server catalog
+
+```bash
+just mcp-m365-refresh-servers     # uses cached OAuth token
+just mcp-m365-refresh-servers --token <bearer>  # explicit token
+```
+
+## HTTP Transport & OAuth
+
+HyperAgent supports remote MCP servers over HTTP with OAuth 2.0 via
+[@azure/msal-node](https://github.com/AzureAD/microsoft-authentication-library-for-js).
+MSAL handles PKCE, token caching, refresh, and redirect URIs.
 
 Config shape:
 
@@ -455,24 +515,34 @@ Config shape:
       "url": "https://example.com/mcp",
       "auth": {
         "method": "oauth",
+        "flow": "browser",
         "clientId": "<client-id>",
-        "tenantId": "<tenant-id-or-common>",
-        "callbackPort": 8080
+        "tenantId": "<tenant-id-or-organizations>",
+        "scopes": ["api://example/.default"],
+        "redirectUri": "http://localhost"
       }
     }
   }
 }
 ```
 
-On first connect HyperAgent starts a short-lived callback listener on
-`http://localhost:<callbackPort>/callback`, opens the system browser to the
-authorisation endpoint advertised by the server's OAuth metadata, performs
-PKCE, and persists the resulting tokens to
-`~/.hyperagent/mcp-tokens/<server>.json` (mode `0600` on Unix).
+### Auth config fields
 
-Subsequent sessions reuse the cached token and refresh silently. Deleting
-the token file forces a fresh sign-in. Tokens are **never** written to the
-transcript log.
+| Field | Required | Description |
+|-------|----------|-------------|
+| `method` | Yes | Must be `"oauth"` |
+| `flow` | Yes | `"browser"` or `"device-code"` — no default |
+| `clientId` | Yes | Entra app (client) ID |
+| `tenantId` | No | Defaults to `"organizations"` |
+| `scopes` | No | OAuth scopes array |
+| `redirectUri` | No | Override redirect URI (default: `http://localhost`, works with MSAL-compatible apps) |
+
+### Token caching
+
+MSAL persists tokens to `~/.hyperagent/mcp-tokens/<server>.msal.json`
+(mode `0600`). Refresh tokens survive across sessions — only the first
+connect requires interactive auth. Deleting the file forces re-auth.
+Tokens are **never** written to the transcript log.
 
 ---
 
@@ -534,10 +604,10 @@ Any MCP-compatible server works. Popular options from the
                ▼
 ┌──────────────────────────────────────┐
 │  MCPClientManager                    │
-│  Lazy connect → stdio process        │
-│  Tool discovery → PluginAdapter      │
+│  Connect → stdio process / HTTP+MSAL │
+│  Tool discovery + annotations        │
 └──────────────┬───────────────────────┘
-               │ setPlugins()
+               │ PluginAdapter + WriteSafetyGate
                ▼
 ┌──────────────────────────────────────┐
 │  Hyperlight Sandbox (micro-VM)       │
@@ -545,13 +615,14 @@ Any MCP-compatible server works. Popular options from the
 │  import { echo } from               │
 │    "host:mcp-everything";            │
 │  const r = echo({ message: "hi" }); │
+│  // → write-safety gate checks      │
 │  // → { content: "Echo: hi" }       │
 └──────────────────────────────────────┘
 ```
 
 MCP tools are bridged through the same `host:` module mechanism as native
-plugins. The sandbox sees synchronous function calls — async transport is
-handled transparently by the bridge layer.
+plugins. The sandbox sees synchronous function calls — async transport and
+the write-safety gate are handled transparently by the bridge layer.
 
 ---
 

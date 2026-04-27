@@ -3,9 +3,34 @@
 // Wraps an MCP server connection as a PluginRegistration so it can
 // be registered with the sandbox via setPlugins() alongside native
 // plugins. Each MCP server becomes a host module at `host:mcp-<name>`.
+//
+// Write-safety gate: tools that are not read-only are intercepted
+// before execution. In interactive mode, the user is prompted to
+// approve. In auto-approve mode, they execute silently. In non-
+// interactive mode without auto-approve, they are refused.
 
 import type { MCPClientManager } from "./client-manager.js";
-import type { MCPConnection, MCPToolSchema } from "./types.js";
+import type {
+  MCPConnection,
+  MCPToolSchema,
+  MCPToolAnnotations,
+} from "./types.js";
+
+/**
+ * Callback that decides whether a write operation should proceed.
+ *
+ * @param serverName - MCP server name (e.g. "work-iq-mail")
+ * @param toolName - Tool name (e.g. "SendEmail")
+ * @param args - The arguments being passed to the tool
+ * @param annotations - Tool annotations (hints from server)
+ * @returns true to allow, false to deny
+ */
+export type WriteSafetyGate = (
+  serverName: string,
+  toolName: string,
+  args: Record<string, unknown>,
+  annotations: MCPToolAnnotations | undefined,
+) => Promise<boolean>;
 
 /**
  * PluginRegistration-compatible interface.
@@ -27,11 +52,14 @@ export interface MCPPluginRegistration {
  *
  * @param conn - The MCP server connection (must be connected).
  * @param manager - The client manager for making tool calls.
+ * @param gate - Optional write-safety gate. When provided, non-read-only
+ *   tools are checked before execution.
  * @returns A PluginRegistration that can be passed to setPlugins().
  */
 export function createMCPPluginAdapter(
   conn: MCPConnection,
   manager: MCPClientManager,
+  gate?: WriteSafetyGate,
 ): MCPPluginRegistration {
   const moduleName = `mcp-${conn.name}`;
 
@@ -45,6 +73,24 @@ export function createMCPPluginAdapter(
       for (const tool of conn.tools) {
         functions[tool.name] = async (...args: unknown[]): Promise<unknown> => {
           const toolArgs = (args[0] as Record<string, unknown>) ?? {};
+
+          // Write-safety gate: if the tool is not read-only, check
+          // with the gate before executing. The guest VM is paused
+          // during this check — it's safe to prompt the user.
+          if (gate && tool.annotations?.readOnlyHint !== true) {
+            const allowed = await gate(
+              conn.name,
+              tool.name,
+              toolArgs,
+              tool.annotations,
+            );
+            if (!allowed) {
+              return {
+                error: `Operation denied: ${tool.name} on ${conn.name} was blocked by the write-safety gate. The user declined the operation.`,
+              };
+            }
+          }
+
           return manager.callTool(conn.name, tool.name, toolArgs);
         };
       }
