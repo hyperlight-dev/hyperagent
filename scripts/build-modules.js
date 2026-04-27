@@ -46,15 +46,26 @@ execSync("npx tsx scripts/generate-native-dts.ts", {
   stdio: "inherit",
 });
 
-// Step 2: Regenerate ha-modules.d.ts so tsc can resolve native module imports
+// Step 2: Compile TypeScript using the committed ha-modules.d.ts (which is
+// up to date — enforced by tests/dts-sync.test.ts). tsc emits fresh .d.ts
+// files for every src/*.ts module.
+//
+// This MUST run before regenerating ha-modules.d.ts. On a fresh checkout
+// the gitignored builtin-modules/*.d.ts files don't exist yet — if we
+// regenerated ha-modules.d.ts first it would be a partial file (only
+// the 4 native modules are present), and tsc would then fail because
+// the ambient `declare module "ha:ooxml-core"` block (etc) was wiped.
+execSync("tsc --project tsconfig.json", { cwd: BUILTIN_DIR, stdio: "inherit" });
+
+// Step 3: Regenerate ha-modules.d.ts from the now-fresh .d.ts files.
+// Output should match the committed ha-modules.d.ts byte-for-byte, modulo
+// any actual API changes the user just made — which is exactly what
+// tests/dts-sync.test.ts catches.
 console.log("\nGenerating ha-modules.d.ts...");
 execSync("npx tsx scripts/generate-ha-modules-dts.ts", {
   cwd: ROOT,
   stdio: "inherit",
 });
-
-// Step 3: Compile TypeScript (can now resolve ha:ziplib etc. via ha-modules.d.ts)
-execSync("tsc --project tsconfig.json", { cwd: BUILTIN_DIR, stdio: "inherit" });
 
 // Step 4: Format with Prettier
 execSync(`prettier --write "${BUILTIN_DIR}/*.js"`, {

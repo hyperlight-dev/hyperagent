@@ -36,6 +36,12 @@ import {
   auditMCPTools,
 } from "./mcp/approval.js";
 import { maskEnvValue } from "./mcp/sanitise.js";
+import { canAcquireSilently } from "./mcp/auth/msal-oauth.js";
+import {
+  isMCPHttpConfig,
+  isMCPStdioConfig,
+  mcpConfigDisplayString,
+} from "./mcp/types.js";
 import {
   createMCPPluginAdapter,
   generateMCPDeclarations,
@@ -1082,10 +1088,6 @@ export async function handleSlashCommand(
           if (targetPlugin.state === "enabled") {
             if (!hasInlineConfig) {
               console.log(`  ℹ️  "${pluginName}" is already enabled.`);
-              console.log(`     To reconfigure, pass key=value overrides:`);
-              console.log(
-                `     /plugin enable ${pluginName} allowedContentTypes=[application/json,text/plain,text/html]`,
-              );
               console.log();
               break;
             }
@@ -2320,9 +2322,7 @@ export async function handleSlashCommand(
               const tools =
                 s.state === "connected" ? ` — ${s.tools.length} tool(s)` : "";
               console.log(`  ${C.label(s.name)}  [${stateColor}]${tools}`);
-              console.log(
-                `    ${C.dim(`${s.config.command} ${(s.config.args ?? []).join(" ")}`)}`,
-              );
+              console.log(`    ${C.dim(mcpConfigDisplayString(s.config))}`);
             }
           }
           console.log();
@@ -2353,6 +2353,31 @@ export async function handleSlashCommand(
           }
 
           try {
+            // For OAuth servers in auto-approve mode, check if we can
+            // authenticate silently. If not, interactive auth would
+            // open a browser that nobody's watching (yolo/CI mode).
+            // Refuse early instead of hanging.
+            if (
+              deps.state.autoApprove &&
+              isMCPHttpConfig(conn.config) &&
+              conn.config.auth?.method === "oauth"
+            ) {
+              const canSilent = await canAcquireSilently(
+                mcpName,
+                conn.config.auth,
+              );
+              if (!canSilent) {
+                console.log(
+                  `  ${C.err(`"${mcpName}" requires interactive authentication but running in auto-approve mode.`)}`,
+                );
+                console.log(
+                  `  ${C.dim("Run without --auto-approve first to authenticate, then tokens will be cached for future runs.")}`,
+                );
+                console.log();
+                return true;
+              }
+            }
+
             // Connect and discover tools
             console.log(`  Connecting to ${C.label(mcpName)}...`);
             const connected = await deps.mcpManager.connect(mcpName);
@@ -2371,10 +2396,10 @@ export async function handleSlashCommand(
               console.log();
               console.log(`  Server:  ${C.label(mcpName)}`);
               console.log(
-                `  Command: ${C.dim(`${conn.config.command} ${(conn.config.args ?? []).join(" ")}`)}`,
+                `  ${isMCPStdioConfig(conn.config) ? "Command" : "URL"}:    ${C.dim(mcpConfigDisplayString(conn.config))}`,
               );
 
-              if (conn.config.env) {
+              if (isMCPStdioConfig(conn.config) && conn.config.env) {
                 console.log(`  Env vars:`);
                 for (const [k, v] of Object.entries(conn.config.env)) {
                   console.log(`    ${k}=${C.dim(maskEnvValue(v))}`);
@@ -2478,7 +2503,7 @@ export async function handleSlashCommand(
           console.log(`  ${C.label(mcpName)}`);
           console.log(`  State:   ${info.state}`);
           console.log(
-            `  Command: ${info.config.command} ${(info.config.args ?? []).join(" ")}`,
+            `  ${isMCPStdioConfig(info.config) ? "Command" : "URL"}:    ${mcpConfigDisplayString(info.config)}`,
           );
           if (info.config.allowTools) {
             console.log(`  Allow:   ${info.config.allowTools.join(", ")}`);

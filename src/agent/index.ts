@@ -44,6 +44,7 @@ import { Transcript } from "./transcript.js";
 import {
   createPluginManager,
   contentHash,
+  computePluginHash,
   loadOperatorConfig,
   exceedsRiskThreshold,
   resolvePluginSource,
@@ -706,8 +707,41 @@ if (discoveredCount > 0) {
   console.error(`[plugins] Discovered ${discoveredCount} plugin(s)`);
 }
 
+// Pre-approve the MCP gateway plugin if it exists. The gateway is a
+// boolean sentinel (zero risk) and its source hash changes on every
+// npm install rebuild. Without this, syncPluginsToSandbox would refuse
+// to load it due to a stale approval hash from a previous session.
+{
+  const mcpGateway = pluginManager.getPlugin("mcp");
+  if (mcpGateway) {
+    const mcpHash = computePluginHash(mcpGateway.dir);
+    if (mcpHash) {
+      pluginManager.setAuditResult("mcp", {
+        contentHash: mcpHash,
+        auditedAt: new Date().toISOString(),
+        findings: [],
+        riskLevel: "LOW",
+        summary: "Boolean sentinel — exposes a single read-only status check.",
+        descriptionAccurate: true,
+        capabilities: ["MCP gateway status"],
+        riskReasons: ["No filesystem, network, or exec capabilities"],
+        recommendation: {
+          verdict: "approve",
+          reason: "Auto-approved: gateway sentinel",
+        },
+      });
+      pluginManager.approve("mcp");
+    }
+  }
+}
+
 // ── MCP Integration ──────────────────────────────────────────────────
 import { parseMCPConfig } from "./mcp/config.js";
+import {
+  isMCPHttpConfig,
+  isMCPStdioConfig,
+  mcpConfigDisplayString,
+} from "./mcp/types.js";
 import {
   createMCPClientManager,
   type MCPClientManager,
@@ -715,7 +749,15 @@ import {
 import {
   createMCPPluginAdapter,
   generateMCPDeclarations,
+  type WriteSafetyGate,
 } from "./mcp/plugin-adapter.js";
+import {
+  loadMCPApprovalStore,
+  isMCPApproved,
+  approveMCPServer,
+  auditMCPTools,
+} from "./mcp/approval.js";
+import { canAcquireSilently } from "./mcp/auth/msal-oauth.js";
 
 // Load MCP config from ~/.hyperagent/config.json
 let mcpManager: MCPClientManager | null = null;
@@ -764,6 +806,77 @@ let mcpManager: MCPClientManager | null = null;
  * function from ever executing if dangerous code was detected. This
  * closes GAP 2 where malicious code could run in host context.
  */
+
+/**
+ * MCP write-safety gate.
+ *
+ * Intercepts non-read-only MCP tool calls before execution.
+ * Read-only tools (readOnlyHint === true) bypass the gate entirely.
+ *
+ * Behaviour:
+ *   - autoApprove mode → allow silently
+ *   - already approved this session → allow silently
+ *   - interactive TTY  → prompt user "[y/n]" (remembered for session)
+ *   - no TTY           → refuse
+ *
+ * The gate runs on the host while the guest VM is paused, so prompting
+ * the user is safe — there's no timeout risk from the sandbox side.
+ */
+
+/** Tools approved by the user during this session (server.tool keys). */
+const mcpSessionApprovedTools = new Set<string>();
+
+const mcpWriteSafetyGate: WriteSafetyGate = async (
+  serverName,
+  toolName,
+  args,
+  annotations,
+) => {
+  // Auto-approve mode → allow everything
+  if (state.autoApprove) return true;
+
+  // Already approved this tool in this session → allow silently
+  const toolKey = `${serverName}.${toolName}`;
+  if (mcpSessionApprovedTools.has(toolKey)) return true;
+
+  // Build a concise summary of the args for the prompt
+  const argSummary = Object.entries(args)
+    .slice(0, 5) // Don't dump huge arg lists
+    .map(([k, v]) => {
+      const val = typeof v === "string" ? v.slice(0, 80) : JSON.stringify(v);
+      return `   ${k}: ${val}`;
+    })
+    .join("\n");
+
+  const label = annotations?.destructiveHint
+    ? C.err("⚠️  MCP DESTRUCTIVE operation")
+    : C.warn("⚠️  MCP write operation");
+
+  console.log();
+  console.log(`  ${label}: ${C.label(serverName)}.${C.label(toolName)}`);
+  if (argSummary) {
+    console.log(argSummary);
+  }
+
+  const rl = state.readlineInstance;
+  if (!rl || !process.stdin.isTTY) {
+    console.log(
+      `  ${C.err("Refused")} — no interactive terminal to approve write operations.`,
+    );
+    return false;
+  }
+
+  await drainAndWarn(rl);
+  const answer = await promptUser(rl, `  Allow? [y/n] `);
+  const normalised = answer.trim().toLowerCase();
+  const allowed = normalised === "y" || normalised === "yes";
+  if (allowed) {
+    // Remember for the rest of this session — don't re-prompt
+    mcpSessionApprovedTools.add(toolKey);
+  }
+  return allowed;
+};
+
 async function syncPluginsToSandbox(): Promise<void> {
   const enabled = pluginManager.getEnabledPlugins();
 
@@ -854,7 +967,11 @@ async function syncPluginsToSandbox(): Promise<void> {
     if (mcpPlugin && mcpPlugin.state === "enabled") {
       for (const conn of mcpManager.listServers()) {
         if (conn.state === "connected" && conn.tools.length > 0) {
-          const adapter = createMCPPluginAdapter(conn, mcpManager);
+          const adapter = createMCPPluginAdapter(
+            conn,
+            mcpManager,
+            mcpWriteSafetyGate,
+          );
           registrations.push(adapter);
         }
       }
@@ -3359,20 +3476,26 @@ const listMCPServersTool = defineTool("list_mcp_servers", {
   description: [
     "List all configured MCP servers with their connection state and available tools.",
     "Use this to discover which external tool servers are available.",
-    "Requires the 'mcp' plugin to be enabled first.",
+    "Works even before the MCP gateway plugin is enabled.",
   ].join("\n"),
   parameters: {
     type: "object",
     properties: {},
   },
   handler: async () => {
-    const err = requireMCPEnabled();
-    if (err) return { error: err };
+    if (!mcpManager) {
+      return {
+        servers: [],
+        total: 0,
+        hint: "No MCP servers configured. Add servers to ~/.hyperagent/config.json under mcpServers.",
+      };
+    }
 
-    const servers = mcpManager!.listServers().map((conn) => ({
+    const servers = mcpManager.listServers().map((conn) => ({
       name: conn.name,
       state: conn.state,
-      command: conn.config.command,
+      transport: isMCPHttpConfig(conn.config) ? "http" : "stdio",
+      endpoint: mcpConfigDisplayString(conn.config),
       toolCount: conn.tools.length,
       tools: conn.tools.map((t) => t.name),
       module: `host:mcp-${conn.name}`,
@@ -3427,8 +3550,8 @@ const mcpServerInfoTool = defineTool("mcp_server_info", {
     return {
       name: conn.name,
       state: conn.state,
-      command: conn.config.command,
-      args: conn.config.args ?? [],
+      transport: isMCPHttpConfig(conn.config) ? "http" : "stdio",
+      endpoint: mcpConfigDisplayString(conn.config),
       toolCount: conn.tools.length,
       tools: conn.tools.map((t) => ({
         name: t.name,
@@ -3471,6 +3594,7 @@ const manageMCPTool = defineTool("manage_mcp", {
     action: "connect" | "disconnect";
     name: string;
   }) => {
+    const rl = state.readlineInstance;
     const err = requireMCPEnabled();
     if (err) return { error: err };
 
@@ -3494,12 +3618,120 @@ const manageMCPTool = defineTool("manage_mcp", {
         };
       }
 
-      // Suggest the user use /mcp enable which handles approval
-      return {
-        success: false,
-        message: `Use /mcp enable ${params.name} to connect — it handles approval and security review.`,
-        hint: "Tell the user to run the /mcp enable command.",
-      };
+      try {
+        // For OAuth servers, check if we can authenticate silently
+        // (cached/refreshed token). If not, interactive auth would
+        // block the tool call indefinitely — bail out and tell the
+        // user to authenticate first via /mcp enable.
+        if (
+          isMCPHttpConfig(conn.config) &&
+          conn.config.auth?.method === "oauth"
+        ) {
+          const canSilent = await canAcquireSilently(
+            params.name,
+            conn.config.auth,
+          );
+          if (!canSilent) {
+            return {
+              success: false,
+              error: `"${params.name}" requires authentication. Tell the user to run: /mcp enable ${params.name}`,
+              hint: "The user needs to authenticate in their browser first. Once done, you can retry manage_mcp to connect.",
+            };
+          }
+        }
+
+        // Connect and discover tools
+        console.error(`[mcp] Connecting to ${params.name}...`);
+        const connected = await mcpManager!.connect(params.name);
+
+        // Audit tool descriptions for prompt injection risks
+        const warnings = auditMCPTools(connected.tools);
+
+        // Check if already approved (pre-approved via /mcp approve,
+        // profile, or a previous session)
+        const approvalStore = loadMCPApprovalStore();
+        const approved = isMCPApproved(params.name, conn.config, approvalStore);
+
+        if (!approved) {
+          // Show server details + tool list to the user
+          console.log();
+          console.log(`  ${C.label("MCP Server Approval Required")}`);
+          console.log();
+          console.log(`  Server:  ${C.label(params.name)}`);
+          console.log(
+            `  ${isMCPStdioConfig(conn.config) ? "Command" : "URL"}:    ${C.dim(mcpConfigDisplayString(conn.config))}`,
+          );
+          console.log();
+          console.log(`  Tools (${connected.tools.length}):`);
+          for (const tool of connected.tools) {
+            console.log(
+              `    ${C.label(tool.name)} — ${tool.description.slice(0, 80)}`,
+            );
+          }
+          if (warnings.length > 0) {
+            console.log();
+            console.log(`  ${C.err("⚠️  Audit Warnings:")}`);
+            for (const w of warnings) {
+              console.log(`    ${C.err("•")} ${w}`);
+            }
+          }
+          console.log();
+
+          // Auto-approve or prompt
+          if (state.autoApprove) {
+            console.log(`  ${C.ok("Auto-approved")} (--auto-approve mode)`);
+          } else if (process.stdin.isTTY && rl) {
+            await drainAndWarn(rl);
+            const answer = await promptUser(
+              rl,
+              `  Approve "${params.name}"? (y/n) `,
+            );
+            if (answer.trim().toLowerCase() !== "y") {
+              console.log(`  ${C.dim("Denied by user.")}`);
+              await mcpManager!.disconnect(params.name);
+              return {
+                success: false,
+                error: `User denied approval for "${params.name}".`,
+              };
+            }
+          } else {
+            // Non-interactive, not auto-approved — refuse
+            await mcpManager!.disconnect(params.name);
+            return {
+              success: false,
+              error: `"${params.name}" requires approval but no interactive terminal is available. Run /mcp approve ${params.name} first.`,
+            };
+          }
+
+          // Store approval
+          approveMCPServer(
+            params.name,
+            conn.config,
+            connected.tools.map((t) => t.name),
+            warnings,
+            approvalStore,
+          );
+        }
+
+        // Sync MCP modules to the sandbox so the LLM can import them
+        await syncPluginsToSandbox();
+
+        console.log(
+          `  ${C.ok(`✓ "${params.name}" connected`)} — ${connected.tools.length} tool(s) available as ${C.dim(`host:mcp-${params.name}`)}`,
+        );
+
+        return {
+          success: true,
+          message: `"${params.name}" connected with ${connected.tools.length} tool(s).`,
+          module: `host:mcp-${params.name}`,
+          tools: connected.tools.map((t) => t.name),
+        };
+      } catch (err) {
+        return {
+          success: false,
+          error: `Failed to connect "${params.name}": ${(err as Error).message}`,
+        };
+      }
     }
 
     // Disconnect
@@ -4249,6 +4481,7 @@ function buildSessionConfig() {
     scratchMb: memory.scratchMb,
     inputKb: buffers.inputKb,
     outputKb: buffers.outputKb,
+    mcpConfigured: mcpManager !== null,
   });
   const pluginAdditions = pluginManager.getSystemMessageAdditions();
 
@@ -5107,6 +5340,44 @@ async function main(): Promise<void> {
 
   // Register event handler for streaming + tool visibility
   registerEventHandler(session);
+
+  // ── Auto-enable MCP gateway if servers are configured ────────
+  // The gateway plugin is a boolean sentinel (zero risk). When MCP
+  // servers are configured, auto-enable it so the LLM can discover
+  // and connect servers via tools without the user having to run
+  // /plugin enable mcp first.
+  //
+  // We also set a synthetic audit result and re-approve the plugin
+  // so that syncPluginsToSandbox doesn't reject it due to stale
+  // content hashes (which change every time npm install rebuilds).
+  if (mcpManager) {
+    const mcpPlugin = pluginManager.getPlugin("mcp");
+    if (mcpPlugin && mcpPlugin.state !== "enabled") {
+      // Compute current content hash so the audit matches the source
+      const mcpHash = computePluginHash(mcpPlugin.dir);
+      if (mcpHash) {
+        pluginManager.setAuditResult("mcp", {
+          contentHash: mcpHash,
+          auditedAt: new Date().toISOString(),
+          findings: [],
+          riskLevel: "LOW",
+          summary:
+            "Boolean sentinel — exposes a single read-only status check.",
+          descriptionAccurate: true,
+          capabilities: ["MCP gateway status"],
+          riskReasons: ["No filesystem, network, or exec capabilities"],
+          recommendation: {
+            verdict: "approve",
+            reason: "Auto-approved: gateway sentinel",
+          },
+        });
+        pluginManager.approve("mcp");
+      }
+      pluginManager.enable("mcp");
+      await syncPluginsToSandbox();
+      console.log(`  ${C.ok("MCP gateway auto-enabled")} (servers configured)`);
+    }
+  }
 
   // ── REPL Loop ────────────────────────────────────────────────
   //

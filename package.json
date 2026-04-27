@@ -30,6 +30,7 @@
     "postinstall": "node -e \"var fs=require('fs'),cp=require('child_process');if(fs.existsSync('scripts/patch-vscode-jsonrpc.js')){cp.execSync('node scripts/patch-vscode-jsonrpc.js',{stdio:'inherit'});cp.execSync('node scripts/check-native-runtime.js',{stdio:'inherit'});}\""
   },
   "dependencies": {
+    "@azure/msal-node": "^5.1.4",
     "@github/copilot-sdk": "^0.2.1",
     "@hyperlight/js-host-api": "file:deps/js-host-api",
     "@modelcontextprotocol/sdk": "^1.29.0",

@@ -19,6 +19,8 @@ export interface SystemMessageParams {
   inputKb: number;
   /** Output buffer size in kilobytes. */
   outputKb: number;
+  /** Whether MCP servers are configured (controls MCP hint in prompt). */
+  mcpConfigured?: boolean;
 }
 
 /** Bytes per kilobyte — used for buffer size calculations. */
@@ -127,20 +129,7 @@ PLUGINS: Require explicit enable via manage_plugin.
   is unnecessary since they already return synchronously.
 
 MCP (Model Context Protocol) SERVERS:
-  External tool servers can be enabled via the "mcp" gateway plugin.
-  MCP servers are configured by the operator in ~/.hyperagent/config.json.
-  You CANNOT enable MCP servers yourself — the user must run:
-    /plugin enable mcp       (enables the gateway)
-    /mcp enable <server>     (connects a specific server)
-  Once enabled, MCP tools appear as host:mcp-<server> modules:
-    import { tool_name } from "host:mcp-<server>";
-  Discovery workflow:
-    1. list_mcp_servers() — see configured servers and connection state
-    2. mcp_server_info(name) — get tool schemas and TypeScript declarations
-    3. Write handler code using the host:mcp-<name> module
-  manage_mcp(action, name) — connect/disconnect servers programmatically.
-  Do NOT try to manage_plugin("mcp:<name>") — MCP servers are NOT plugins.
-  Do NOT import from "host:mcp-gateway" — that is the gateway, not a server.
+\${MCP_SECTION}
   async/await IS needed for libraries that use Promises internally.
 
 URLS: Do NOT guess URLs — they will 404. Discover via APIs or verify first.
@@ -167,6 +156,18 @@ OUTPUT: Plain terminal — no markdown rendering. Tool results auto-display — 
 export function buildSystemMessage(params: SystemMessageParams): string {
   const inputBytes = params.inputKb * BYTES_PER_KB;
   const outputBytes = params.outputKb * BYTES_PER_KB;
+
+  const mcpSection = params.mcpConfigured
+    ? [
+        "  MCP servers are configured. Call list_mcp_servers() to discover available",
+        '  services and manage_mcp({action:"connect", name:"..."}) to connect them.',
+        "  Once connected, get tool schemas via mcp_server_info(name), then import",
+        '  tools with: import { tool_name } from "host:mcp-<name>"',
+        "  Connection may prompt the user for approval (security review).",
+        '  Do NOT try to manage_plugin("mcp:<name>") — MCP servers are NOT plugins.',
+      ].join("\n")
+    : "  No MCP servers configured. Add servers to ~/.hyperagent/config.json under mcpServers.";
+
   return SYSTEM_MESSAGE_TEMPLATE.replace(
     "${CPU_TIMEOUT_MS}",
     String(params.cpuTimeoutMs),
@@ -177,5 +178,6 @@ export function buildSystemMessage(params: SystemMessageParams): string {
     .replace("${INPUT_KB}", String(params.inputKb))
     .replace("${INPUT_BYTES}", String(inputBytes))
     .replace("${OUTPUT_KB}", String(params.outputKb))
-    .replace("${OUTPUT_BYTES}", String(outputBytes));
+    .replace("${OUTPUT_BYTES}", String(outputBytes))
+    .replace("${MCP_SECTION}", mcpSection);
 }

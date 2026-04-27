@@ -6,12 +6,17 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 
 import {
   type MCPServerConfig,
+  type MCPHttpServerConfig,
   type MCPConnection,
   type MCPToolSchema,
   type MCPConnectionState,
+  isMCPStdioConfig,
+  isMCPHttpConfig,
   MAX_MCP_CONNECTIONS,
   MCP_CONNECT_TIMEOUT_MS,
   MCP_CALL_TIMEOUT_MS,
@@ -20,6 +25,17 @@ import {
   MCP_MAX_DESCRIPTION_LENGTH,
 } from "./types.js";
 import { sanitiseToolName, sanitiseDescription } from "./sanitise.js";
+import {
+  acquireMsalToken,
+  createMsalOAuthProvider,
+  hasMsalCache,
+} from "./auth/msal-oauth.js";
+import { createRetryFetch } from "./retry-fetch.js";
+import {
+  loadCachedSession,
+  saveCachedSession,
+  deleteCachedSession,
+} from "./session-cache.js";
 
 /**
  * Create an MCP client manager that handles connection lifecycle,
@@ -48,6 +64,10 @@ export function createMCPClientManager() {
 
   /**
    * Connect to an MCP server, discover tools, and apply filtering.
+   * For HTTP servers with OAuth, handles auth via MSAL:
+   *   1. Attempt token acquisition via MSAL (silent → interactive)
+   *   2. Connect with authenticated transport
+   *   3. If no TTY and no cached tokens → fail with clear instructions
    * Throws on connection failure after timeout.
    */
   async function connect(name: string): Promise<MCPConnection> {
@@ -73,71 +93,203 @@ export function createMCPClientManager() {
     conn.state = "connecting";
 
     try {
-      // Build environment with resolved vars
-      const env: Record<string, string> = {
-        ...(process.env as Record<string, string>),
-        ...(conn.config.env ?? {}),
-      };
+      // For HTTP + OAuth servers, handle the auth flow via MSAL
+      if (
+        isMCPHttpConfig(conn.config) &&
+        conn.config.auth?.method === "oauth"
+      ) {
+        return await connectWithMsal(name, conn);
+      }
 
-      const transport = new StdioClientTransport({
-        command: conn.config.command,
-        args: conn.config.args,
-        env,
-      });
-
-      const client = new Client({
-        name: "hyperagent",
-        version: "1.0.0",
-      });
-
-      // Connect with timeout
-      const connectPromise = client.connect(transport);
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(
-          () =>
-            reject(
-              new Error(
-                `Connection timed out after ${MCP_CONNECT_TIMEOUT_MS}ms`,
-              ),
-            ),
-          MCP_CONNECT_TIMEOUT_MS,
-        ),
-      );
-
-      await Promise.race([connectPromise, timeoutPromise]);
-
-      // Discover tools
-      const toolsResult = await client.listTools();
-      const rawTools = toolsResult.tools ?? [];
-
-      // Apply allow/deny filtering and sanitise
-      const filtered = filterTools(rawTools, conn.config);
-      const sanitised = filtered.map((tool) => ({
-        name: sanitiseToolName(tool.name),
-        originalName: tool.name,
-        description: sanitiseDescription(tool.description ?? ""),
-        inputSchema: (tool.inputSchema as Record<string, unknown>) ?? {},
-      }));
-
-      conn.client = client;
-      conn.transport = transport;
-      conn.tools = sanitised;
-      conn.state = "connected";
-      conn.lastError = undefined;
-
-      console.error(
-        `[mcp] Connected to "${name}" — ${sanitised.length} tool(s) available`,
-      );
-
-      return conn;
+      // Standard connection (stdio or unauthenticated HTTP)
+      return await connectDirect(name, conn);
     } catch (err) {
       conn.state = "error";
       conn.lastError = (err as Error).message;
       conn.retryCount++;
+      // A cached session id may be stale (server-side expiry); drop it
+      // so the next attempt starts a fresh handshake.
+      deleteCachedSession(name);
       throw new Error(
         `[mcp] Failed to connect to "${name}": ${(err as Error).message}`,
       );
     }
+  }
+
+  /**
+   * Direct connection — no OAuth flow. Used for stdio and
+   * unauthenticated HTTP servers.
+   */
+  async function connectDirect(
+    name: string,
+    conn: MCPConnection,
+  ): Promise<MCPConnection> {
+    const transport = createTransport(conn.config, name);
+    return await connectWithTransport(name, conn, transport);
+  }
+
+  /**
+   * Connect to an HTTP server using MSAL for OAuth authentication.
+   *
+   * MSAL handles both browser (PKCE, ephemeral loopback) and device-code
+   * flows, plus silent token refresh via its internal cache. We eagerly
+   * acquire a token before connecting so the MCP SDK transport gets a
+   * valid Bearer token on the first request.
+   *
+   * If there's already a valid cached token, acquireMsalToken() returns
+   * it silently — no browser or device-code prompt.
+   */
+  async function connectWithMsal(
+    name: string,
+    conn: MCPConnection,
+  ): Promise<MCPConnection> {
+    const httpConfig = conn.config as MCPHttpServerConfig;
+    const authConfig = httpConfig.auth!;
+
+    if (authConfig.method !== "oauth") {
+      throw new Error(`[mcp] connectWithMsal called with non-oauth method`);
+    }
+
+    const isInteractive = process.stdin.isTTY === true;
+    if (!isInteractive) {
+      // In non-interactive mode, we can only succeed if MSAL has a
+      // cached token to refresh silently. Check for the cache file
+      // first — if it doesn't exist, fail fast with a clear message
+      // instead of letting MSAL hang trying to do interactive auth.
+      if (!hasMsalCache(name)) {
+        throw new Error(
+          `[mcp] OAuth authentication required for "${name}" but no cached ` +
+            `tokens found and no interactive terminal available.\n` +
+            `  Run HyperAgent interactively first to authenticate:\n` +
+            `    npx tsx src/agent/index.ts\n` +
+            `    /mcp enable ${name}`,
+        );
+      }
+      // Cache exists — try silent refresh.
+      try {
+        await acquireMsalToken(name, authConfig);
+      } catch {
+        throw new Error(
+          `[mcp] OAuth authentication required for "${name}" but cached ` +
+            `tokens could not be refreshed and no interactive terminal ` +
+            `available.\n` +
+            `  Run HyperAgent interactively first to re-authenticate:\n` +
+            `    npx tsx src/agent/index.ts\n` +
+            `    /mcp enable ${name}`,
+        );
+      }
+    } else {
+      // Interactive: acquire token eagerly (silent → browser/device-code).
+      await acquireMsalToken(name, authConfig);
+      console.error(`[mcp] ✅ Authentication successful.`);
+    }
+
+    // Build a provider that serves cached tokens to the MCP transport.
+    const provider = createMsalOAuthProvider(name, authConfig);
+
+    const url = new URL(httpConfig.url);
+    const requestInit: RequestInit = {};
+    if (httpConfig.headers && Object.keys(httpConfig.headers).length > 0) {
+      requestInit.headers = { ...httpConfig.headers };
+    }
+
+    const cachedSessionId = loadCachedSession(name);
+    const transport = new StreamableHTTPClientTransport(url, {
+      authProvider: provider,
+      requestInit,
+      fetch: createRetryFetch(),
+      ...(cachedSessionId ? { sessionId: cachedSessionId } : {}),
+    });
+
+    return await connectWithTransport(name, conn, transport);
+  }
+
+  /**
+   * Complete a connection using a pre-built transport.
+   * Handles client creation, timeout, tool discovery, and state update.
+   */
+  async function connectWithTransport(
+    name: string,
+    conn: MCPConnection,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    transport: any,
+  ): Promise<MCPConnection> {
+    const client = new Client({
+      name: "hyperagent",
+      version: "1.0.0",
+    });
+
+    // Connect with timeout
+    const connectPromise = client.connect(transport);
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(
+        () =>
+          reject(
+            new Error(`Connection timed out after ${MCP_CONNECT_TIMEOUT_MS}ms`),
+          ),
+        MCP_CONNECT_TIMEOUT_MS,
+      ),
+    );
+
+    await Promise.race([connectPromise, timeoutPromise]);
+
+    // Discover tools
+    const toolsResult = await client.listTools();
+    const rawTools = toolsResult.tools ?? [];
+
+    // Apply allow/deny filtering and sanitise
+    const filtered = filterTools(rawTools, conn.config);
+    const sanitised = filtered.map((tool) => ({
+      name: sanitiseToolName(tool.name),
+      originalName: tool.name,
+      description: sanitiseDescription(tool.description ?? ""),
+      inputSchema: (tool.inputSchema as Record<string, unknown>) ?? {},
+      // Capture behavioural annotations if the server provides them.
+      // These are hints (not guarantees) used by the write-safety gate.
+      ...(tool.annotations
+        ? {
+            annotations: {
+              ...(tool.annotations.readOnlyHint !== undefined
+                ? { readOnlyHint: tool.annotations.readOnlyHint }
+                : {}),
+              ...(tool.annotations.destructiveHint !== undefined
+                ? { destructiveHint: tool.annotations.destructiveHint }
+                : {}),
+              ...(tool.annotations.idempotentHint !== undefined
+                ? { idempotentHint: tool.annotations.idempotentHint }
+                : {}),
+              ...(tool.annotations.openWorldHint !== undefined
+                ? { openWorldHint: tool.annotations.openWorldHint }
+                : {}),
+            },
+          }
+        : {}),
+    }));
+
+    conn.client = client;
+    conn.transport = transport;
+    conn.tools = sanitised;
+    conn.state = "connected";
+    conn.lastError = undefined;
+
+    // Persist the session id (HTTP transports only) so we can resume on
+    // next start. transport.sessionId is set by the SDK after the
+    // initialize handshake completes.
+    const sessionId =
+      typeof transport === "object" &&
+      transport !== null &&
+      "sessionId" in transport
+        ? (transport as { sessionId?: unknown }).sessionId
+        : undefined;
+    if (typeof sessionId === "string" && sessionId.length > 0) {
+      saveCachedSession(name, sessionId);
+    }
+
+    console.error(
+      `[mcp] Connected to "${name}" — ${sanitised.length} tool(s) available`,
+    );
+
+    return conn;
   }
 
   /**
@@ -203,16 +355,20 @@ export function createMCPClientManager() {
 
       return content;
     } catch (err) {
-      // Server may have died — mark as error for reconnect
+      // Server may have died or network is down — mark as error for reconnect
+      const msg = (err as Error).message;
       if (
-        (err as Error).message.includes("closed") ||
-        (err as Error).message.includes("EPIPE") ||
-        (err as Error).message.includes("ECONNRESET")
+        msg.includes("closed") ||
+        msg.includes("EPIPE") ||
+        msg.includes("ECONNRESET") ||
+        msg.includes("ECONNREFUSED") ||
+        msg.includes("ETIMEDOUT") ||
+        msg.includes("fetch failed")
       ) {
         conn.state = "error";
-        conn.lastError = (err as Error).message;
+        conn.lastError = msg;
       }
-      return { error: `[mcp] Tool call failed: ${(err as Error).message}` };
+      return { error: `[mcp] Tool call failed: ${msg}` };
     }
   }
 
@@ -277,6 +433,55 @@ export type MCPClientManager = ReturnType<typeof createMCPClientManager>;
 // ── Internal helpers ─────────────────────────────────────────────────
 
 /**
+ * Create the appropriate transport for a server config.
+ * Returns a StdioClientTransport for stdio configs and a
+ * StreamableHTTPClientTransport for HTTP configs.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function createTransport(config: MCPServerConfig, serverName?: string): any {
+  if (isMCPHttpConfig(config)) {
+    return createHttpTransport(config, serverName);
+  }
+
+  // stdio transport (default)
+  const env: Record<string, string> = {
+    ...(process.env as Record<string, string>),
+    ...(config.env ?? {}),
+  };
+
+  return new StdioClientTransport({
+    command: config.command,
+    args: config.args,
+    env,
+  });
+}
+
+/**
+ * Create a StreamableHTTPClientTransport for an HTTP MCP server.
+ * Used for unauthenticated HTTP servers and non-OAuth auth methods.
+ * OAuth is handled separately in connectWithMsal().
+ */
+function createHttpTransport(
+  config: MCPHttpServerConfig,
+  serverName?: string,
+): StreamableHTTPClientTransport {
+  const url = new URL(config.url);
+
+  // Build request init with static headers from config
+  const requestInit: RequestInit = {};
+  if (config.headers && Object.keys(config.headers).length > 0) {
+    requestInit.headers = { ...config.headers };
+  }
+
+  const sessionId = serverName ? loadCachedSession(serverName) : undefined;
+  return new StreamableHTTPClientTransport(url, {
+    requestInit,
+    fetch: createRetryFetch(),
+    ...(sessionId ? { sessionId } : {}),
+  });
+}
+
+/**
  * Filter discovered tools based on allowTools/denyTools config.
  * allowTools takes precedence — if set, only those are included.
  * denyTools is then applied to remove any denied tools.
@@ -317,30 +522,81 @@ function extractTextContent(content: any[]): string {
 /**
  * Extract structured content from MCP response.
  * Returns text for text-only responses, or the full content array.
+ *
+ * Agent 365 servers return three flavours of single-text responses:
+ *
+ *   1. Clean JSON      — `{"teams":[...]}`                  (Teams)
+ *   2. Status + JSON   — `Success.\n{"value":[...]}`        (Calendar)
+ *   3. Wrapped JSON    — `{"rawResponse":"…","message":…}`  (Mail)
+ *
+ * `extractEmbeddedJson` peels back layers (1) → (2) → (3) so callers
+ * always get the structured data.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function extractContent(content: any[]): unknown {
   if (!Array.isArray(content)) return content;
 
-  // Single text content → return as string
+  // Single text content → unwrap to structured data when possible
   if (content.length === 1 && content[0].type === "text") {
-    // Try to parse as JSON
-    try {
-      return JSON.parse(content[0].text);
-    } catch {
-      return content[0].text;
-    }
+    return extractEmbeddedJson(content[0].text);
   }
 
-  // Multiple items → return structured
+  // Multiple items → return structured, parsing each text item
   return content.map((c) => {
     if (c.type === "text") {
-      try {
-        return { type: "text", data: JSON.parse(c.text) };
-      } catch {
-        return { type: "text", data: c.text };
-      }
+      return { type: "text", data: extractEmbeddedJson(c.text) };
     }
     return c;
   });
+}
+
+/**
+ * Try to recover structured JSON from a text content payload.
+ * Handles three patterns observed in the wild:
+ *
+ *   • clean JSON           → returns the parsed object
+ *   • status + JSON        → strips leading status text, returns JSON
+ *   • {rawResponse: "..."} → un-nests one level, recurses
+ *
+ * Falls back to the original string if no pattern matches.
+ */
+export function extractEmbeddedJson(text: string): unknown {
+  if (typeof text !== "string") return text;
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return text;
+
+  // (1) Clean JSON — most common.
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      // (3) Wrapped: { rawResponse: "<json string>", message: "..." }
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        !Array.isArray(parsed) &&
+        typeof (parsed as { rawResponse?: unknown }).rawResponse === "string"
+      ) {
+        const inner = (parsed as { rawResponse: string }).rawResponse;
+        return extractEmbeddedJson(inner);
+      }
+      return parsed;
+    } catch {
+      // fall through
+    }
+  }
+
+  // (2) Status + JSON — find the first "{" or "[" after some prefix and
+  // try parsing from there. Only accept if the suffix is itself valid
+  // JSON, otherwise we'd false-positive on prose containing a brace.
+  const firstBrace = trimmed.search(/[\{\[]/);
+  if (firstBrace > 0) {
+    const suffix = trimmed.slice(firstBrace);
+    try {
+      return JSON.parse(suffix) as unknown;
+    } catch {
+      // fall through
+    }
+  }
+
+  return text;
 }

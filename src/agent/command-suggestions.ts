@@ -11,6 +11,7 @@
 export const ACTIONABLE_COMMAND_PREFIXES = [
   "/plugin enable",
   "/plugin disable",
+  "/mcp enable",
   "/buffer ",
   "/timeout ",
   "/set ",
@@ -37,7 +38,7 @@ export function extractSuggestedCommands(text: string): string[] {
   // Pattern 1: commands inside backticks — `/plugin enable fetch ...`
   // This catches inline code references the LLM wraps in backticks.
   const backtickRe =
-    /`(\/(?:plugin\s+enable|plugin\s+disable|buffer|timeout|set)\s[^`]+)`/gi;
+    /`(\/(?:plugin\s+enable|plugin\s+disable|mcp\s+enable|buffer|timeout|set)\s[^`]+)`/gi;
   for (const m of text.matchAll(backtickRe)) {
     const cmd = m[1].trim();
     if (!seen.has(cmd) && !PLACEHOLDER_RE.test(cmd)) {

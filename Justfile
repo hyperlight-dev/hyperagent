@@ -301,8 +301,36 @@ check: lint-all test-all
     @echo "✅ All checks passed — you may proceed to commit"
 
 # Clean build artifacts (keeps deps/)
+#
+# Removes:
+#   - node_modules and dist (npm/binary outputs)
+#   - generated builtin-modules/*.{js,d.ts,d.ts.map} (preserves
+#     _save.js / _restore.js which ARE committed)
+#   - generated plugin .d.ts files and plugins/shared/*.js
+#   - generated plugins/host-modules.d.ts
+#
+# Use this when a previous build failed mid-way and left stale
+# generated files that confuse `just setup` / `just build`.
+[unix]
 clean:
+    #!/usr/bin/env bash
+    set -euo pipefail
     rm -rf dist node_modules
+    # Wipe gitignored builtin-modules build outputs (keep _save.js / _restore.js)
+    find builtin-modules -maxdepth 1 \
+      \( -name '*.js' -o -name '*.d.ts' -o -name '*.d.ts.map' \) \
+      ! -name '_save.js' ! -name '_restore.js' -delete 2>/dev/null || true
+    # Wipe gitignored plugin build outputs
+    find plugins -maxdepth 3 -name '*.d.ts' -delete 2>/dev/null || true
+    find plugins/shared -maxdepth 1 -name '*.js' -delete 2>/dev/null || true
+    rm -f plugins/host-modules.d.ts plugins/plugin-schema-types.d.ts
+    # Restore committed ha-modules.d.ts in case a failed build clobbered it
+    git checkout -- builtin-modules/src/types/ha-modules.d.ts 2>/dev/null || true
+    echo "🧹 Cleaned build artefacts"
+
+[windows]
+clean:
+    if (Test-Path dist) { Remove-Item -Recurse -Force dist }; if (Test-Path node_modules) { Remove-Item -Recurse -Force node_modules }; Get-ChildItem builtin-modules -File | Where-Object { ($_.Extension -in '.js','.ts','.map') -and ($_.Name -notin '_save.js','_restore.js') } | Remove-Item -Force -ErrorAction SilentlyContinue; Get-ChildItem plugins -Recurse -Filter '*.d.ts' | Remove-Item -Force -ErrorAction SilentlyContinue; Get-ChildItem plugins/shared -Filter '*.js' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue; if (Test-Path plugins/host-modules.d.ts) { Remove-Item plugins/host-modules.d.ts }; if (Test-Path plugins/plugin-schema-types.d.ts) { Remove-Item plugins/plugin-schema-types.d.ts }; git checkout -- builtin-modules/src/types/ha-modules.d.ts 2>$null; Write-Output "🧹 Cleaned build artefacts"
 
 # Clean everything including deps/ symlinks
 clean-all: clean
@@ -712,7 +740,12 @@ mcp-show-config:
         if (cfg.mcpServers) {
           console.log('Configured MCP servers:');
           for (const [name, s] of Object.entries(cfg.mcpServers)) {
-            console.log('  ' + name + ': ' + (s.command || '?') + ' ' + (s.args || []).join(' '));
+            if (s.type === 'http') {
+              const auth = s.auth ? ' [' + s.auth.method + ']' : '';
+              console.log('  ' + name + ': ' + s.url + auth);
+            } else {
+              console.log('  ' + name + ': ' + (s.command || '?') + ' ' + (s.args || []).join(' '));
+            }
           }
         } else {
           console.log('No MCP servers configured.');
@@ -787,3 +820,92 @@ mcp-setup-workiq:
     echo "     /mcp enable workiq"
     echo ""
     echo "   First tool call opens a browser for Microsoft sign-in."
+
+# ── Generic HTTP MCP server recipe ───────────────────────────────────
+#
+# Adds a single HTTP MCP server entry to ~/.hyperagent/config.json. Used
+# directly for ad-hoc HTTP MCP servers, and also called per-service by
+# `mcp-setup-m365` below.
+#
+# Args:
+#   NAME           Config key (becomes the alias for /mcp enable <NAME>).
+#   URL            HTTPS endpoint of the MCP server.
+#   CLIENT_ID      Optional. If set, OAuth is configured (and FLOW becomes required).
+#   TENANT_ID      Optional. Defaults to the auth-side default ('organizations').
+#   SCOPES         Optional, comma-separated. If empty + CLIENT_ID set,
+#                  defaults to '<URL-origin>/.default'.
+#   FLOW           REQUIRED when CLIENT_ID is set. "browser" or "device-code".
+#
+# Add an HTTP MCP server entry to ~/.hyperagent/config.json. Used by
+# `mcp-setup-m365` and intended for direct use when wiring custom HTTP
+# MCP servers (any vendor — not M365-specific).
+#
+# Examples:
+#   just mcp-add-http example https://mcp.example.com/sse
+#   just mcp-add-http work-iq-mail \
+#       https://agent365.svc.cloud.microsoft/agents/servers/mcp_MailRemoteServer \
+#       <client-id> <tenant-id> "" browser
+mcp-add-http NAME URL CLIENT_ID="" TENANT_ID="" SCOPES="" FLOW="":
+    npx tsx scripts/mcp-add-http.ts "{{ NAME }}" "{{ URL }}" "{{ CLIENT_ID }}" "{{ TENANT_ID }}" "{{ SCOPES }}" "{{ FLOW }}"
+
+# ── Microsoft 365 / Agent 365 HTTP MCP servers ───────────────────────
+#
+# Alternative to the stdio `mcp-setup-workiq` recipe above: direct
+# HTTP+OAuth to the Agent 365 per-service MCP endpoints (mail, calendar,
+# teams, sharepoint, onedrive, user, copilot, word, …). Requires either
+# a per-tenant Entra app registration (`mcp-m365-create-app`) or a
+# pre-existing client id passed explicitly.
+#
+# Flow:
+#   1. just mcp-m365-create-app           # one-time: Entra app registration
+#   2. just mcp-m365-setup                # writes one entry per M365 service
+#   3. just start → /plugin enable mcp → /mcp enable work-iq-<service>
+#
+# State lives at ~/.hyperagent/m365.json (clientId, tenantId).
+# The server catalog (alias → mcp_* id mapping) lives at
+# scripts/m365-mcp-servers.json — refresh via `just mcp-m365-refresh-servers`.
+
+# Create (or reuse) the Entra app registration for the Agent 365 MCP servers.
+# Optional: --service-ref GUID for corporate tenants that require one.
+# Optional: --client-id ID to adopt an existing app.
+# Requires `az` CLI installed and `az login`'d. Cross-platform (Linux,
+# macOS, Windows native, Git Bash, WSL) — runs via tsx.
+mcp-m365-create-app *ARGS:
+    npx tsx scripts/setup-m365-app.ts {{ ARGS }}
+
+# Write the M365 HTTP MCP server entries into ~/.hyperagent/config.json
+# by looping over scripts/m365-mcp-servers.json. Reads clientId/tenantId
+# from ~/.hyperagent/m365.json by default; override with explicit args.
+#
+# Each server uses the URL and per-server scope discovered from
+# Agent 365 (see catalog file). The catalog stores the discovery URL
+# (/agents/servers/<name>); the setup script injects the caller's
+# tenantId at config-write time to produce the actual gateway URL
+# (/agents/tenants/<tid>/servers/<name>) that the gateway requires —
+# without it the server returns EndpointInvalid / TenantIdInvalid.
+#
+# Args:
+#   SERVICES        "all" (default), comma-separated alias list ("mail,teams"),
+#                   or "list" to print all known service aliases and exit.
+#   CLIENT_ID       Override Entra app client id
+#   TENANT_ID       Override Entra tenant id (used for OAuth authority)
+#   SCOPE_OVERRIDE  Optional: force a single scope for every server
+#                   (default: each server uses its catalogued scope)
+#   FLOW            REQUIRED. "browser" or "device-code". Picks which
+#                   user-interaction OAuth flow gets baked into every
+#                   server entry. There is no default — different
+#                   environments (laptop vs SSH vs FOCI app) need
+#                   different flows so the recipe forces an explicit
+#                   choice.
+mcp-setup-m365 SERVICES="all" CLIENT_ID="" TENANT_ID="" SCOPE_OVERRIDE="" FLOW="":
+    npx tsx scripts/m365-setup.ts "{{ SERVICES }}" "{{ CLIENT_ID }}" "{{ TENANT_ID }}" "{{ SCOPE_OVERRIDE }}" "{{ FLOW }}"
+
+# Refresh scripts/m365-mcp-servers.json from the live Agent 365 catalog.
+# Existing alias→server-id mappings are preserved; new server ids appear
+# under a derived alias.
+mcp-m365-refresh-servers *ARGS:
+    npx tsx scripts/m365-refresh-servers.ts {{ ARGS }}
+
+# Print the saved M365 app details (if any).
+mcp-m365-show:
+    npx tsx scripts/m365-show.ts

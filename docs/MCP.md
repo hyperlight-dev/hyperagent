@@ -32,10 +32,13 @@ Or use the setup script:
 just mcp-setup-everything   # sets up the MCP everything test server
 ```
 
-### 2. Enable the MCP gateway plugin
+### 2. Start HyperAgent
 
-```
-/plugin enable mcp
+The MCP gateway plugin auto-enables when servers are configured — no
+manual `/plugin enable mcp` needed.
+
+```bash
+just start
 ```
 
 ### 3. Connect a server
@@ -43,6 +46,9 @@ just mcp-setup-everything   # sets up the MCP everything test server
 ```
 /mcp enable everything
 ```
+
+Or just ask a question — the LLM will discover configured servers and
+connect them automatically (prompting for approval if needed).
 
 ### 4. Use MCP tools in your prompt
 
@@ -86,7 +92,7 @@ function handler(event) {
 
 - Names must match `/^[a-z][a-z0-9-]*$/` (lowercase, alphanumeric, hyphens).
 - Cannot collide with native plugin names (`fs-read`, `fs-write`, `fetch`).
-- Maximum 20 configured servers.
+- Maximum 50 configured servers.
 
 ### Tool filtering
 
@@ -140,11 +146,14 @@ are shown during approval.
 | `mcp_server_info(name)`| Detailed info + TypeScript declarations               |
 | `manage_mcp(action, name)` | Connect/disconnect servers                        |
 
-The LLM discovers MCP by:
-1. Enabling the `mcp` plugin via `manage_plugin`
-2. Calling `list_mcp_servers()` to see what's available
-3. Calling `mcp_server_info(name)` for tool schemas
-4. Writing handler code with `import { tool } from "host:mcp-<name>"`
+The LLM discovers MCP automatically:
+1. MCP gateway auto-enables on startup when servers are configured
+2. Calls `list_mcp_servers()` to discover available servers
+3. Calls `manage_mcp("connect", name)` — pre-approved servers connect silently,
+   others prompt the user for approval. OAuth servers that need first-time
+   browser auth will direct the user to run `/mcp enable <name>`.
+4. Calls `mcp_server_info(name)` for tool schemas
+5. Writes handler code with `import { tool } from "host:mcp-<name>"`
 
 ---
 
@@ -193,6 +202,35 @@ Suspicious descriptions are flagged during approval.
 - Tool descriptions are truncated to 2,000 chars, `*/` escaped for JSDoc
 - Env var values are **never** logged anywhere
 - MCP responses are capped at 1 MB
+
+### Write-safety gate
+
+MCP tools that are not read-only are intercepted before execution. The
+gate uses the MCP spec's `ToolAnnotations` (hints from the server):
+
+| Scenario                         | `readOnlyHint=true` | No annotations / write | `destructiveHint=true` |
+|----------------------------------|---------------------|------------------------|------------------------|
+| **Interactive TTY**              | Execute ✅           | Prompt `[y/n]`         | Prompt `[y/n]` ⚠️      |
+| **`--auto-approve` (yolo)**      | Execute ✅           | Execute ✅              | Execute ✅              |
+| **No TTY, no auto-approve**      | Execute ✅           | Refuse ❌               | Refuse ❌               |
+
+The gate runs on the **host side** while the guest VM is paused — the
+LLM's handler code sees either a normal result or
+`{ error: "Operation denied..." }`. The LLM doesn't need to know about
+the gate; it writes code normally.
+
+Example prompt shown to the user:
+
+```
+⚠️  MCP write operation: work-iq-mail.SendEmail
+   to: boss@contoso.com
+   subject: Q4 Report
+  Allow? [y/n]
+```
+
+Note: annotations are **hints from untrusted servers** (per MCP spec).
+Tools without annotations are treated as writes (prompted). Use
+`allowTools`/`denyTools` in config for hard enforcement.
 
 ---
 
@@ -373,6 +411,139 @@ no documented service-principal / client-credentials flow for Work IQ.
 | `/mcp enable workiq` hangs                   | First run downloads ~188 MB of platform binaries via `npx`. Be patient.        |
 | "AADSTS650052" / "Access denied" on consent URL | Work IQ Tools service principal not provisioned. Run the admin PS script.   |
 
+### Alternative: HTTP path (Agent 365 per-service servers)
+
+Instead of the single stdio `workiq` server you can connect to the
+per-service Agent 365 HTTP endpoints directly. This gives you finer
+`/mcp enable` control per M365 service and uses MSAL for OAuth.
+
+The setup script uses the VS Code MCP extension's pre-registered client ID
+(`aebc6443-...`) which has `McpServers.*` scopes admin-consented in all
+M365 Copilot tenants — no per-tenant app registration needed.
+
+21 servers are available (see the full list with `just mcp-setup-m365 list`).
+Common ones:
+
+| Config entry         | Service                          |
+|----------------------|----------------------------------|
+| `work-iq-mail`       | Outlook mail                     |
+| `work-iq-calendar`   | Calendar & scheduling            |
+| `work-iq-teams`      | Teams chats & channels           |
+| `work-iq-planner`    | Planner tasks & plans            |
+| `work-iq-sharepoint` | SharePoint sites & files         |
+| `work-iq-onedrive`   | Personal OneDrive                |
+| `work-iq-copilot`    | M365 Copilot search              |
+
+#### Setup
+
+```bash
+# Configure all M365 servers with browser auth (one-time)
+just mcp-setup-m365 all \
+  aebc6443-996d-45c2-90f0-388ff96faa56 \
+  <your-tenant-id> \
+  "" browser
+
+# Or a subset
+just mcp-setup-m365 "mail,teams,planner" \
+  aebc6443-996d-45c2-90f0-388ff96faa56 \
+  <your-tenant-id> \
+  "" browser
+
+# List available services
+just mcp-setup-m365 list
+```
+
+This writes config entries AND pre-approves all configured servers so the
+LLM can connect them without interactive prompts.
+
+#### Auth flows
+
+The `FLOW` argument (last positional) is **required**:
+
+| Flow | When to use |
+|------|-------------|
+| `browser` | Workstation with a browser. MSAL opens `http://localhost` (ephemeral port). |
+| `device-code` | SSH, containers, no browser. Prints a code + URL to enter on any device. |
+
+First connect opens the browser / shows the device code. Tokens are cached
+in `~/.hyperagent/mcp-tokens/<server>.msal.json` and refreshed silently on
+subsequent sessions.
+
+#### Auth safety in `--auto-approve` mode
+
+If the LLM tries to connect an OAuth server with no cached token in
+`--auto-approve` (yolo) mode, it refuses immediately instead of opening a
+browser nobody's watching. Authenticate interactively first, then yolo
+works with cached tokens.
+
+#### Custom Entra app registration
+
+If your tenant blocks the VS Code client ID, create your own app:
+
+```bash
+just mcp-m365-create-app
+# Then use your app's client ID:
+just mcp-setup-m365 all <your-client-id> <your-tenant-id> "" browser
+```
+
+#### Scope
+
+All servers use `ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/.default` (the Agent 365
+resource app ID with `.default`), which requests all pre-consented scopes in
+one shot. This matches what [a365cli](https://github.com/sozercan/a365cli) uses.
+
+#### Refreshing the server catalog
+
+```bash
+just mcp-m365-refresh-servers     # uses cached OAuth token
+just mcp-m365-refresh-servers --token <bearer>  # explicit token
+```
+
+## HTTP Transport & OAuth
+
+HyperAgent supports remote MCP servers over HTTP with OAuth 2.0 via
+[@azure/msal-node](https://github.com/AzureAD/microsoft-authentication-library-for-js).
+MSAL handles PKCE, token caching, refresh, and redirect URIs.
+
+Config shape:
+
+```json
+{
+  "mcpServers": {
+    "my-remote": {
+      "type": "http",
+      "url": "https://example.com/mcp",
+      "auth": {
+        "method": "oauth",
+        "flow": "browser",
+        "clientId": "<client-id>",
+        "tenantId": "<tenant-id-or-organizations>",
+        "scopes": ["api://example/.default"],
+        "redirectUri": "http://localhost"
+      }
+    }
+  }
+}
+```
+
+### Auth config fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `method` | Yes | Must be `"oauth"` |
+| `flow` | Yes | `"browser"` or `"device-code"` — no default |
+| `clientId` | Yes | Entra app (client) ID |
+| `tenantId` | No | Defaults to `"organizations"` |
+| `scopes` | No | OAuth scopes array |
+| `redirectUri` | No | Override redirect URI (default: `http://localhost`, works with MSAL-compatible apps) |
+
+### Token caching
+
+MSAL persists tokens to `~/.hyperagent/mcp-tokens/<server>.msal.json`
+(mode `0600`). Refresh tokens survive across sessions — only the first
+connect requires interactive auth. Deleting the file forces re-auth.
+Tokens are **never** written to the transcript log.
+
 ---
 
 ## Debugging
@@ -433,10 +604,10 @@ Any MCP-compatible server works. Popular options from the
                ▼
 ┌──────────────────────────────────────┐
 │  MCPClientManager                    │
-│  Lazy connect → stdio process        │
-│  Tool discovery → PluginAdapter      │
+│  Connect → stdio process / HTTP+MSAL │
+│  Tool discovery + annotations        │
 └──────────────┬───────────────────────┘
-               │ setPlugins()
+               │ PluginAdapter + WriteSafetyGate
                ▼
 ┌──────────────────────────────────────┐
 │  Hyperlight Sandbox (micro-VM)       │
@@ -444,13 +615,14 @@ Any MCP-compatible server works. Popular options from the
 │  import { echo } from               │
 │    "host:mcp-everything";            │
 │  const r = echo({ message: "hi" }); │
+│  // → write-safety gate checks      │
 │  // → { content: "Echo: hi" }       │
 └──────────────────────────────────────┘
 ```
 
 MCP tools are bridged through the same `host:` module mechanism as native
-plugins. The sandbox sees synchronous function calls — async transport is
-handled transparently by the bridge layer.
+plugins. The sandbox sees synchronous function calls — async transport and
+the write-safety gate are handled transparently by the bridge layer.
 
 ---
 
