@@ -92,7 +92,7 @@ describe("parseMCPConfig", () => {
 
   it("rejects too many servers", () => {
     const servers: Record<string, unknown> = {};
-    for (let i = 0; i < 25; i++) {
+    for (let i = 0; i < 55; i++) {
       servers[`server-${i}`] = { command: "test" };
     }
     const { errors } = parseMCPConfig(servers);
