@@ -223,6 +223,19 @@ export type SandboxTool = {
     codeSize?: number;
     contextAfter?: string;
   }>;
+  editHandlerLines: (
+    name: string,
+    startLine: number,
+    endLine: number,
+    replacement: string,
+  ) => Promise<{
+    success: boolean;
+    message?: string;
+    error?: string;
+    handlers?: string[];
+    codeSize?: number;
+    contextAfter?: string;
+  }>;
   registerModule: (
     name: string,
     source: string,

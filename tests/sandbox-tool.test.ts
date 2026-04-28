@@ -485,6 +485,43 @@ describe("editHandler", () => {
     expect(r.contextAfter).toBeDefined();
     expect(r.contextAfter).toContain("22");
   });
+
+  it("should edit a handler by line range", async () => {
+    const code = [
+      "function handler(event) {",
+      "  const title = 'old';",
+      "  const height = 0.4;",
+      "  return { title, height };",
+      "}",
+    ].join("\n");
+    await tool.registerHandler("edit-lines", code);
+
+    const r = await tool.editHandlerLines(
+      "edit-lines",
+      3,
+      3,
+      "  const height = 0.6;",
+    );
+
+    expect(r.success).toBe(true);
+    expect(r.contextAfter).toContain("0.6");
+
+    const source = tool.getHandlerSource("edit-lines", { lineNumbers: false });
+    expect(source.code).toContain("const height = 0.6;");
+    expect(source.code).not.toContain("const height = 0.4;");
+  });
+
+  it("should reject line edits outside the handler", async () => {
+    await tool.registerHandler("edit-lines-range", "return 'range';");
+    const r = await tool.editHandlerLines(
+      "edit-lines-range",
+      20,
+      20,
+      "return 2;",
+    );
+    expect(r.success).toBe(false);
+    expect(r.error).toContain("outside handler");
+  });
 });
 
 // ── Execution (Named Handlers) ───────────────────────────────────────
