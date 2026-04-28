@@ -219,6 +219,103 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ github.event_name == 'workflow_dispatch' && secrets.NPM_TOKEN || '' }}
 
+  # Post-publish smoke test: install the *just-published* tarball from the npm
+  # registry into a clean container and verify the bundled launcher resolves
+  # the correct platform binary.
+  #
+  # This is the missing gate that catches:
+  #   - tarball missing native binaries (the Friday-2026-04-23 false-alarm)
+  #   - launcher musl-vs-glibc detection broken
+  #   - file: deps in `dependencies` actually breaking npm install
+  #   - registry replication / CDN propagation lag
+  #   - shasum mismatch between published metadata and tarball blob
+  #
+  # We test linux-x64-gnu (debian-slim) and linux-x64-musl (alpine) — the two
+  # Linux triples we ship. Windows smoke is left out for now (the launcher's
+  # win32-x64-msvc path is exercised via `just test` pre-publish).
+  smoke-test:
+    name: Smoke test (${{ matrix.label }})
+    needs: [publish-npm]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: linux-x64-gnu
+            image: node:22-bookworm-slim
+          - label: linux-x64-musl
+            image: node:22-alpine
+    steps:
+      - name: Resolve published version
+        id: ver
+        run: |
+          # Release tags arrive as `v0.2.3`; npm strips the leading `v` at
+          # publish time. Match that here so `npm view <pkg>@<ver>` resolves.
+          RAW="${{ github.event.release.tag_name || inputs.version }}"
+          VERSION="${RAW#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Smoke-testing @hyperlight-dev/hyperagent@$VERSION"
+
+      - name: Wait for registry propagation
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          # Poll registry.npmjs.org for up to 5 minutes for the version to
+          # become resolvable. Cloudflare/CouchDB replication is usually fast
+          # but can lag for minutes after a fresh publish.
+          for i in $(seq 1 30); do
+            ACTUAL=$(npm view "@hyperlight-dev/hyperagent@$VERSION" version 2>/dev/null || true)
+            if [ "$ACTUAL" = "$VERSION" ]; then
+              echo "✅ visible after $((i * 10))s"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "❌ @hyperlight-dev/hyperagent@$VERSION not visible after 300s"
+          exit 1
+
+      - name: Verify tarball blob fetchable + shasum
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          TARBALL=$(npm view "@hyperlight-dev/hyperagent@$VERSION" dist.tarball)
+          EXPECTED=$(npm view "@hyperlight-dev/hyperagent@$VERSION" dist.shasum)
+          ACTUAL=$(curl -sSL --fail "$TARBALL" | sha1sum | awk '{print $1}')
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "❌ shasum mismatch — expected $EXPECTED got $ACTUAL"
+            exit 1
+          fi
+          echo "✅ tarball fetchable, shasum matches ($EXPECTED)"
+
+      - name: Install + run in ${{ matrix.image }}
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          docker run --rm \
+            -e VERSION="$VERSION" \
+            ${{ matrix.image }} \
+            sh -c '
+              set -e
+              echo "=== platform ==="
+              uname -a
+              cat /etc/os-release 2>/dev/null | head -3 || true
+
+              echo "=== install ==="
+              npm install -g --no-audit --no-fund "@hyperlight-dev/hyperagent@${VERSION}"
+
+              echo "=== version check ==="
+              ACTUAL=$(hyperagent --version 2>&1)
+              echo "got: $ACTUAL"
+              echo "$ACTUAL" | grep -q "${VERSION}" \
+                || { echo "❌ --version did not match ${VERSION}"; exit 1; }
+
+              echo "=== help check ==="
+              hyperagent --help 2>&1 | grep -q "Usage:" \
+                || { echo "❌ --help did not produce expected output"; exit 1; }
+
+              echo "✅ smoke passed on ${VERSION}"
+            '
+
   # Build and publish Docker image (after tests pass)
   publish-docker:
     name: Publish to GitHub Container Registry
