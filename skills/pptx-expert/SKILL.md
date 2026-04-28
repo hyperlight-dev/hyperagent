@@ -28,16 +28,24 @@ allowed-tools:
   - execute_javascript
   - delete_handler
   - get_handler_source
+  - edit_handler
+  - list_handlers
+  - reset_sandbox
   - list_modules
   - module_info
   - list_plugins
   - plugin_info
   - manage_plugin
+  - list_mcp_servers
+  - mcp_server_info
+  - manage_mcp
   - apply_profile
   - configure_sandbox
   - sandbox_help
-  - llm_thought
   - register_module
+  - write_output
+  - read_input
+  - read_output
   - ask_user
 ---
 
@@ -57,6 +65,7 @@ inside the Hyperlight sandbox.
 ## CRITICAL: ShapeFragment API
 
 All shape-builder functions return `ShapeFragment` objects — NOT strings.
+
 - Pass ShapeFragment arrays to `customSlide(pres, [shape1, shape2, ...])`
 - Do NOT concatenate with `+` — pass as arrays
 - Charts return `{ shape: ShapeFragment, rels: ... }` — use the `.shape` property
@@ -71,6 +80,7 @@ object directly — methods are lost.
 ## Slide Templates (Use These!)
 
 Use high-level slide functions instead of manual positioning:
+
 - `titleSlide()` — cover slide
 - `contentSlide()` — title + body text
 - `twoColumnSlide()` — side-by-side layout
@@ -91,6 +101,7 @@ Call `module_info('pptx', 'functionName')` to see parameters for any function.
 ## Theme & Colour Rules
 
 Call `module_info('ooxml-core')` to see available themes.
+
 - All colours: 6-char hex without `#` (e.g. `"2196F3"`)
 - Named colours, rgb(), 3-char hex are NOT supported — runtime error
 - Contrast is enforced — if text/bg contrast fails WCAG AA, you get an error

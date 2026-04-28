@@ -27,6 +27,7 @@
       "ha:pptx": ["./src/pptx.ts"],
       "ha:pptx-tables": ["./src/pptx-tables.ts"],
       "ha:pptx-charts": ["./src/pptx-charts.ts"],
+      "ha:xlsx": ["./src/xlsx.ts"],
       "ha:shared-state": ["./src/shared-state.ts"]
     }
   },

@@ -1,0 +1,41 @@
+{
+  "name": "xlsx",
+  "description": "Excel XLSX workbook builder - cells, styles, formulas, tables, charts, pivots, sparklines, validation, hyperlinks, images, print setup",
+  "author": "system",
+  "mutable": false,
+  "sourceHash": "sha256:85eeace97a71a974",
+  "dtsHash": "sha256:cef548ac935b1a80",
+  "importStyle": "named",
+  "hints": {
+    "overview": "Create Excel .xlsx workbooks using strongly typed workbook, sheet, style, chart, pivot, validation, image, hyperlink, and print setup APIs.",
+    "relatedModules": [
+      "ha:xml-escape",
+      "ha:zip-format"
+    ],
+    "requiredPlugins": [
+      "fs-write"
+    ],
+    "criticalRules": [
+      "Call module_info('xlsx') before using the API — the type definitions list every options bag.",
+      "Use createWorkbook() then wb.addSheet(name), populate sheets, then exportToFile(wb, path, fsWrite).",
+      "Cell refs are A1-style strings, or { row, col } objects using 1-based indexes.",
+      "Use tableToWorkbook({ data, headers }) for simple formatted tables instead of hand-building rows.",
+      "Chart series values must be numbers, and categories must align with each series length.",
+      "Sheet protection uses Excel's legacy XOR hash; it prevents accidental edits only and is not encryption."
+    ],
+    "antiPatterns": [
+      "Don't hand-write OOXML XML — use xlsx workbook/sheet methods.",
+      "Don't use zero-based row or column numbers in public APIs; rows and columns are 1-based.",
+      "Don't rely on protect({ password }) for security or sensitive data protection.",
+      "Don't guess option names — use module_info('xlsx') and follow the exported interfaces.",
+      "Don't pass JavaScript objects directly to addRow; use tableToWorkbook or map object rows through headers."
+    ],
+    "commonPatterns": [
+      "const wb = createWorkbook(); const sh = wb.addSheet('Report'); sh.addRow(1, headers, headerStyle); exportToFile(wb, 'report.xlsx', writeFileBinary)",
+      "tableToWorkbook({ sheetName: 'Data', data, headers, columnWidths }) for one-sheet reports.",
+      "sh.freezeRows(1).setAutoFilter('A1:D100') for scan-friendly tables.",
+      "sh.addConditionalFormat('D2:D100', { type: 'dataBar', color: '#4472C4' }) for visual metrics.",
+      "wb.addPivotTable({ sourceSheet, targetSheet, sourceRange, rows, values }) after populating source data."
+    ]
+  }
+}

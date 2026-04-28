@@ -5046,6 +5046,475 @@ declare module "ha:str-bytes" {
   export declare function concatBytes(...arrays: Uint8Array[]): Uint8Array;
 }
 
+declare module "ha:xlsx" {
+  type CellValue = string | number | boolean | Date | null | undefined;
+  type RowData = readonly CellValue[] | Record<string, CellValue>;
+  type CellRefLike = string | {
+      row: number;
+      col: number;
+  };
+  type HexColor = string;
+  type RelationshipId = string | null;
+  /** Excel border style for one side of a cell border. */
+  export interface BorderSide {
+      style?: string;
+      color?: HexColor;
+  }
+  /** Excel border style, either one style for every side or per-side settings. */
+  export type BorderSpec = string | {
+      left?: string | BorderSide | null;
+      right?: string | BorderSide | null;
+      top?: string | BorderSide | null;
+      bottom?: string | BorderSide | null;
+  };
+  /** Cell style options accepted by setCell, addRow, addData, and table helpers. */
+  export interface CellStyle {
+      /** Font size in points. Defaults to 11. */
+      fontSize?: number;
+      /** Font family name. Defaults to Calibri. */
+      fontFamily?: string;
+      /** Text colour as RGB hex, with or without leading #. */
+      color?: HexColor;
+      bold?: boolean;
+      italic?: boolean;
+      underline?: boolean;
+      /** Solid fill colour as RGB hex, with or without leading #. */
+      fill?: HexColor;
+      /** Border style string or per-side border specification. */
+      border?: BorderSpec;
+      /** Excel number format code, e.g. "#,##0.00", "mm-dd-yy", "0%". */
+      numFmt?: string;
+      /** Horizontal alignment. */
+      align?: "left" | "center" | "right" | "justify" | "distributed" | string;
+      /** Vertical alignment. */
+      valign?: "top" | "center" | "bottom" | "justify" | "distributed" | string;
+      wrapText?: boolean;
+      /** Formula text without leading =. If present, cell value is ignored. */
+      formula?: string;
+  }
+  export type ChartType = "column" | "bar" | "line" | "area" | "pie" | "doughnut";
+  export type ChartLegendPosition = "l" | "r" | "t" | "b";
+  export interface ChartSeries {
+      name: string;
+      values: readonly number[];
+  }
+  export interface ChartAnchor {
+      from?: string;
+      to?: string;
+  }
+  export interface ChartOptions {
+      type?: ChartType;
+      title?: string;
+      categories?: readonly string[];
+      series?: readonly ChartSeries[];
+      stacked?: boolean;
+      percentStacked?: boolean;
+      legend?: boolean;
+      legendPosition?: ChartLegendPosition;
+      dataLabels?: boolean;
+      holeSize?: number;
+      anchor?: ChartAnchor;
+  }
+  export type SparklineType = "line" | "column" | "winLoss";
+  export interface SparklineOptions {
+      type?: SparklineType;
+      dataRange: string;
+      locationRange: string;
+      color?: HexColor;
+      negativeColor?: HexColor;
+      firstColor?: HexColor;
+      lastColor?: HexColor;
+      highColor?: HexColor;
+      lowColor?: HexColor;
+      markers?: boolean;
+      showHigh?: boolean;
+      showLow?: boolean;
+      showFirst?: boolean;
+      showLast?: boolean;
+      showNegative?: boolean;
+      lineWeight?: number;
+  }
+  export interface DataBarRule {
+      type: "dataBar";
+      color?: HexColor;
+  }
+  export interface ColorScaleRule {
+      type: "colorScale";
+      minColor?: HexColor;
+      midColor?: HexColor;
+      maxColor?: HexColor;
+  }
+  export interface IconSetRule {
+      type: "iconSet";
+      iconSet?: string;
+  }
+  export interface CellIsRule {
+      type: "cellIs";
+      operator?: string;
+      formula?: string | number;
+      formula2?: string | number;
+      style?: CellStyle;
+  }
+  export interface Top10Rule {
+      type: "top10";
+      rank?: number;
+      bottom?: boolean;
+      percent?: boolean;
+      style?: CellStyle;
+  }
+  export interface AboveAverageRule {
+      type: "aboveAverage";
+      below?: boolean;
+      style?: CellStyle;
+  }
+  export interface DuplicateValuesRule {
+      type: "duplicateValues";
+      style?: CellStyle;
+  }
+  export type ConditionalFormatRule = DataBarRule | ColorScaleRule | IconSetRule | CellIsRule | Top10Rule | AboveAverageRule | DuplicateValuesRule;
+  export type DataValidationType = "list" | "whole" | "decimal" | "textLength" | "custom";
+  export interface DataValidationOptions {
+      type?: DataValidationType;
+      values?: readonly string[];
+      formula?: string;
+      operator?: string;
+      min?: number;
+      max?: number;
+      errorTitle?: string;
+      error?: string;
+      promptTitle?: string;
+      prompt?: string;
+      allowBlank?: boolean;
+  }
+  interface DataValidationEntry extends DataValidationOptions {
+      range: string;
+  }
+  export interface HyperlinkOptions {
+      display?: string;
+      tooltip?: string;
+  }
+  export type HyperlinkTarget = string | {
+      sheet?: string;
+      cell?: string;
+  };
+  export interface ImageOptions {
+      from?: string;
+      to?: string;
+  }
+  export interface GroupOptions {
+      level?: number;
+      collapsed?: boolean;
+  }
+  export interface SheetProtectionOptions {
+      /** Legacy Excel XOR hash; deters casual edits only, not secure encryption. */
+      password?: string;
+      allowSort?: boolean;
+      allowFilter?: boolean;
+      allowFormatCells?: boolean;
+      allowFormatColumns?: boolean;
+      allowFormatRows?: boolean;
+      allowInsertColumns?: boolean;
+      allowInsertRows?: boolean;
+      allowDeleteColumns?: boolean;
+      allowDeleteRows?: boolean;
+  }
+  export interface PageSetupOptions {
+      orientation?: "landscape" | "portrait";
+      paperSize?: number;
+      fitToWidth?: number;
+      fitToHeight?: number;
+      scale?: number;
+  }
+  export interface PageMarginsOptions {
+      top?: number;
+      bottom?: number;
+      left?: number;
+      right?: number;
+      header?: number;
+      footer?: number;
+  }
+  export interface HeaderFooterOptions {
+      header?: string;
+      footer?: string;
+  }
+  export interface PivotValueSpec {
+      field?: string;
+      name?: string;
+      func?: "sum" | "count" | "average" | "min" | "max" | string;
+      label?: string;
+  }
+  export interface PivotTableOptions {
+      sourceRange: string;
+      targetCell?: string;
+      rows?: readonly string[];
+      columns?: readonly string[];
+      filters?: readonly string[];
+      values?: readonly PivotValueSpec[];
+  }
+  export interface PivotTableAddOptions extends PivotTableOptions {
+      sourceSheet: string | Sheet;
+      targetSheet: string | Sheet;
+  }
+  export interface TableToWorkbookOptions {
+      sheetName?: string;
+      headers?: readonly string[];
+      data: readonly RowData[];
+      headerStyle?: CellStyle;
+      columnWidths?: readonly number[];
+      rowStyle?: CellStyle | ((rowIndex: number, row: RowData) => CellStyle);
+  }
+  export interface ExportResult {
+      path: string;
+      size: number;
+  }
+  interface ParsedCellRef {
+      col: number;
+      row: number;
+  }
+  interface CellEntry {
+      v: CellValue;
+      s: CellStyle | null;
+  }
+  interface AnchorPoint {
+      col: number;
+      row: number;
+  }
+  interface InternalAnchor {
+      from: AnchorPoint;
+      to: AnchorPoint;
+  }
+  interface ChartSpec {
+      type: ChartType;
+      title: string | null;
+      categories: string[];
+      series: ChartSeries[];
+      stacked: boolean;
+      percentStacked: boolean;
+      legend: boolean;
+      legendPosition: ChartLegendPosition;
+      dataLabels: boolean;
+      holeSize: number;
+      _anchor: InternalAnchor;
+  }
+  interface CondFmtEntry {
+      range: string;
+      rule: ConditionalFormatRule;
+  }
+  interface HyperlinkEntry {
+      ref: string;
+      url?: string | null;
+      location?: string | null;
+      display: string;
+      tooltip: string | null;
+      internal: boolean;
+  }
+  interface ImageEntry {
+      data: Uint8Array;
+      ext: ImageExt;
+      _anchor: InternalAnchor;
+  }
+  interface ColumnOutlineEntry {
+      from: number;
+      to: number;
+      level: number;
+      collapsed: boolean;
+  }
+  interface RowOutlineEntry {
+      level: number;
+      collapsed: boolean;
+  }
+  interface NamedRangeEntry {
+      name: string;
+      ref: string;
+      localSheetId?: number;
+  }
+  type ImageExt = "png" | "jpeg" | "gif";
+  interface FontEntry {
+      sz: number;
+      nm: string;
+      c: string | null;
+      b: boolean;
+      i: boolean;
+      u: boolean;
+  }
+  interface FillEntry {
+      t: "none" | "gray125" | "solid";
+      c?: string | null;
+  }
+  interface ParsedBorderSide {
+      s: string;
+      c: string | null;
+  }
+  interface BorderEntry {
+      l: ParsedBorderSide | null;
+      r: ParsedBorderSide | null;
+      t: ParsedBorderSide | null;
+      b: ParsedBorderSide | null;
+  }
+  interface CellXfEntry {
+      fi: number;
+      fli: number;
+      bi: number;
+      ni: number;
+      aF: 0 | 1;
+      aFl: 0 | 1;
+      aB: 0 | 1;
+      aN: 0 | 1;
+      aA: 0 | 1;
+      hA: string | null;
+      vA: string | null;
+      wr: 0 | 1;
+  }
+  interface DxfOptions {
+      bold?: boolean;
+      italic?: boolean;
+      color?: string;
+      fill?: string;
+  }
+  interface PivotFieldSpec {
+      name: string;
+      idx: number;
+      shared: boolean;
+      unique?: CellValue[];
+      valueMap?: Map<string, number>;
+      min?: number;
+      max?: number;
+  }
+  interface InternalPivotValueSpec {
+      fld: number;
+      func: string;
+      label: string;
+  }
+  /** Convert column letter(s) to 1-based number. A=1, Z=26, AA=27 */
+  export declare function colToNum(letters: string): number;
+  /** Convert 1-based column number to letter(s). 1=A, 26=Z, 27=AA */
+  export declare function numToCol(num: number): string;
+  /** Parse "A1" cell reference to { col, row } (both 1-based). */
+  export declare function parseCellRef(ref: string): ParsedCellRef;
+  /** Build "A1" reference from 1-based row and col. */
+  export declare function cellRef(row: number, col: number): string;
+  /** Convert JS Date to Excel serial date number. */
+  export declare function dateToSerial(d: Date): number;
+  export declare class Sheet {
+      name: string;
+      index: number;
+      _rows: Map<number, Map<number, CellEntry>>;
+      _colW: Map<number, number>;
+      _rowH: Map<number, number>;
+      _merges: string[];
+      _fzR: number;
+      _fzC: number;
+      _af: string | null;
+      _charts: ChartSpec[];
+      _sparkGroups: SparklineOptions[];
+      _condFmts: CondFmtEntry[];
+      _dataVals: DataValidationEntry[];
+      _tabColor: string | null;
+      _hyperlinks: HyperlinkEntry[];
+      _images: ImageEntry[];
+      _rowOutline: Map<number, RowOutlineEntry>;
+      _colOutline: ColumnOutlineEntry[];
+      _protection: SheetProtectionOptions | null;
+      _printArea: string | null;
+      _pageSetup: PageSetupOptions | null | undefined;
+      _pageMargins: PageMarginsOptions | null | undefined;
+      _headerFooter: HeaderFooterOptions | null | undefined;
+      constructor(name: string, idx: number);
+      setCell(ref: CellRefLike, value: CellValue, style?: CellStyle | null): this;
+      setColumnWidth(colRef: number | string, width: number): this;
+      setRowHeight(row: number, height: number): this;
+      mergeCells(from: string, to: string): this;
+      freezeRows(n: number): this;
+      freezeColumns(n: number): this;
+      setAutoFilter(range: string): this;
+      addRow(rowNum: number, values: readonly CellValue[], style?: CellStyle | null): this;
+      addData(data: readonly (readonly CellValue[])[], startRef?: CellRefLike, style?: CellStyle | ((rowIndex: number, colIndex: number, value: CellValue) => CellStyle)): this;
+      getCellValue(ref: CellRefLike): CellValue;
+      addChart(opts: ChartOptions): this;
+      addSparklines(opts: SparklineOptions): this;
+      addConditionalFormat(range: string, rule: ConditionalFormatRule): this;
+      addDataValidation(range: string, opts: DataValidationOptions): this;
+      setTabColor(color: string): this;
+      addHyperlink(ref: string, target: HyperlinkTarget, opts?: HyperlinkOptions): this;
+      addImage(data: Uint8Array, opts?: ImageOptions): this;
+      groupRows(from: number, to: number, opts?: GroupOptions): this;
+      groupColumns(from: number | string, to: number | string, opts?: GroupOptions): this;
+      protect(opts?: SheetProtectionOptions): this;
+      setPrintArea(range: string): this;
+      setPageSetup(opts?: PageSetupOptions): this;
+      setPageMargins(opts?: PageMarginsOptions): this;
+      setHeaderFooter(opts?: HeaderFooterOptions): this;
+  }
+  export declare class StyleMgr {
+      _nf: {
+          id: number;
+          fc: string;
+      }[];
+      _nfNext: number;
+      _fonts: FontEntry[];
+      _fills: FillEntry[];
+      _borders: BorderEntry[];
+      _xfs: CellXfEntry[];
+      _xfMap: Map<string, number>;
+      _dxfs: DxfOptions[];
+      _defaultXf(): CellXfEntry;
+      _fontIdx(f: FontEntry): number;
+      _fillIdx(f: FillEntry): number;
+      _borderIdx(b: BorderEntry): number;
+      _nfId(fmt?: string): number;
+      _parseBdr(b?: BorderSpec): BorderEntry;
+      resolve(opts?: CellStyle | null): number;
+      addDxf(opts?: DxfOptions): number;
+      toXml(): string;
+  }
+  export declare class PivotConfig {
+      id: number;
+      srcSheet: Sheet;
+      tgtSheet: Sheet;
+      sourceRange: string;
+      targetCell: string;
+      headers: string[];
+      dataRows: CellValue[][];
+      rowIdxs: number[];
+      colIdxs: number[];
+      filterIdxs: number[];
+      valSpecs: InternalPivotValueSpec[];
+      fields: PivotFieldSpec[];
+      constructor(id: number, opts: PivotTableOptions, srcSheet: Sheet, tgtSheet: Sheet);
+      _preCompute(): void;
+      cacheDefXml(): string;
+      cacheRecXml(): string;
+      tableXml(): string;
+  }
+  export declare class Workbook {
+      _sheets: Sheet[];
+      _sm: StyleMgr;
+      _sst: string[];
+      _sstMap: Map<string, number>;
+      _pivots: PivotConfig[];
+      _namedRanges: NamedRangeEntry[];
+      _globalImages: ImageEntry[];
+      addSheet(name?: string): Sheet;
+      addPivotTable(opts: PivotTableAddOptions): this;
+      addNamedRange(name: string, ref: string, sheetName?: string): this;
+      _addStr(s: string): number;
+      build(): Uint8Array;
+      _ctXml(totalCharts: number, sheetChartMap: Map<Sheet, number[]>, imageExts: Set<ImageExt>): string;
+      _wbXml(): string;
+      _wbRels(): string;
+      _wsXml(sh: Sheet, drawingRId: RelationshipId, isFirst: boolean, hlRids: number[]): string;
+      _cXml(ref: string, v: CellValue, si: number, style: CellStyle | null): string;
+      _sstXml(): string;
+  }
+  /** Create a new empty workbook. */
+  export declare function createWorkbook(): Workbook;
+  /** Build and write workbook to an .xlsx file. */
+  export declare function exportToFile(wb: Workbook, path: string, writeFn: (path: string, bytes: Uint8Array) => void): ExportResult;
+  /** Convenience: create a workbook with a single formatted table. */
+  export declare function tableToWorkbook(opts: TableToWorkbookOptions): Workbook;
+  export {};
+}
+
 declare module "ha:xml-escape" {
   /**
    * Escape a string for use as XML text content.

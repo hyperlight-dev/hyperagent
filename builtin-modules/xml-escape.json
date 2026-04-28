@@ -7,7 +7,7 @@
   "dtsHash": "sha256:df392595863d1808",
   "importStyle": "named",
   "hints": {
-    "overview": "XML escaping and element construction. Used internally by PPTX modules.",
-    "relatedModules": ["ha:pptx", "ha:ooxml-core"]
+    "overview": "XML escaping and element construction. Used internally by PPTX/XLSX modules.",
+    "relatedModules": ["ha:pptx", "ha:ooxml-core", "ha:xlsx"]
   }
 }

@@ -33,16 +33,24 @@ allowed-tools:
   - execute_javascript
   - delete_handler
   - get_handler_source
+  - edit_handler
+  - list_handlers
+  - reset_sandbox
   - list_modules
   - module_info
   - list_plugins
   - plugin_info
   - manage_plugin
+  - list_mcp_servers
+  - mcp_server_info
+  - manage_mcp
   - apply_profile
   - configure_sandbox
   - sandbox_help
-  - llm_thought
   - register_module
+  - write_output
+  - read_input
+  - read_output
   - ask_user
 ---
 
@@ -61,12 +69,14 @@ inside the Hyperlight sandbox.
 ## Two APIs — When to Use Which
 
 ### Flow Layout (PREFERRED for all documents)
+
 Use `addContent(doc, elements)` — elements auto-paginate, no coordinate math.
 `addContent()` starts on the current page. When content overflows, it auto-creates
 new pages. Call it multiple times — each continues where the last left off.
 Do NOT try to control exact page count — let content flow naturally.
 
 ### Low-Level (custom positioning only)
+
 Use `doc.addPage()` + `doc.drawText()` / `doc.drawRect()` only for letterheads,
 custom headers, or precise positioning. Call `addContent()` after low-level draws
 to flow content below them.
@@ -88,18 +98,21 @@ Call `module_info('doc-core')` to see all available themes and their colours.
 A professional document tells a story. Every element must have context.
 
 ### Structure Rules
+
 - **Every document starts with a title** — use `heading({ level: 1 })` or `titlePage()`
 - **Every section has a heading** — `heading({ level: 2 })` before each section
 - **Charts NEVER appear alone** — heading above + interpretation paragraph below
 - **Tables NEVER appear alone** — introduce with context explaining what it shows
 
 ### Content Rules
+
 - **Add narrative text** — explain what data means, don't just show numbers
 - **Highlight key findings** — call out trends, anomalies, comparisons
 - **Use bullet lists for summaries** — after charts/tables, summarize 2-3 takeaways
 - **Include footer and page numbers** — `addFooter()` and `addPageNumbers()` for multi-page docs
 
 ### Quality Checklist
+
 1. Does every chart have a heading AND interpretation paragraph?
 2. Are numeric values given context (comparison, % change, trend)?
 3. Would a reader understand the data without the original request?
@@ -110,22 +123,24 @@ A professional document tells a story. Every element must have context.
 Use `estimateHeight(elements)` to predict total height BEFORE rendering.
 
 ### Available space per page
+
 - **Letter** (612×792pt): ~648pt usable with default 1" margins
 - **A4** (595×842pt): ~698pt usable with default 1" margins
 - `contentPage()` heading uses ~50pt (h1 + spacing)
 
 ### Approximate element heights
-| Element | Height |
-|---------|--------|
-| heading level 1 | ~60pt |
-| heading level 2 | ~45pt |
-| paragraph (3 lines) | ~50pt |
-| table row | ~24pt |
-| chart (default) | ~250pt + 21pt if titled |
-| spacer(12) | 12pt |
-| rule() | ~16pt |
-| bullet list item | ~15pt |
-| metricCard | ~62pt (76pt with change indicator) |
+
+| Element             | Height                             |
+| ------------------- | ---------------------------------- |
+| heading level 1     | ~60pt                              |
+| heading level 2     | ~45pt                              |
+| paragraph (3 lines) | ~50pt                              |
+| table row           | ~24pt                              |
+| chart (default)     | ~250pt + 21pt if titled            |
+| spacer(12)          | 12pt                               |
+| rule()              | ~16pt                              |
+| bullet list item    | ~15pt                              |
+| metricCard          | ~62pt (76pt with change indicator) |
 
 ## Setup Sequence
 
@@ -149,6 +164,7 @@ Use `estimateHeight(elements)` to predict total height BEFORE rendering.
 ## Validation
 
 `exportToFile()` runs automatic validation before saving:
+
 - **Text overlap detection** — overlapping text elements throw an error
 - **Bounds checking** — text outside page edges throws an error
 - **Whitespace detection** — nearly-empty interior pages warn

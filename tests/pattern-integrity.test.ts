@@ -9,8 +9,9 @@
 // ─────────────────────────────────────────────────────────────────────
 
 import { describe, it, expect } from "vitest";
-import { readdirSync } from "fs";
+import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
+import { ALLOWED_TOOLS } from "../src/agent/tool-gating.js";
 import { loadSkills } from "../src/agent/skill-loader.js";
 import { loadPatterns } from "../src/agent/pattern-loader.js";
 
@@ -31,6 +32,28 @@ const PRIVATE_MODULES = new Set(["_restore", "_save"]);
 
 const skills = loadSkills(SKILLS_DIR);
 const patterns = loadPatterns(PATTERNS_DIR);
+
+function parseAllowedTools(skillName: string): string[] {
+  const skillFile = join(SKILLS_DIR, skillName, "SKILL.md");
+  const content = readFileSync(skillFile, "utf-8");
+  const lines = content.split("\n");
+  const tools: string[] = [];
+  let inAllowedTools = false;
+
+  for (const line of lines) {
+    if (line.trim() === "---" && inAllowedTools) break;
+    if (/^allowed-tools:\s*$/.test(line.trim())) {
+      inAllowedTools = true;
+      continue;
+    }
+    if (!inAllowedTools) continue;
+    if (/^\S/.test(line) && !line.trim().startsWith("-")) break;
+    const match = line.match(/^\s+-\s+(.+)\s*$/);
+    if (match) tools.push(match[1]!.trim());
+  }
+
+  return tools;
+}
 
 describe("pattern-integrity", () => {
   describe("skill → pattern references", () => {
@@ -85,6 +108,28 @@ describe("pattern-integrity", () => {
           `Pattern "${patternName}" has hardcoded API calls in steps. ` +
             `Use descriptive intent instead (e.g. "parse HTML using ha:html"). ` +
             `Violations:\n${violations.map((v) => `  - ${v}`).join("\n")}`,
+        ).toEqual([]);
+      });
+    }
+  });
+
+  describe("skill allowed-tools metadata", () => {
+    const mcpTools = ["list_mcp_servers", "mcp_server_info", "manage_mcp"];
+
+    for (const [skillName] of skills) {
+      const allowedTools = parseAllowedTools(skillName);
+
+      it(`skill "${skillName}" only references real HyperAgent tools`, () => {
+        expect(
+          allowedTools.filter((tool) => !ALLOWED_TOOLS.has(tool)),
+          `Skill "${skillName}" has stale/unknown allowed-tools entries`,
+        ).toEqual([]);
+      });
+
+      it(`skill "${skillName}" includes MCP discovery/connect tools`, () => {
+        expect(
+          mcpTools.filter((tool) => !allowedTools.includes(tool)),
+          `Skill "${skillName}" should allow MCP discovery/connect tools so it can use external data sources when relevant`,
         ).toEqual([]);
       });
     }

@@ -35,6 +35,30 @@ antiPatterns:
   - Don't fetch the same URL twice — deduplicate URLs before fetching
   - Don't scrape SPA websites (React, Next.js, Astro) — content is loaded by JavaScript and won't appear in the HTML. Use JSON APIs instead
   - Don't store 80KB of raw HTML — parseHtml() extracts ~5KB of useful text from a typical page
+allowed-tools:
+  - register_handler
+  - execute_javascript
+  - delete_handler
+  - get_handler_source
+  - edit_handler
+  - list_handlers
+  - reset_sandbox
+  - list_modules
+  - module_info
+  - list_plugins
+  - plugin_info
+  - manage_plugin
+  - list_mcp_servers
+  - mcp_server_info
+  - manage_mcp
+  - apply_profile
+  - configure_sandbox
+  - sandbox_help
+  - register_module
+  - write_output
+  - read_input
+  - read_output
+  - ask_user
 ---
 
 # Research Synthesiser
@@ -48,6 +72,7 @@ tasks into discovery → extraction → analysis → output phases.
 ### Phase 1: Plan & Discover Sources
 
 Before fetching anything:
+
 1. Ask the user to clarify scope if the topic is broad
 2. **Prefer JSON APIs over website scraping** — most provider websites
    are SPAs (React, Next.js, Astro) where content is loaded by JavaScript.
@@ -63,6 +88,7 @@ Before fetching anything:
 ### Phase 2: Research (Handler 1 — "researcher")
 
 Dedicated handler for fetching and extracting:
+
 - Enable fetch plugin with appropriate allowedDomains
 - Fetch sources in batches (3-5 at a time via handler re-execution with different events)
 - **For HTML responses: ALWAYS import { parseHtml } from 'ha:html'**
@@ -77,6 +103,7 @@ Dedicated handler for fetching and extracting:
 - Track source URLs alongside each finding for citation
 
 Data structure pattern for shared-state:
+
 ```
 set("findings", {
   sources: ["url1", "url2", ...],
@@ -91,6 +118,7 @@ set("findings", {
 ### Phase 3: Analyse & Cross-Reference (Handler 2 — "analyser")
 
 Process the raw findings:
+
 - Cross-reference facts across sources
 - Identify consensus, contradictions, and gaps
 - Calculate aggregates and comparisons
@@ -100,6 +128,7 @@ Process the raw findings:
 ### Phase 4: Build Output (Handler 3 or write_output)
 
 Produce the final deliverable:
+
 - **For PPTX**: Use ha:pptx in the sandbox with appropriate theme, charts, tables
 - **For Markdown/text reports**: Use write_output(path, content) directly — no sandbox needed!
   Build the report as a string and call write_output("report.md", content)
@@ -107,6 +136,7 @@ Produce the final deliverable:
 - Only use the sandbox for binary output or complex computation
 
 Always include:
+
 - Executive summary / key findings at the top
 - Source attribution (footnotes, citations, or a references section)
 - Data visualisations where numbers tell the story (charts, tables, comparison grids)
@@ -115,6 +145,7 @@ Always include:
 ## Output Format Selection
 
 Match output to what the user asked for:
+
 - "presentation" / "slides" / "deck" → PPTX (use pptx-expert patterns)
 - "report" / "document" / "analysis" / "paper" → write_output(path, content) directly
 - "data" / "dataset" / "spreadsheet" → write_output(path, content) for JSON/CSV
@@ -123,11 +154,13 @@ Match output to what the user asked for:
 ## Profile & Plugin Setup
 
 Always start with:
+
 ```
 apply_profile("web-research file-builder")
 ```
 
 This gives you:
+
 - fetch plugin (with configurable allowedDomains)
 - fs-write plugin (for output files)
 - Generous timeouts (120s wall for multiple fetches)
@@ -136,6 +169,7 @@ This gives you:
 ## Image Research
 
 If the user wants images (e.g. for a PPTX with visuals):
+
 1. Discover image URLs during the research phase (don't guess!)
 2. Use API endpoints for image discovery (e.g. Wikipedia media-list API)
 3. Download all images in the research handler using fetchBinaryBatch
@@ -145,6 +179,7 @@ If the user wants images (e.g. for a PPTX with visuals):
 ## Handler Size Management
 
 Research tasks accumulate lots of data. Keep handlers under 4KB:
+
 - Don't inline fetched content in handler source code
 - Pass data via event parameter or shared-state
 - Use event dispatch to run the same handler with different actions
@@ -153,6 +188,7 @@ Research tasks accumulate lots of data. Keep handlers under 4KB:
 ## Error Recovery
 
 Research is inherently unreliable (sites go down, rate limits, 404s):
+
 - The fetch plugin auto-retries on 429 (configurable)
 - Always check response status before reading content
 - Log failed URLs and continue — don't abort the whole research

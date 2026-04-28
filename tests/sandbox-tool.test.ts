@@ -10,6 +10,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { inflateRawSync } from "node:zlib";
 
 import { createSandboxTool, parsePositiveInt } from "../src/sandbox/tool.js";
 
@@ -41,6 +42,58 @@ function loadSaveRestoreModules(
     readModule("_save"),
     readModule("_restore"),
   ]);
+}
+
+function u16(data: Uint8Array, offset: number): number {
+  return data[offset]! | (data[offset + 1]! << 8);
+}
+
+function u32(data: Uint8Array, offset: number): number {
+  return (
+    data[offset]! |
+    (data[offset + 1]! << 8) |
+    (data[offset + 2]! << 16) |
+    (data[offset + 3]! << 24)
+  );
+}
+
+function parseZipEntries(bytes: readonly number[]): Map<string, Uint8Array> {
+  const zip = Uint8Array.from(bytes);
+  const entries = new Map<string, Uint8Array>();
+  let offset = 0;
+
+  while (offset + 30 <= zip.length && u32(zip, offset) === 0x04034b50) {
+    const method = u16(zip, offset + 8);
+    const compressedSize = u32(zip, offset + 18);
+    const fileNameLength = u16(zip, offset + 26);
+    const extraLength = u16(zip, offset + 28);
+    const nameStart = offset + 30;
+    const nameEnd = nameStart + fileNameLength;
+    const dataStart = nameEnd + extraLength;
+    const dataEnd = dataStart + compressedSize;
+    const name = Buffer.from(zip.subarray(nameStart, nameEnd)).toString("utf8");
+    const compressed = zip.subarray(dataStart, dataEnd);
+
+    if (method === 0) {
+      entries.set(name, compressed);
+    } else if (method === 8) {
+      entries.set(name, new Uint8Array(inflateRawSync(compressed)));
+    } else {
+      throw new Error(
+        `Unsupported ZIP compression method ${method} for ${name}`,
+      );
+    }
+
+    offset = dataEnd;
+  }
+
+  return entries;
+}
+
+function zipText(entries: Map<string, Uint8Array>, name: string): string {
+  const entry = entries.get(name);
+  if (!entry) throw new Error(`Missing ZIP entry: ${name}`);
+  return Buffer.from(entry).toString("utf8");
 }
 
 // ── parsePositiveInt ─────────────────────────────────────────────────
@@ -1905,5 +1958,391 @@ describe("zip-format deduplication", () => {
     expect(r.success).toBe(true);
     expect(r.result.isUint8Array).toBe(true);
     expect(r.result.size).toBeGreaterThan(0);
+  });
+});
+
+// ── XLSX workbook generation ─────────────────────────────────────────
+
+describe("xlsx builtin module", () => {
+  function loadXlsxModules(tool: ReturnType<typeof createSandboxTool>): void {
+    tool.setModules([
+      readModule("xml-escape"),
+      readModule("str-bytes"),
+      readModule("crc32"),
+      readModule("zip-format"),
+      readModule("xlsx"),
+    ]);
+  }
+
+  it("should build a workbook with styles, formulas, validation, chart, and pivot data", async () => {
+    const tool = createSandboxTool({ inputBufferKb: 256, outputBufferKb: 256 });
+    loadXlsxModules(tool);
+
+    await tool.registerHandler(
+      "xlsx-smoke-test",
+      [
+        'import { createWorkbook } from "ha:xlsx";',
+        "export function handler() {",
+        "  const wb = createWorkbook();",
+        "  const data = wb.addSheet('Data');",
+        "  data.addRow(1, ['Region', 'Quarter', 'Revenue', 'Active'], { bold: true, fill: '#4472C4', color: '#FFFFFF', border: 'thin' });",
+        "  data.addRow(2, ['North', 'Q1', 120, true], { border: 'thin' });",
+        "  data.addRow(3, ['South', 'Q1', 90, false], { border: 'thin' });",
+        "  data.addRow(4, ['North', 'Q2', 150, true], { border: 'thin' });",
+        "  data.setCell('E1', 'Total', { bold: true });",
+        "  data.setCell('E2', '=SUM(C2:C4)', { numFmt: '#,##0' });",
+        "  data.setCell('F2', new Date(2026, 3, 28));",
+        "  data.setColumnWidth('A', 18).setColumnWidth('C', 12);",
+        "  data.freezeRows(1).setAutoFilter('A1:D4');",
+        "  data.addConditionalFormat('C2:C4', { type: 'dataBar', color: '#70AD47' });",
+        "  data.addDataValidation('B2:B100', { type: 'list', values: ['Q1', 'Q2', 'Q3', 'Q4'] });",
+        "  data.addChart({ type: 'column', title: 'Revenue', categories: ['North Q1', 'South Q1', 'North Q2'], series: [{ name: 'Revenue', values: [120, 90, 150] }] });",
+        "  const pivots = wb.addSheet('Pivots');",
+        "  wb.addPivotTable({ sourceSheet: data, targetSheet: pivots, sourceRange: 'A1:D4', targetCell: 'A3', rows: ['Region'], values: [{ field: 'Revenue', func: 'sum' }] });",
+        "  const bytes = wb.build();",
+        "  return {",
+        "    isUint8Array: bytes instanceof Uint8Array,",
+        "    size: bytes.length,",
+        "    signature: [bytes[0], bytes[1], bytes[2], bytes[3]],",
+        "    pivotNorth: pivots.getCellValue('A4'),",
+        "    pivotTotal: pivots.getCellValue('B6'),",
+        "  };",
+        "}",
+      ].join("\n"),
+    );
+
+    const r = await tool.executeJavaScript("xlsx-smoke-test");
+    expect(r.success).toBe(true);
+    expect(r.result).toMatchObject({
+      isUint8Array: true,
+      signature: [0x50, 0x4b, 0x03, 0x04],
+      pivotNorth: "North",
+      pivotTotal: 360,
+    });
+    expect(r.result.size).toBeGreaterThan(2000);
+  });
+
+  it("should build a simple formatted table with tableToWorkbook", async () => {
+    const tool = createSandboxTool({ inputBufferKb: 128, outputBufferKb: 128 });
+    loadXlsxModules(tool);
+
+    await tool.registerHandler(
+      "xlsx-table-test",
+      [
+        'import { tableToWorkbook } from "ha:xlsx";',
+        "export function handler() {",
+        "  const wb = tableToWorkbook({",
+        "    sheetName: 'Sales',",
+        "    headers: ['name', 'value'],",
+        "    data: [{ name: 'Alpha', value: 10 }, { name: 'Beta', value: 20 }],",
+        "    columnWidths: [20, 12],",
+        "  });",
+        "  const bytes = wb.build();",
+        "  return { size: bytes.length, signature: [bytes[0], bytes[1], bytes[2], bytes[3]] };",
+        "}",
+      ].join("\n"),
+    );
+
+    const r = await tool.executeJavaScript("xlsx-table-test");
+    expect(r.success).toBe(true);
+    expect(r.result.signature).toEqual([0x50, 0x4b, 0x03, 0x04]);
+    expect(r.result.size).toBeGreaterThan(1000);
+  });
+
+  it("should expose cell reference and date helper functions", async () => {
+    const tool = createSandboxTool();
+    loadXlsxModules(tool);
+
+    await tool.registerHandler(
+      "xlsx-helper-test",
+      [
+        'import { colToNum, numToCol, parseCellRef, cellRef, dateToSerial } from "ha:xlsx";',
+        "export function handler() {",
+        "  let invalidRef = '';",
+        "  try { parseCellRef('not-a-cell'); } catch (err) { invalidRef = err.message; }",
+        "  return {",
+        "    colAA: colToNum('AA'),",
+        "    colXfd: colToNum('XFD'),",
+        "    num703: numToCol(703),",
+        "    parsed: parseCellRef('BC42'),",
+        "    ref: cellRef(99, 28),",
+        "    serial: dateToSerial(new Date(1900, 0, 1)),",
+        "    leapBugSerial: dateToSerial(new Date(1900, 2, 1)),",
+        "    invalidRef,",
+        "  };",
+        "}",
+      ].join("\n"),
+    );
+
+    const r = await tool.executeJavaScript("xlsx-helper-test");
+    expect(r.success).toBe(true);
+    expect(r.result).toEqual({
+      colAA: 27,
+      colXfd: 16384,
+      num703: "AAA",
+      parsed: { col: 55, row: 42 },
+      ref: "AB99",
+      serial: 1,
+      leapBugSerial: 61,
+      invalidRef: "Invalid cell ref: not-a-cell",
+    });
+  });
+
+  it("should write accurate dimensions and safe validation list XML", async () => {
+    const tool = createSandboxTool({
+      inputBufferKb: 512,
+      outputBufferKb: 1024,
+    });
+    loadXlsxModules(tool);
+
+    await tool.registerHandler(
+      "xlsx-validation-xml-test",
+      [
+        'import { createWorkbook } from "ha:xlsx";',
+        "export function handler() {",
+        "  const wb = createWorkbook();",
+        "  const sh = wb.addSheet('Validation');",
+        "  sh.setCell('C3', 'First');",
+        "  sh.setCell('D4', 'Last');",
+        "  sh.addDataValidation('C3:C10', { type: 'list', values: ['R&D', '<Open>'] });",
+        "  const bytes = wb.build();",
+        "  let invalidMessage = '';",
+        "  try {",
+        "    const bad = createWorkbook();",
+        "    bad.addSheet('Bad').addDataValidation('A1:A2', { type: 'list', values: ['Needs, comma'] });",
+        "    bad.build();",
+        "  } catch (err) { invalidMessage = err.message; }",
+        "  return { bytes: Array.from(bytes), invalidMessage };",
+        "}",
+      ].join("\n"),
+    );
+
+    const r = await tool.executeJavaScript("xlsx-validation-xml-test");
+    expect(r.success).toBe(true);
+    const entries = parseZipEntries(r.result.bytes);
+    const sheetXml = zipText(entries, "xl/worksheets/sheet1.xml");
+    expect(sheetXml).toContain('<dimension ref="C3:D4"/>');
+    expect(sheetXml).toContain('<formula1>"R&amp;D,&lt;Open&gt;"</formula1>');
+    expect(r.result.invalidMessage).toContain("use a formula range instead");
+  });
+
+  it("should write core workbook entries and worksheet layout XML", async () => {
+    const tool = createSandboxTool({
+      inputBufferKb: 512,
+      outputBufferKb: 1024,
+    });
+    loadXlsxModules(tool);
+
+    await tool.registerHandler(
+      "xlsx-worksheet-xml-test",
+      [
+        'import { createWorkbook } from "ha:xlsx";',
+        "export function handler() {",
+        "  const wb = createWorkbook();",
+        "  const sh = wb.addSheet('Ops & Plan');",
+        "  sh.addRow(1, ['Merged title', null, null], { bold: true, fill: '#D9EAD3' });",
+        "  sh.addRow(2, ['Team', 'Count', 'Revenue'], { bold: true });",
+        "  sh.addRow(3, ['North', 2, 30]);",
+        "  sh.addRow(4, ['South', 1, 5]);",
+        "  sh.addRow(5, ['Total', 3, '=SUM(C3:C4)']);",
+        "  sh.setColumnWidth('A', 22).setRowHeight(1, 24);",
+        "  sh.mergeCells('A1', 'C1').freezeRows(1).freezeColumns(1).setAutoFilter('A2:C5');",
+        "  sh.groupRows(3, 4, { level: 2, collapsed: true }).groupColumns('B', 'C', { level: 1, collapsed: true });",
+        "  sh.setTabColor('#FFAA00');",
+        "  sh.protect({ password: 'secret', allowSort: true, allowFilter: true });",
+        "  sh.setPrintArea('A1:C5');",
+        "  sh.setPageSetup({ orientation: 'landscape', paperSize: 9, fitToWidth: 1, fitToHeight: 0 });",
+        "  sh.setPageMargins({ left: 0.5, right: 0.5, top: 0.6, bottom: 0.6, header: 0.2, footer: 0.2 });",
+        "  sh.setHeaderFooter({ header: '&CReport', footer: '&P of &N' });",
+        "  wb.addNamedRange('Totals', \"'Ops & Plan'!$C$5\");",
+        "  const bytes = wb.build();",
+        "  return { bytes: Array.from(bytes) };",
+        "}",
+      ].join("\n"),
+    );
+
+    const r = await tool.executeJavaScript("xlsx-worksheet-xml-test");
+    expect(r.success).toBe(true);
+    const entries = parseZipEntries(r.result.bytes);
+    expect([...entries.keys()]).toEqual(
+      expect.arrayContaining([
+        "[Content_Types].xml",
+        "_rels/.rels",
+        "xl/workbook.xml",
+        "xl/_rels/workbook.xml.rels",
+        "xl/worksheets/sheet1.xml",
+        "xl/styles.xml",
+        "xl/sharedStrings.xml",
+      ]),
+    );
+
+    const workbookXml = zipText(entries, "xl/workbook.xml");
+    expect(workbookXml).toContain('sheet name="Ops &amp; Plan"');
+    expect(workbookXml).toContain('<definedName name="Totals">');
+    expect(workbookXml).toContain("'Ops &amp; Plan'!$C$5");
+    expect(workbookXml).toContain('name="_xlnm.Print_Area" localSheetId="0"');
+
+    const sheetXml = zipText(entries, "xl/worksheets/sheet1.xml");
+    expect(sheetXml).toContain('<tabColor rgb="FFFFAA00"/>');
+    expect(sheetXml).toContain('<pane xSplit="1" ySplit="1" topLeftCell="B2"');
+    expect(sheetXml).toContain(
+      '<col min="1" max="1" width="22" customWidth="1"/>',
+    );
+    expect(sheetXml).toContain(
+      '<col min="2" max="2" width="8.43" outlineLevel="1" collapsed="1"/>',
+    );
+    expect(sheetXml).toContain('<row r="1" ht="24" customHeight="1"');
+    expect(sheetXml).toContain('<row r="3" outlineLevel="2" collapsed="1"');
+    expect(sheetXml).toContain(
+      '<sheetProtection sheet="1" objects="1" scenarios="1"',
+    );
+    expect(sheetXml).toContain(' sort="1"');
+    expect(sheetXml).toContain(' autoFilter="1"');
+    expect(sheetXml).toContain('<autoFilter ref="A2:C5"/>');
+    expect(sheetXml).toContain('<mergeCell ref="A1:C1"/>');
+    expect(sheetXml).toContain(
+      '<pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.2" footer="0.2"/>',
+    );
+    expect(sheetXml).toContain(
+      '<pageSetup orientation="landscape" paperSize="9" fitToWidth="1" fitToHeight="0"/>',
+    );
+    expect(sheetXml).toContain("<oddHeader>&amp;CReport</oddHeader>");
+    expect(sheetXml).toContain("<oddFooter>&amp;P of &amp;N</oddFooter>");
+  });
+
+  it("should write relationships for hyperlinks, drawings, charts, images, and sparklines", async () => {
+    const tool = createSandboxTool({
+      inputBufferKb: 512,
+      outputBufferKb: 1024,
+    });
+    loadXlsxModules(tool);
+
+    await tool.registerHandler(
+      "xlsx-relationship-xml-test",
+      [
+        'import { createWorkbook } from "ha:xlsx";',
+        "export function handler() {",
+        "  const wb = createWorkbook();",
+        "  const data = wb.addSheet('Data');",
+        "  wb.addSheet('Other').setCell('B2', 'Target');",
+        "  data.addRow(1, ['Metric', 'Q1', 'Q2', 'Q3']);",
+        "  data.addRow(2, ['Revenue', 10, 20, 30]);",
+        "  data.addRow(3, ['Cost', 4, 8, 12]);",
+        "  data.addHyperlink('A5', 'https://example.com/report', { display: 'External report', tooltip: 'Open report' });",
+        "  data.addHyperlink('A6', { sheet: 'Other', cell: 'B2' }, { display: 'Internal target' });",
+        "  data.addChart({ type: 'line', title: 'Trend', categories: ['Q1', 'Q2', 'Q3'], series: [{ name: 'Revenue', values: [10, 20, 30] }], dataLabels: true, anchor: { from: 'F2', to: 'M16' } });",
+        "  data.addSparklines({ type: 'line', dataRange: 'B2:D3', locationRange: 'E2:E3', markers: true, showHigh: true, showLow: true });",
+        "  data.addImage(new Uint8Array([0x89, 0x50, 0x4E, 0x47, 1, 2, 3, 4]), { from: 'F18', to: 'H24' });",
+        "  const bytes = wb.build();",
+        "  return { bytes: Array.from(bytes) };",
+        "}",
+      ].join("\n"),
+    );
+
+    const r = await tool.executeJavaScript("xlsx-relationship-xml-test");
+    expect(r.success).toBe(true);
+    const entries = parseZipEntries(r.result.bytes);
+    expect([...entries.keys()]).toEqual(
+      expect.arrayContaining([
+        "xl/worksheets/sheet1.xml",
+        "xl/worksheets/_rels/sheet1.xml.rels",
+        "xl/drawings/drawing1.xml",
+        "xl/drawings/_rels/drawing1.xml.rels",
+        "xl/charts/chart1.xml",
+        "xl/media/image1.png",
+      ]),
+    );
+
+    const sheetXml = zipText(entries, "xl/worksheets/sheet1.xml");
+    expect(sheetXml).toContain(
+      '<hyperlink ref="A5" r:id="rId2" display="External report" tooltip="Open report"/>',
+    );
+    expect(sheetXml).toContain(
+      '<hyperlink ref="A6" location="Other!B2" display="Internal target"/>',
+    );
+    expect(sheetXml).toContain('<drawing r:id="rId1"/>');
+    expect(sheetXml).toContain("<x14:sparklineGroups");
+    expect(sheetXml).toContain(
+      "<xm:f>Data!B2:D2</xm:f><xm:sqref>E2</xm:sqref>",
+    );
+
+    const sheetRels = zipText(entries, "xl/worksheets/_rels/sheet1.xml.rels");
+    expect(sheetRels).toContain(
+      'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"',
+    );
+    expect(sheetRels).toContain(
+      'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com/report" TargetMode="External"',
+    );
+
+    const drawingRels = zipText(entries, "xl/drawings/_rels/drawing1.xml.rels");
+    expect(drawingRels).toContain('Target="../charts/chart1.xml"');
+    expect(drawingRels).toContain('Target="../media/image1.png"');
+
+    const chartXml = zipText(entries, "xl/charts/chart1.xml");
+    expect(chartXml).toContain("<c:lineChart>");
+    expect(chartXml).toContain("<a:t>Trend</a:t>");
+    expect(chartXml).toContain("<c:v>Revenue</c:v>");
+    expect(entries.get("xl/media/image1.png")).toEqual(
+      Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]),
+    );
+  });
+
+  it("should compute pivot aggregators for sum, count, average, min, and max", async () => {
+    const tool = createSandboxTool({ inputBufferKb: 256, outputBufferKb: 256 });
+    loadXlsxModules(tool);
+
+    await tool.registerHandler(
+      "xlsx-pivot-aggregator-test",
+      [
+        'import { createWorkbook } from "ha:xlsx";',
+        "export function handler() {",
+        "  const wb = createWorkbook();",
+        "  const data = wb.addSheet('Data');",
+        "  data.addRow(1, ['Region', 'Revenue']);",
+        "  data.addRow(2, ['North', 10]);",
+        "  data.addRow(3, ['North', 20]);",
+        "  data.addRow(4, ['South', 5]);",
+        "  const pivot = wb.addSheet('Pivot');",
+        "  wb.addPivotTable({",
+        "    sourceSheet: data,",
+        "    targetSheet: pivot,",
+        "    sourceRange: 'A1:B4',",
+        "    targetCell: 'A3',",
+        "    rows: ['Region'],",
+        "    values: [",
+        "      { field: 'Revenue', func: 'sum' },",
+        "      { field: 'Revenue', func: 'count' },",
+        "      { field: 'Revenue', func: 'average' },",
+        "      { field: 'Revenue', func: 'min' },",
+        "      { field: 'Revenue', func: 'max' },",
+        "    ],",
+        "  });",
+        "  return {",
+        "    headers: ['B3', 'C3', 'D3', 'E3', 'F3'].map((ref) => pivot.getCellValue(ref)),",
+        "    north: ['A4', 'B4', 'C4', 'D4', 'E4', 'F4'].map((ref) => pivot.getCellValue(ref)),",
+        "    south: ['A5', 'B5', 'C5', 'D5', 'E5', 'F5'].map((ref) => pivot.getCellValue(ref)),",
+        "    total: ['A6', 'B6', 'C6', 'D6', 'E6', 'F6'].map((ref) => pivot.getCellValue(ref)),",
+        "  };",
+        "}",
+      ].join("\n"),
+    );
+
+    const r = await tool.executeJavaScript("xlsx-pivot-aggregator-test");
+    expect(r.success).toBe(true);
+    expect(r.result.headers).toEqual([
+      "Sum of Revenue",
+      "Count of Revenue",
+      "Average of Revenue",
+      "Min of Revenue",
+      "Max of Revenue",
+    ]);
+    expect(r.result.north).toEqual(["North", 30, 2, 15, 10, 20]);
+    expect(r.result.south).toEqual(["South", 5, 1, 5, 5, 5]);
+    expect(r.result.total[0]).toBe("Grand Total");
+    expect(r.result.total[1]).toBe(35);
+    expect(r.result.total[2]).toBe(3);
+    expect(r.result.total[3]).toBeCloseTo(35 / 3);
+    expect(r.result.total[4]).toBe(5);
+    expect(r.result.total[5]).toBe(20);
   });
 });

@@ -8,7 +8,13 @@
   "importStyle": "named",
   "hints": {
     "overview": "Assembles arrays of {name, data} entries into valid ZIP files.",
-    "relatedModules": ["ha:ziplib", "ha:crc32", "ha:str-bytes", "ha:pptx"],
+    "relatedModules": [
+      "ha:ziplib",
+      "ha:crc32",
+      "ha:str-bytes",
+      "ha:pptx",
+      "ha:xlsx"
+    ],
     "requiredPlugins": ["fs-write"],
     "criticalRules": [
       "Returns Uint8Array — write with writeFileBinary, not writeFile"

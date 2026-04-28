@@ -22,10 +22,29 @@ antiPatterns:
   - Don't guess tool names — always call mcp_server_info() first
   - Don't hardcode MCP tool schemas — they change when servers update
 allowed-tools:
+  - register_handler
   - list_mcp_servers
   - mcp_server_info
   - manage_mcp
   - execute_javascript
+  - delete_handler
+  - get_handler_source
+  - edit_handler
+  - list_handlers
+  - reset_sandbox
+  - list_modules
+  - module_info
+  - list_plugins
+  - plugin_info
+  - manage_plugin
+  - apply_profile
+  - configure_sandbox
+  - sandbox_help
+  - register_module
+  - write_output
+  - read_input
+  - read_output
+  - ask_user
 ---
 
 ## MCP Server Workflow
@@ -73,6 +92,7 @@ export default async function handler(event) {
 ```
 
 Key rules:
+
 - Import from `host:mcp-<server-name>` (the name from list_mcp_servers)
 - Tool function names are EXACTLY as returned by mcp_server_info
 - All MCP tool calls are async — use `await`
@@ -86,6 +106,7 @@ Key rules:
 ### Server name patterns
 
 M365 servers use the `work-iq-` prefix:
+
 - `work-iq-mail` — Email (search, send, reply, drafts)
 - `work-iq-teams` — Teams (channels, chats, messages)
 - `work-iq-calendar` — Calendar (events, scheduling)

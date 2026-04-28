@@ -32,6 +32,30 @@ antiPatterns:
   - Don't ignore pagination — check for next/Link headers and follow them
   - Don't scrape SPA API documentation sites — fetch the OpenAPI spec directly or use raw API endpoints
   - Don't parse HTML documentation with regex — use ha:html parseHtml() if you must read docs pages
+allowed-tools:
+  - register_handler
+  - execute_javascript
+  - delete_handler
+  - get_handler_source
+  - edit_handler
+  - list_handlers
+  - reset_sandbox
+  - list_modules
+  - module_info
+  - list_plugins
+  - plugin_info
+  - manage_plugin
+  - list_mcp_servers
+  - mcp_server_info
+  - manage_mcp
+  - apply_profile
+  - configure_sandbox
+  - sandbox_help
+  - register_module
+  - write_output
+  - read_input
+  - read_output
+  - ask_user
 ---
 
 # API Explorer
@@ -123,24 +147,25 @@ Produce clear, structured output:
 
 For each endpoint discovered, document:
 
-| Method | Path | Description | Response Type | Paginated |
-|--------|------|-------------|---------------|-----------|
-| GET | /users | List users | Array of User | Yes (Link header) |
-| GET | /users/:id | Get user by ID | User object | No |
+| Method | Path       | Description    | Response Type | Paginated         |
+| ------ | ---------- | -------------- | ------------- | ----------------- |
+| GET    | /users     | List users     | Array of User | Yes (Link header) |
+| GET    | /users/:id | Get user by ID | User object   | No                |
 
 ### Response Schema Format
 
 For each unique response type, document field names and types:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| id | number | Unique identifier |
-| name | string | Display name |
+| Field      | Type              | Description        |
+| ---------- | ----------------- | ------------------ |
+| id         | number            | Unique identifier  |
+| name       | string            | Display name       |
 | created_at | string (ISO 8601) | Creation timestamp |
 
 ### Output
 
 Use `write_output` for the final documentation. Markdown is the default format. Include:
+
 - API base URL and version
 - Endpoint table with all discovered routes
 - Response schemas with field descriptions
