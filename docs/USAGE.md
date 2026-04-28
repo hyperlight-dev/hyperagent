@@ -26,7 +26,7 @@ Complete reference for HyperAgent configuration, features, and commands.
 | `--plugins-dir <path>`     | Custom plugins directory (default: `./plugins`)                |
 | `--list-models`            | List available models and exit                                 |
 | `--resume [id]`            | Resume a previous session (latest if no ID given)              |
-| `--skip-suggest`           | Disable command suggestions after LLM responses                |
+| `--skip-suggest`           | Skip mandatory suggest_approach/API-discovery enforcement      |
 | `--output-threshold <n>`   | Large output threshold in bytes (default: 20480)               |
 | `--debug`                  | Enable debug event/lifecycle logging                           |
 | `--version`                | Show version and exit                                          |
@@ -36,33 +36,33 @@ Complete reference for HyperAgent configuration, features, and commands.
 
 All configuration is also available via environment variables (overridden by CLI flags):
 
-| Variable                            | Default           | Description                                              |
-| ----------------------------------- | ----------------- | -------------------------------------------------------- |
-| `COPILOT_MODEL`                     | `claude-opus-4.6` | Model name for the Copilot SDK session                   |
-| `HYPERLIGHT_CPU_TIMEOUT_MS`         | `1000`            | Max CPU time per JS execution (ms)                       |
-| `HYPERLIGHT_WALL_TIMEOUT_MS`        | `5000`            | Max wall-clock time per execution (ms)                   |
-| `HYPERAGENT_SEND_TIMEOUT_MS`        | `300000`          | Agent inactivity timeout (ms)                            |
-| `HYPERLIGHT_HEAP_SIZE_MB`           | `16`              | Guest heap size (megabytes)                              |
-| `HYPERLIGHT_SCRATCH_SIZE_MB`        | `16`              | Guest scratch size, includes stack (megabytes)           |
-| `HYPERLIGHT_INPUT_BUFFER_KB`        | `64`              | Input buffer size (kilobytes)                            |
-| `HYPERLIGHT_OUTPUT_BUFFER_KB`       | `64`              | Output buffer size (kilobytes)                           |
-| `HYPERAGENT_PROFILE`                | _(none)_          | Profile name(s) to apply at startup                      |
-| `HYPERAGENT_AUTO_APPROVE`           | _(none)_          | Set to `1` for auto-approve mode                         |
-| `HYPERAGENT_PROMPT`                 | _(none)_          | Non-interactive prompt text                              |
-| `HYPERAGENT_PROMPT_FILE`            | _(none)_          | File containing the non-interactive prompt               |
-| `HYPERAGENT_SKILL`                  | _(none)_          | Skill name(s) to invoke                                  |
-| `HYPERAGENT_TUNE`                   | _(none)_          | Set to `1` to capture LLM decision logs                  |
-| `HYPERAGENT_SHOW_REASONING`         | _(none)_          | Reasoning effort level (low/medium/high/xhigh)           |
-| `HYPERAGENT_VERBOSE`                | _(none)_          | Set to `1` for verbose output mode                       |
-| `HYPERAGENT_LIST_MODELS`            | _(none)_          | Set to `1` to list models and exit                       |
-| `HYPERAGENT_RESUME_SESSION`         | _(none)_          | Session ID to resume, or `__last__` for latest           |
-| `HYPERAGENT_PLUGINS_DIR`            | _(none)_          | Custom plugins directory path                            |
-| `HYPERAGENT_SKIP_SUGGEST`           | _(none)_          | Set to `1` to disable command suggestions                |
-| `HYPERAGENT_OUTPUT_THRESHOLD_BYTES` | `20480`           | Large output threshold in bytes                          |
-| `HYPERAGENT_TIMING_LOG`             | _(none)_          | Path to timing log file (default: `~/.hyperagent/logs/`) |
-| `HYPERAGENT_CODE_LOG`               | _(none)_          | Path to code log file (default: `~/.hyperagent/logs/`)   |
-| `HYPERAGENT_TRANSCRIPT`             | _(none)_          | Set to `1` to record session transcript                  |
-| `HYPERAGENT_DEBUG`                  | _(none)_          | Set to `1` for debug logging to `~/.hyperagent/logs/`    |
+| Variable                            | Default           | Description                                                      |
+| ----------------------------------- | ----------------- | ---------------------------------------------------------------- |
+| `COPILOT_MODEL`                     | `claude-opus-4.6` | Model name for the Copilot SDK session                           |
+| `HYPERLIGHT_CPU_TIMEOUT_MS`         | `1000`            | Max CPU time per JS execution (ms)                               |
+| `HYPERLIGHT_WALL_TIMEOUT_MS`        | `5000`            | Max wall-clock time per execution (ms)                           |
+| `HYPERAGENT_SEND_TIMEOUT_MS`        | `300000`          | Agent inactivity timeout (ms)                                    |
+| `HYPERLIGHT_HEAP_SIZE_MB`           | `16`              | Guest heap size (megabytes)                                      |
+| `HYPERLIGHT_SCRATCH_SIZE_MB`        | `16`              | Guest scratch size, includes stack (megabytes)                   |
+| `HYPERLIGHT_INPUT_BUFFER_KB`        | `1040`            | Input buffer size (kilobytes)                                    |
+| `HYPERLIGHT_OUTPUT_BUFFER_KB`       | `1040`            | Output buffer size (kilobytes)                                   |
+| `HYPERAGENT_PROFILE`                | _(none)_          | Profile name(s) to apply at startup                              |
+| `HYPERAGENT_AUTO_APPROVE`           | _(none)_          | Set to `1` for auto-approve mode                                 |
+| `HYPERAGENT_PROMPT`                 | _(none)_          | Non-interactive prompt text                                      |
+| `HYPERAGENT_PROMPT_FILE`            | _(none)_          | File containing the non-interactive prompt                       |
+| `HYPERAGENT_SKILL`                  | _(none)_          | Skill name(s) to invoke                                          |
+| `HYPERAGENT_TUNE`                   | _(none)_          | Set to `1` to capture LLM decision logs                          |
+| `HYPERAGENT_SHOW_REASONING`         | _(none)_          | Reasoning effort level (low/medium/high/xhigh)                   |
+| `HYPERAGENT_VERBOSE`                | _(none)_          | Set to `1` for verbose output mode                               |
+| `HYPERAGENT_LIST_MODELS`            | _(none)_          | Set to `1` to list models and exit                               |
+| `HYPERAGENT_RESUME_SESSION`         | _(none)_          | Session ID to resume, or `__last__` for latest                   |
+| `HYPERAGENT_PLUGINS_DIR`            | _(none)_          | Custom plugins directory path                                    |
+| `HYPERAGENT_SKIP_SUGGEST`           | _(none)_          | Set to `1` to disable suggest_approach/API-discovery enforcement |
+| `HYPERAGENT_OUTPUT_THRESHOLD_BYTES` | `20480`           | Large output threshold in bytes                                  |
+| `HYPERAGENT_TIMING_LOG`             | _(none)_          | Path to timing log file (default: `~/.hyperagent/logs/`)         |
+| `HYPERAGENT_CODE_LOG`               | _(none)_          | Path to code log file (default: `~/.hyperagent/logs/`)           |
+| `HYPERAGENT_TRANSCRIPT`             | _(none)_          | Set to `1` to record session transcript                          |
+| `HYPERAGENT_DEBUG`                  | _(none)_          | Set to `1` for debug logging to `~/.hyperagent/logs/`            |
 
 Example:
 
@@ -116,17 +116,27 @@ The agent registers custom tools that the LLM can call. All SDK built-in tools
 | `register_handler`   | Register named JavaScript handler code in the sandbox                |
 | `execute_javascript` | Execute a registered handler with optional event data                |
 | `delete_handler`     | Remove a handler from the sandbox                                    |
+| `get_handler_source` | Retrieve handler source for inspection or editing                    |
+| `edit_handler`       | Surgically edit an existing handler                                  |
+| `list_handlers`      | List registered handlers with line counts                            |
 | `reset_sandbox`      | Clear sandbox state, keep handlers registered                        |
 | `configure_sandbox`  | Change resource limits at runtime (heap, scratch, timeouts, buffers) |
 | `register_module`    | Create a reusable ES module (persisted to `~/.hyperagent/modules/`)  |
 | `list_modules`       | List available modules (system + user)                               |
 | `module_info`        | Get module exports, JSDoc, and metadata                              |
 | `delete_module`      | Delete a user-created module                                         |
+| `write_output`       | Write text content through the `fs-write` plugin                     |
+| `read_input`         | Read text content through the `fs-read` plugin                       |
+| `read_output`        | Read content previously written as output                            |
 | `manage_plugin`      | Enable/disable plugins with configuration                            |
 | `list_plugins`       | Discover available plugins                                           |
 | `plugin_info`        | Detailed plugin information and config schema                        |
 | `apply_profile`      | Apply named resource profiles (limits + plugins in one step)         |
+| `list_mcp_servers`   | List configured MCP servers and connection status                    |
+| `mcp_server_info`    | Inspect MCP server tools and generated declarations                  |
+| `manage_mcp`         | Connect or disconnect MCP servers                                    |
 | `sandbox_help`       | On-demand guidance: patterns, state, binary I/O, fetch, debugging    |
+| `report_intent`      | Protocol tool used by the model to signal intent                     |
 | `ask_user`           | Ask the user structured questions (free-form or multiple choice)     |
 | `llm_thought`        | _(tune mode only)_ Log structured reasoning for prompt engineering   |
 

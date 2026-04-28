@@ -28,9 +28,8 @@ hyperagent --profile file-builder --skill pptx-expert
 
 ```
 You: /profile apply file-builder
-  Applied profile: file-builder
-  Heap: 128MB, CPU: 15000ms, Wall: 60s
-  Plugins: fs-write
+  ✅ Limits applied: heap: 128MB, cpu: 15000ms, wall: 60s
+  📋 Profile applied: file-builder
 ```
 
 ### Via Tool
