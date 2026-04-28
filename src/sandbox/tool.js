@@ -125,7 +125,7 @@ export function parsePositiveInt(raw, defaultVal) {
  * @property {(name: string, startLine: number, endLine: number, replacement: string) => Promise<{success: boolean, message?: string, error?: string, handlers?: string[], codeSize?: number, contextAfter?: string}>} editHandlerLines
  * @property {(name: string, event?: object) => Promise<ExecutionResult>}       execute
  * @property {() => string[]}                                                   getHandlers
- * @property {(name: string) => string | null}                                  getHandlerSource
+ * @property {(name: string, options?: {lineNumbers?: boolean, startLine?: number, endLine?: number}) => {success: boolean, code?: string, error?: string, totalLines?: number, startLine?: number, endLine?: number}} getHandlerSource
  * @property {() => string[]}                                                   getAvailableModules
  */
 
@@ -1436,6 +1436,30 @@ export function createSandboxTool(options = {}) {
       const newCode = newLines.join("\n");
       const newHash = sha256(newCode);
 
+      const contextStart = Math.max(0, startLine - 3);
+      const contextEnd = Math.min(newLines.length, startLine + 3);
+      const contextLines = newLines.slice(contextStart, contextEnd);
+      const width = String(contextEnd).length;
+      const contextAfter = contextLines
+        .map((line, lineIndex) => {
+          const lineNumber = String(contextStart + lineIndex + 1).padStart(
+            width,
+            " ",
+          );
+          return `${lineNumber} | ${line}`;
+        })
+        .join("\n");
+
+      if (newHash === entry.hash) {
+        return {
+          success: true,
+          message: `Handler "${name}" unchanged (same code)`,
+          handlers: publicHandlerNames(),
+          codeSize: entry.code.length,
+          contextAfter,
+        };
+      }
+
       const existing = findDuplicateCode(newHash, name);
       if (existing) {
         return {
@@ -1469,20 +1493,6 @@ export function createSandboxTool(options = {}) {
           );
         }
       }
-
-      const contextStart = Math.max(0, startLine - 3);
-      const contextEnd = Math.min(newLines.length, startLine + 3);
-      const contextLines = newLines.slice(contextStart, contextEnd);
-      const width = String(contextEnd).length;
-      const contextAfter = contextLines
-        .map((line, lineIndex) => {
-          const lineNumber = String(contextStart + lineIndex + 1).padStart(
-            width,
-            " ",
-          );
-          return `${lineNumber} | ${line}`;
-        })
-        .join("\n");
 
       return {
         success: true,

@@ -53,7 +53,7 @@ These are the kinds of jobs HyperAgent is designed to handle.
 
 ```bash
 hyperagent --skill pptx-expert --profile web-research \
-  --prompt "Create a presentation on the NASA Artemis II mission include lots of statistics and data, use an appropriate theme and color scheme for the subject, you aim is to inspire the audience to find out more and get involved, make sure you go to the Internet to get the very latest mission information from https://www.nasa.gov/mission/artemis-ii and images/multimedia from https://www.nasa.gov/artemis-ii-multimedia/ , ensure you include photos taken by the crew during the mission, make it stunning"
+  --prompt "Create a presentation on the NASA Artemis II mission include lots of statistics and data, use an appropriate theme and color scheme for the subject, your aim is to inspire the audience to find out more and get involved, make sure you go to the Internet to get the very latest mission information from https://www.nasa.gov/mission/artemis-ii and images/multimedia from https://www.nasa.gov/artemis-ii-multimedia/, ensure you include photos taken by the crew during the mission, make it stunning"
 ```
 
 The agent can use `ha:pptx`, `ha:pptx-charts`, and `ha:pptx-tables` to create editable PowerPoint files instead of screenshots glued into slides.

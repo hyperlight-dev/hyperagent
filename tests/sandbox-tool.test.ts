@@ -522,6 +522,34 @@ describe("editHandler", () => {
     expect(r.success).toBe(false);
     expect(r.error).toContain("outside handler");
   });
+
+  it("should not invalidate loaded sandbox for no-op line edits", async () => {
+    const code = [
+      "let count = 0;",
+      "function handler() {",
+      "  count++;",
+      "  return { count };",
+      "}",
+    ].join("\n");
+    await tool.registerHandler("edit-lines-noop", code);
+
+    const first = await tool.executeJavaScript("edit-lines-noop");
+    expect(first.result).toEqual({ count: 1 });
+
+    const edit = await tool.editHandlerLines(
+      "edit-lines-noop",
+      3,
+      3,
+      "  count++;",
+    );
+    expect(edit.success).toBe(true);
+    expect(edit.message).toContain("unchanged");
+
+    const second = await tool.executeJavaScript("edit-lines-noop");
+    expect(second.result).toEqual({ count: 2 });
+    expect(second.timing!.compileMs).toBe(0);
+    expect(second.statePreserved).toBe(true);
+  });
 });
 
 // ── Execution (Named Handlers) ───────────────────────────────────────
