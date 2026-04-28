@@ -1105,6 +1105,19 @@ describe("approval management", () => {
     manager.discover();
     expect(manager.getApprovalRecord("test-plugin")).toBeUndefined();
   });
+
+  it("should verify auto-approved plugin source after loading source", () => {
+    const manager = createPluginManager(FIXTURES_DIR);
+    manager.discover();
+
+    manager.setAuditResult("test-plugin", makeAudit("synthetic"));
+    expect(manager.approve("test-plugin")).toBe(true);
+    manager.enable("test-plugin");
+
+    expect(manager.verifySourceHash("test-plugin")).toBe(false);
+    expect(manager.loadSource("test-plugin")).toBeTruthy();
+    expect(manager.verifySourceHash("test-plugin")).toBe(true);
+  });
 });
 
 // ── applyInlineConfig ──────────────────────────────────────────────

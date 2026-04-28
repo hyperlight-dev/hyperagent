@@ -122,9 +122,10 @@ export function parsePositiveInt(raw, defaultVal) {
  * @property {() => {heapMb: number, scratchMb: number}}                        getEffectiveMemorySizes
  * @property {(name: string, code: string, options?: {isModule?: boolean}) => Promise<{success: boolean, message?: string, error?: string, handlers?: string[], codeSize?: number, mode?: string}>} registerHandler
  * @property {(name: string) => Promise<{success: boolean, message?: string, error?: string, handlers?: string[]}>} deleteHandler
+ * @property {(name: string, startLine: number, endLine: number, replacement: string) => Promise<{success: boolean, message?: string, error?: string, handlers?: string[], codeSize?: number, contextAfter?: string}>} editHandlerLines
  * @property {(name: string, event?: object) => Promise<ExecutionResult>}       execute
  * @property {() => string[]}                                                   getHandlers
- * @property {(name: string) => string | null}                                  getHandlerSource
+ * @property {(name: string, options?: {lineNumbers?: boolean, startLine?: number, endLine?: number}) => {success: boolean, code?: string, error?: string, totalLines?: number, startLine?: number, endLine?: number}} getHandlerSource
  * @property {() => string[]}                                                   getAvailableModules
  */
 
@@ -1356,6 +1357,155 @@ export function createSandboxTool(options = {}) {
     }
   }
 
+  /**
+   * Edit a handler by replacing a 1-based inclusive line range.
+   * This is friendlier for LLM repair loops because getHandlerSource()
+   * already returns stable line numbers.
+   *
+   * @param {string} name — Handler name
+   * @param {number} startLine — 1-based start line (inclusive)
+   * @param {number} endLine — 1-based end line (inclusive)
+   * @param {string} replacement — Replacement code for the line range
+   * @returns {Promise<{success: boolean, message?: string, error?: string, handlers?: string[], codeSize?: number, contextAfter?: string}>}
+   */
+  async function editHandlerLines(name, startLine, endLine, replacement) {
+    const release = await acquireLock();
+    try {
+      if (!name || typeof name !== "string") {
+        return {
+          success: false,
+          error: "Handler name must be a non-empty string",
+          handlers: publicHandlerNames(),
+        };
+      }
+      if (name.startsWith("_")) {
+        return {
+          success: false,
+          error: `Internal handler "${name}" cannot be edited`,
+          handlers: publicHandlerNames(),
+        };
+      }
+      if (!Number.isInteger(startLine) || startLine < 1) {
+        return {
+          success: false,
+          error: "startLine must be a positive integer",
+          handlers: publicHandlerNames(),
+        };
+      }
+      if (!Number.isInteger(endLine) || endLine < startLine) {
+        return {
+          success: false,
+          error:
+            "endLine must be a positive integer greater than or equal to startLine",
+          handlers: publicHandlerNames(),
+        };
+      }
+      if (typeof replacement !== "string") {
+        return {
+          success: false,
+          error: "replacement must be a string",
+          handlers: publicHandlerNames(),
+        };
+      }
+
+      const entry = handlerCache.get(name);
+      if (!entry) {
+        return {
+          success: false,
+          error: `Handler "${name}" not found`,
+          handlers: publicHandlerNames(),
+        };
+      }
+
+      const lines = entry.code.split("\n");
+      if (startLine > lines.length || endLine > lines.length) {
+        return {
+          success: false,
+          error: `Line range ${startLine}-${endLine} is outside handler "${name}" (${lines.length} lines)`,
+          handlers: publicHandlerNames(),
+        };
+      }
+
+      const replacementLines =
+        replacement === "" ? [] : replacement.split("\n");
+      const newLines = [
+        ...lines.slice(0, startLine - 1),
+        ...replacementLines,
+        ...lines.slice(endLine),
+      ];
+      const newCode = newLines.join("\n");
+      const newHash = sha256(newCode);
+
+      const contextStart = Math.max(0, startLine - 3);
+      const contextEnd = Math.min(newLines.length, startLine + 3);
+      const contextLines = newLines.slice(contextStart, contextEnd);
+      const width = String(contextEnd).length;
+      const contextAfter = contextLines
+        .map((line, lineIndex) => {
+          const lineNumber = String(contextStart + lineIndex + 1).padStart(
+            width,
+            " ",
+          );
+          return `${lineNumber} | ${line}`;
+        })
+        .join("\n");
+
+      if (newHash === entry.hash) {
+        return {
+          success: true,
+          message: `Handler "${name}" unchanged (same code)`,
+          handlers: publicHandlerNames(),
+          codeSize: entry.code.length,
+          contextAfter,
+        };
+      }
+
+      const existing = findDuplicateCode(newHash, name);
+      if (existing) {
+        return {
+          success: false,
+          error: `This edit would create duplicate code — same as handler "${existing}".`,
+          handlers: publicHandlerNames(),
+        };
+      }
+
+      handlerCache.set(name, { code: newCode, hash: newHash });
+
+      if (loadedSandbox !== null) {
+        if (verbose) {
+          console.error(
+            `[sandbox] editHandlerLines("${name}"): loadedSandbox exists, calling autoSaveState before invalidating...`,
+          );
+        }
+        await autoSaveState();
+        try {
+          jsSandbox = await loadedSandbox.unload();
+          loadedSandbox = null;
+        } catch {
+          invalidateSandbox();
+        }
+        compiledHandlersHash = null;
+        currentSnapshot = null;
+        if (verbose) {
+          const stashSize = savedSharedState ? savedSharedState.size : 0;
+          console.error(
+            `[sandbox] editHandlerLines("${name}"): sandbox invalidated, stash preserved with ${stashSize} keys`,
+          );
+        }
+      }
+
+      return {
+        success: true,
+        message: `Handler "${name}" edited (recompile pending — shared-state auto-preserved)`,
+        handlers: publicHandlerNames(),
+        codeSize: newCode.length,
+        contextAfter,
+      };
+    } finally {
+      release();
+    }
+  }
+
   // ── User Module Management ───────────────────────────────────
   //
   // Modules are ES modules that handlers (and other modules) can
@@ -2199,6 +2349,7 @@ export function createSandboxTool(options = {}) {
     deleteHandler,
     getHandlerSource,
     editHandler,
+    editHandlerLines,
     registerModule,
     deleteModule: deleteModule,
     setModules,

@@ -1662,11 +1662,12 @@ const editHandlerTool = defineTool("edit_handler", {
   description: [
     "Make a surgical edit to an existing handler without re-sending all the code.",
     "",
-    "Finds oldString exactly once in the handler and replaces it with newString.",
-    "Much faster and safer than re-registering the entire handler for small fixes.",
+    "Either replace oldString exactly once, or replace a line range from get_handler_source.",
+    "Much faster and safer than regenerating the entire handler for small fixes.",
     "",
-    "⚠️ oldString must match EXACTLY ONCE. If it matches 0 or 2+ times, the edit",
-    "fails. Add more surrounding context to make the match unique.",
+    "String mode: provide oldString and newString. oldString must match EXACTLY ONCE.",
+    "Line mode: provide startLine, optional endLine, and replacement. Use the line",
+    "numbers returned by get_handler_source, but do not include the 'N |' prefixes.",
     "",
     "Returns the edited region with surrounding context for verification.",
   ].join("\n"),
@@ -1679,62 +1680,157 @@ const editHandlerTool = defineTool("edit_handler", {
       },
       oldString: {
         type: "string",
-        description:
-          "Exact string to find and replace. Must occur exactly once.",
+        description: "String mode: exact string to find and replace once.",
       },
       newString: {
         type: "string",
-        description: "Replacement string.",
+        description: "String mode: replacement string.",
+      },
+      startLine: {
+        type: "number",
+        description:
+          "Line mode: 1-based start line to replace, from get_handler_source.",
+      },
+      endLine: {
+        type: "number",
+        description:
+          "Line mode: optional 1-based end line to replace. Defaults to startLine.",
+      },
+      replacement: {
+        type: "string",
+        description: "Line mode: replacement code for the selected line range.",
       },
     },
-    required: ["name", "oldString", "newString"],
+    required: ["name"],
   },
   handler: async ({
     name,
     oldString,
     newString,
+    startLine,
+    endLine,
+    replacement,
   }: {
     name: string;
-    oldString: string;
-    newString: string;
+    oldString?: string;
+    newString?: string;
+    startLine?: number;
+    endLine?: number;
+    replacement?: string;
   }) => {
     // ── Preview the edit and validate before applying ─────────────
     // Get current source to build the edited version
     const sourceResult = sandbox.getHandlerSource(name, {
       lineNumbers: false,
-    }) as { success: true; source: string } | { success: false; error: string };
+    });
 
     if (!sourceResult.success) {
       console.error(`  ${C.err("❌ " + sourceResult.error)}`);
       return { success: false, error: sourceResult.error };
     }
 
-    const currentSource = sourceResult.source;
+    const currentSource = sourceResult.code ?? "";
 
-    // Check exact-once match
-    const firstIdx = currentSource.indexOf(oldString);
-    if (firstIdx === -1) {
+    const hasStringEdit = oldString !== undefined || newString !== undefined;
+    const hasLineEdit =
+      startLine !== undefined ||
+      endLine !== undefined ||
+      replacement !== undefined;
+
+    if (hasStringEdit && hasLineEdit) {
       const error =
-        "oldString not found in handler. Use get_handler_source to see current code, then copy the EXACT text to replace.";
-      console.error(`  ${C.err("❌ " + error)}`);
-      return { success: false, error };
-    }
-    const secondIdx = currentSource.indexOf(
-      oldString,
-      firstIdx + oldString.length,
-    );
-    if (secondIdx !== -1) {
-      const error =
-        "oldString matches multiple times. Add more surrounding context to make it unique.";
+        "Use either string mode (oldString + newString) or line mode (startLine/endLine + replacement), not both.";
       console.error(`  ${C.err("❌ " + error)}`);
       return { success: false, error };
     }
 
-    // Build the edited code
-    const editedCode =
-      currentSource.slice(0, firstIdx) +
-      newString +
-      currentSource.slice(firstIdx + oldString.length);
+    let editedCode: string;
+    let applyEdit: () => Promise<{
+      success: boolean;
+      message?: string;
+      error?: string;
+      handlers?: string[];
+      codeSize?: number;
+      contextAfter?: string;
+    }>;
+
+    if (hasLineEdit) {
+      if (typeof replacement !== "string") {
+        const error = "Line mode requires replacement.";
+        console.error(`  ${C.err("❌ " + error)}`);
+        return { success: false, error };
+      }
+      if (
+        typeof startLine !== "number" ||
+        !Number.isInteger(startLine) ||
+        startLine < 1
+      ) {
+        const error = "Line mode requires startLine as a positive integer.";
+        console.error(`  ${C.err("❌ " + error)}`);
+        return { success: false, error };
+      }
+
+      const lines = currentSource.split("\n");
+      const rangeEnd = endLine ?? startLine;
+      if (
+        typeof rangeEnd !== "number" ||
+        !Number.isInteger(rangeEnd) ||
+        rangeEnd < startLine
+      ) {
+        const error =
+          "endLine must be a positive integer greater than or equal to startLine.";
+        console.error(`  ${C.err("❌ " + error)}`);
+        return { success: false, error };
+      }
+      if (startLine > lines.length || rangeEnd > lines.length) {
+        const error = `Line range ${startLine}-${rangeEnd} is outside handler "${name}" (${lines.length} lines).`;
+        console.error(`  ${C.err("❌ " + error)}`);
+        return { success: false, error };
+      }
+
+      const replacementLines =
+        replacement === "" ? [] : replacement.split("\n");
+      const editedLines = [
+        ...lines.slice(0, startLine - 1),
+        ...replacementLines,
+        ...lines.slice(rangeEnd),
+      ];
+      editedCode = editedLines.join("\n");
+      applyEdit = async () =>
+        sandbox.editHandlerLines(name, startLine, rangeEnd, replacement);
+    } else {
+      if (typeof oldString !== "string" || typeof newString !== "string") {
+        const error = "String mode requires oldString and newString.";
+        console.error(`  ${C.err("❌ " + error)}`);
+        return { success: false, error };
+      }
+
+      // Check exact-once match
+      const firstIdx = currentSource.indexOf(oldString);
+      if (firstIdx === -1) {
+        const error =
+          "oldString not found in handler. Use get_handler_source to see current code, then copy the EXACT text to replace, or use startLine/replacement line mode.";
+        console.error(`  ${C.err("❌ " + error)}`);
+        return { success: false, error };
+      }
+      const secondIdx = currentSource.indexOf(
+        oldString,
+        firstIdx + oldString.length,
+      );
+      if (secondIdx !== -1) {
+        const error =
+          "oldString matches multiple times. Add more surrounding context to make it unique, or use startLine/replacement line mode.";
+        console.error(`  ${C.err("❌ " + error)}`);
+        return { success: false, error };
+      }
+
+      // Build the edited code
+      editedCode =
+        currentSource.slice(0, firstIdx) +
+        newString +
+        currentSource.slice(firstIdx + oldString.length);
+      applyEdit = async () => sandbox.editHandler(name, oldString, newString);
+    }
 
     // Validate the edited code through the same pipeline as register_handler
     try {
@@ -1762,7 +1858,7 @@ const editHandlerTool = defineTool("edit_handler", {
     }
 
     // Validation passed — apply the edit
-    const result = await sandbox.editHandler(name, oldString, newString);
+    const result = await applyEdit();
     if (result.success) {
       console.error(
         `  ${C.ok("✅")} Edited handler "${name}" (${result.codeSize} bytes)`,
@@ -5353,9 +5449,10 @@ async function main(): Promise<void> {
   if (mcpManager) {
     const mcpPlugin = pluginManager.getPlugin("mcp");
     if (mcpPlugin && mcpPlugin.state !== "enabled") {
+      const mcpSource = pluginManager.loadSource("mcp");
       // Compute current content hash so the audit matches the source
       const mcpHash = computePluginHash(mcpPlugin.dir);
-      if (mcpHash) {
+      if (mcpSource && mcpHash) {
         pluginManager.setAuditResult("mcp", {
           contentHash: mcpHash,
           auditedAt: new Date().toISOString(),

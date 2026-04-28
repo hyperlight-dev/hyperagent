@@ -485,6 +485,71 @@ describe("editHandler", () => {
     expect(r.contextAfter).toBeDefined();
     expect(r.contextAfter).toContain("22");
   });
+
+  it("should edit a handler by line range", async () => {
+    const code = [
+      "function handler(event) {",
+      "  const title = 'old';",
+      "  const height = 0.4;",
+      "  return { title, height };",
+      "}",
+    ].join("\n");
+    await tool.registerHandler("edit-lines", code);
+
+    const r = await tool.editHandlerLines(
+      "edit-lines",
+      3,
+      3,
+      "  const height = 0.6;",
+    );
+
+    expect(r.success).toBe(true);
+    expect(r.contextAfter).toContain("0.6");
+
+    const source = tool.getHandlerSource("edit-lines", { lineNumbers: false });
+    expect(source.code).toContain("const height = 0.6;");
+    expect(source.code).not.toContain("const height = 0.4;");
+  });
+
+  it("should reject line edits outside the handler", async () => {
+    await tool.registerHandler("edit-lines-range", "return 'range';");
+    const r = await tool.editHandlerLines(
+      "edit-lines-range",
+      20,
+      20,
+      "return 2;",
+    );
+    expect(r.success).toBe(false);
+    expect(r.error).toContain("outside handler");
+  });
+
+  it("should not invalidate loaded sandbox for no-op line edits", async () => {
+    const code = [
+      "let count = 0;",
+      "function handler() {",
+      "  count++;",
+      "  return { count };",
+      "}",
+    ].join("\n");
+    await tool.registerHandler("edit-lines-noop", code);
+
+    const first = await tool.executeJavaScript("edit-lines-noop");
+    expect(first.result).toEqual({ count: 1 });
+
+    const edit = await tool.editHandlerLines(
+      "edit-lines-noop",
+      3,
+      3,
+      "  count++;",
+    );
+    expect(edit.success).toBe(true);
+    expect(edit.message).toContain("unchanged");
+
+    const second = await tool.executeJavaScript("edit-lines-noop");
+    expect(second.result).toEqual({ count: 2 });
+    expect(second.timing!.compileMs).toBe(0);
+    expect(second.statePreserved).toBe(true);
+  });
 });
 
 // ── Execution (Named Handlers) ───────────────────────────────────────
