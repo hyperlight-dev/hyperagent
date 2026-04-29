@@ -38,6 +38,39 @@ describe("extractSuggestedCommands", () => {
     expect(extractSuggestedCommands(text)).toEqual(["/set heap 16"]);
   });
 
+  // ── Markdown-emphasised commands ────────────────────────────
+
+  it("should extract a bold /mcp enable command", () => {
+    const text = [
+      "The Microsoft Teams MCP server requires authentication.",
+      "",
+      "**/mcp enable work-iq-teams**",
+      "",
+      "This will prompt you to authenticate in your browser.",
+    ].join("\n");
+
+    expect(extractSuggestedCommands(text)).toEqual([
+      "/mcp enable work-iq-teams",
+    ]);
+  });
+
+  it("should extract an inline bold /mcp enable command", () => {
+    const text = "Please run **/mcp enable work-iq-teams** to authenticate.";
+
+    expect(extractSuggestedCommands(text)).toEqual([
+      "/mcp enable work-iq-teams",
+    ]);
+  });
+
+  it("should preserve wildcard arguments in bold commands", () => {
+    const text =
+      "Run **/plugin enable fetch allowedDomains=[*.bbc.co.uk,feeds.bbci.co.uk]**";
+
+    expect(extractSuggestedCommands(text)).toEqual([
+      "/plugin enable fetch allowedDomains=[*.bbc.co.uk,feeds.bbci.co.uk]",
+    ]);
+  });
+
   // ── Bare commands on their own line ──────────────────────────
 
   it("should extract a bare /plugin enable on its own line", () => {
