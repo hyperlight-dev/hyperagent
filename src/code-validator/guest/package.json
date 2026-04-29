@@ -18,7 +18,7 @@
     ]
   },
   "scripts": {
-    "build": "napi build --platform --release --manifest-path host/Cargo.toml && node -e \"require('fs').readdirSync('host').filter(f=>f.endsWith('.node')).forEach(f=>require('fs').copyFileSync('host/'+f,f))\"",
+    "build": "napi build --platform --release --strip --manifest-path host/Cargo.toml && node -e \"require('fs').readdirSync('host').filter(f=>f.endsWith('.node')).forEach(f=>require('fs').copyFileSync('host/'+f,f))\"",
     "build:debug": "napi build --platform --manifest-path host/Cargo.toml && node -e \"require('fs').readdirSync('host').filter(f=>f.endsWith('.node')).forEach(f=>require('fs').copyFileSync('host/'+f,f))\"",
     "test": "vitest run",
     "test:watch": "vitest",

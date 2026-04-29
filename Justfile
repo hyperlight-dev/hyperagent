@@ -101,6 +101,9 @@ build-hyperlight target="debug": (build-runtime-release)
     cd "${hl_dir}/src/hyperlight-js" && cargo clean -p hyperlight-js 2>/dev/null || true
     # Build the NAPI addon (inherits HYPERLIGHT_JS_RUNTIME_PATH from env)
     cd "${hl_dir}" && just build {{ if target == "debug" { "" } else { target } }}
+    if [ "{{target}}" = "release" ]; then
+      cd "${hl_dir}/src/js-host-api" && npx napi build --platform --release --strip
+    fi
     # Symlink for npm file: dependency resolution
     mkdir -p "{{justfile_dir()}}/deps"
     ln -sfn "${hl_dir}/src/js-host-api" "{{hyperlight-link}}"
@@ -111,7 +114,7 @@ build-hyperlight target="debug": (build-runtime-release)
 [private]
 [windows]
 build-hyperlight target="debug": (build-runtime-release)
-    $hl_dir = just resolve-hyperlight-dir; Push-Location (Join-Path $hl_dir "src" "hyperlight-js"); cargo clean -p hyperlight-js 2>$null; Pop-Location; Push-Location $hl_dir; just build {{ if target == "debug" { "" } else { target } }}; Pop-Location; $linkPath = [IO.Path]::GetFullPath("{{hyperlight-link}}"); $targetPath = Join-Path $hl_dir "src" "js-host-api"; New-Item -ItemType Directory -Path (Split-Path $linkPath) -Force | Out-Null; if (Test-Path $linkPath) { cmd /c rmdir /q $linkPath 2>$null }; cmd /c mklink /J $linkPath $targetPath; Write-Output "🔗 deps/js-host-api → $targetPath"
+  $hl_dir = just resolve-hyperlight-dir; Push-Location (Join-Path $hl_dir "src" "hyperlight-js"); cargo clean -p hyperlight-js 2>$null; Pop-Location; Push-Location $hl_dir; just build {{ if target == "debug" { "" } else { target } }}; Pop-Location; if ("{{target}}" -eq "release") { Push-Location (Join-Path $hl_dir "src" "js-host-api"); npx napi build --platform --release --strip; Pop-Location }; $linkPath = [IO.Path]::GetFullPath("{{hyperlight-link}}"); $targetPath = Join-Path $hl_dir "src" "js-host-api"; New-Item -ItemType Directory -Path (Split-Path $linkPath) -Force | Out-Null; if (Test-Path $linkPath) { cmd /c rmdir /q $linkPath 2>$null }; cmd /c mklink /J $linkPath $targetPath; Write-Output "🔗 deps/js-host-api → $targetPath"
 
 # Build the hyperlight-analysis-guest NAPI addon (debug)
 [private]

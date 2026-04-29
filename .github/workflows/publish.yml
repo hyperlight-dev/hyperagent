@@ -65,7 +65,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup
+      - name: Setup debug build for tests
         run: just setup
 
       - name: Install musl tools and rebuild for musl target
@@ -74,15 +74,21 @@ jobs:
           sudo apt-get update && sudo apt-get install -y musl-tools
           rustup target add x86_64-unknown-linux-musl
 
-          # Rebuild hyperlight-js NAPI addon targeting musl
+          # Rebuild hyperlight-js NAPI addon targeting musl in release mode.
           hl_dir=$(just resolve-hyperlight-dir)
           cd "${hl_dir}/src/js-host-api"
-          npx napi build --platform --target x86_64-unknown-linux-musl
+          npx napi build --platform --release --strip --target x86_64-unknown-linux-musl
 
-          # Rebuild hyperlight-analysis NAPI addon targeting musl
+          # Rebuild hyperlight-analysis NAPI addon targeting musl in release mode.
           cd "$GITHUB_WORKSPACE/src/code-validator/guest"
-          npx napi build --platform --target x86_64-unknown-linux-musl --manifest-path host/Cargo.toml
+          npx napi build --platform --release --strip --target x86_64-unknown-linux-musl --manifest-path host/Cargo.toml
           node -e "require('fs').readdirSync('host').filter(f=>f.endsWith('.node')).forEach(f=>require('fs').copyFileSync('host/'+f,f))"
+
+          # This matrix leg must upload only musl artifacts; the setup step also
+          # creates host-platform glibc addons, which are supplied by linux-kvm.
+          rm -f "${hl_dir}/src/js-host-api/"*.linux-x64-gnu.node
+          rm -f "$GITHUB_WORKSPACE/src/code-validator/guest/host/"*.linux-x64-gnu.node
+          rm -f "$GITHUB_WORKSPACE/src/code-validator/guest/"*.linux-x64-gnu.node
 
           # Verify musl .node files were actually produced
           ls -la "${hl_dir}/src/js-host-api/"*.linux-x64-musl.node
@@ -97,6 +103,10 @@ jobs:
       - name: Run tests
         if: matrix.run_tests
         run: just test
+
+      - name: Rebuild native addons for release packaging
+        if: matrix.run_tests
+        run: just build-release
 
       # Upload the native .node addons so the publish job can combine them
       - name: Upload native addons
@@ -158,6 +168,18 @@ jobs:
 
       - name: Pack npm tarball
         run: npm pack
+
+      - name: Check npm package size
+        run: |
+          TARBALL=$(ls *.tgz)
+          UNPACKED=$(npm pack --dry-run --json | node -e 'let data="";process.stdin.on("data",c=>data+=c);process.stdin.on("end",()=>console.log(JSON.parse(data)[0].unpackedSize))')
+          MAX=$((300 * 1024 * 1024))
+          echo "Packed tarball: $TARBALL"
+          echo "Unpacked size: $UNPACKED bytes (limit: $MAX)"
+          if [ "$UNPACKED" -gt "$MAX" ]; then
+            echo "❌ npm package is too large"
+            exit 1
+          fi
 
       - name: Upload npm tarball
         uses: actions/upload-artifact@v7
@@ -260,32 +282,33 @@ jobs:
         env:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          # Poll registry.npmjs.org for up to 5 minutes for the version to
-          # become resolvable. Cloudflare/CouchDB replication is usually fast
-          # but can lag for minutes after a fresh publish.
+          # Poll registry.npmjs.org for up to 5 minutes for the version metadata
+          # AND tarball blob to become fetchable. npm can expose dist metadata
+          # before the tarball URL has propagated through the CDN, so metadata
+          # visibility alone is not enough for installability.
           for i in $(seq 1 30); do
             ACTUAL=$(npm view "@hyperlight-dev/hyperagent@$VERSION" version 2>/dev/null || true)
             if [ "$ACTUAL" = "$VERSION" ]; then
-              echo "✅ visible after $((i * 10))s"
-              exit 0
+              TARBALL=$(npm view "@hyperlight-dev/hyperagent@$VERSION" dist.tarball 2>/dev/null || true)
+              EXPECTED=$(npm view "@hyperlight-dev/hyperagent@$VERSION" dist.shasum 2>/dev/null || true)
+              TMP=$(mktemp)
+              if [ -n "$TARBALL" ] && [ -n "$EXPECTED" ] && curl -fsSL "$TARBALL" -o "$TMP"; then
+                FOUND=$(sha1sum "$TMP" | awk '{print $1}')
+                rm -f "$TMP"
+                if [ "$FOUND" = "$EXPECTED" ]; then
+                  echo "✅ metadata and tarball visible after $((i * 10))s ($EXPECTED)"
+                  exit 0
+                fi
+                echo "⏳ tarball shasum mismatch on attempt $i — expected $EXPECTED got $FOUND"
+              else
+                rm -f "$TMP"
+                echo "⏳ metadata visible, tarball not fetchable yet (attempt $i)"
+              fi
             fi
             sleep 10
           done
-          echo "❌ @hyperlight-dev/hyperagent@$VERSION not visible after 300s"
+          echo "❌ @hyperlight-dev/hyperagent@$VERSION metadata/tarball not installable after 300s"
           exit 1
-
-      - name: Verify tarball blob fetchable + shasum
-        env:
-          VERSION: ${{ steps.ver.outputs.version }}
-        run: |
-          TARBALL=$(npm view "@hyperlight-dev/hyperagent@$VERSION" dist.tarball)
-          EXPECTED=$(npm view "@hyperlight-dev/hyperagent@$VERSION" dist.shasum)
-          ACTUAL=$(curl -sSL --fail "$TARBALL" | sha1sum | awk '{print $1}')
-          if [ "$ACTUAL" != "$EXPECTED" ]; then
-            echo "❌ shasum mismatch — expected $EXPECTED got $ACTUAL"
-            exit 1
-          fi
-          echo "✅ tarball fetchable, shasum matches ($EXPECTED)"
 
       - name: Install + run in ${{ matrix.image }}
         env:

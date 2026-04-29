@@ -217,25 +217,7 @@ if (!existsSync(analysisNode)) {
   process.exit(1);
 }
 
-// Copy .node files for ALL available platforms so the package is cross-platform.
-// The current platform's .node is guaranteed to exist (checked above).
-// Additional platform .node files are copied if present (e.g. from CI matrix builds).
 const ALL_TRIPLES = ["linux-x64-gnu", "linux-x64-musl", "win32-x64-msvc"];
-for (const triple of ALL_TRIPLES) {
-  const hlNode = join(ROOT, `deps/js-host-api/js-host-api.${triple}.node`);
-  const anNode = join(
-    ROOT,
-    `src/code-validator/guest/host/hyperlight-analysis.${triple}.node`,
-  );
-  if (existsSync(hlNode)) {
-    copyFileSync(hlNode, join(LIB_DIR, `js-host-api.${triple}.node`));
-    console.log(`  ✓ js-host-api.${triple}.node`);
-  }
-  if (existsSync(anNode)) {
-    copyFileSync(anNode, join(LIB_DIR, `hyperlight-analysis.${triple}.node`));
-    console.log(`  ✓ hyperlight-analysis.${triple}.node`);
-  }
-}
 
 // Create a proper node_modules package structure for hyperlight-analysis
 // so both require() and import() can resolve it in the bundled binary.
@@ -252,6 +234,7 @@ for (const triple of ALL_TRIPLES) {
       anNode,
       join(analysisPkgDir, `hyperlight-analysis.${triple}.node`),
     );
+    console.log(`  ✓ hyperlight-analysis.${triple}.node`);
   }
 }
 // Copy the index.js and index.d.ts from the source package
@@ -284,6 +267,7 @@ for (const triple of ALL_TRIPLES) {
       hlNode,
       join(hyperlightHostApiDir, `js-host-api.${triple}.node`),
     );
+    console.log(`  ✓ js-host-api.${triple}.node`);
   }
 }
 // Copy lib.js as lib.cjs, patching the require('./index.js') to './index.cjs'
