@@ -16,8 +16,8 @@ import {
 } from "../src/agent/profiles.js";
 
 describe("profile registry", () => {
-  it("should have exactly 4 built-in profiles", () => {
-    expect(PROFILES.size).toBe(4);
+  it("should have exactly 5 built-in profiles", () => {
+    expect(PROFILES.size).toBe(5);
   });
 
   it("should include all expected profile names", () => {
@@ -26,6 +26,7 @@ describe("profile registry", () => {
     expect(names).toContain("file-builder");
     expect(names).toContain("web-research");
     expect(names).toContain("heavy-compute");
+    expect(names).toContain("mcp-network");
   });
 
   it("should return undefined for unknown profile", () => {
@@ -84,6 +85,15 @@ describe("profile definitions", () => {
     expect(p.limits.cpuTimeoutMs).toBe(10000);
     expect(p.limits.heapMb).toBe(64);
     expect(p.limits.scratchMb).toBe(64);
+  });
+
+  it("mcp-network should bump wall time without enabling plugins", () => {
+    const p = getProfile("mcp-network")!;
+    expect(p.plugins).toHaveLength(0);
+    expect(p.limits.cpuTimeoutMs).toBe(2000);
+    expect(p.limits.wallTimeoutMs).toBe(30000);
+    expect(p.limits.heapMb).toBe(32);
+    expect(p.limits.scratchMb).toBe(32);
   });
 });
 
@@ -147,7 +157,7 @@ describe("mergeProfiles", () => {
   it("should handle stacking all profiles", () => {
     const result = mergeProfiles(getProfileNames());
     expect(result.error).toBeUndefined();
-    expect(result.appliedProfiles).toHaveLength(4);
+    expect(result.appliedProfiles).toHaveLength(5);
 
     // Max across all profiles
     expect(result.limits.cpuTimeoutMs).toBe(15000); // file-builder
@@ -159,6 +169,16 @@ describe("mergeProfiles", () => {
     const pluginNames = result.plugins.map((p) => p.name);
     expect(pluginNames).toContain("fetch");
     expect(pluginNames).toContain("fs-write");
+  });
+
+  it("should stack mcp-network without adding plugins", () => {
+    const result = mergeProfiles(["default", "mcp-network"]);
+    expect(result.error).toBeUndefined();
+    expect(result.appliedProfiles).toEqual(["default", "mcp-network"]);
+    expect(result.limits.cpuTimeoutMs).toBe(2000);
+    expect(result.limits.wallTimeoutMs).toBe(30000);
+    expect(result.limits.heapMb).toBe(32);
+    expect(result.plugins).toHaveLength(0);
   });
 
   it("should handle duplicate profile names gracefully", () => {

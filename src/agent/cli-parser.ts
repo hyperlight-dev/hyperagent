@@ -97,7 +97,7 @@ Options:
   --tune                 Capture LLM decision/reasoning logs to ~/.hyperagent/logs/
   --profile <name>       Apply resource profile at startup (limits only)
                          Stack: --profile "web-research heavy-compute"
-                         Profiles: default, file-builder, web-research, heavy-compute
+                         Profiles: default, file-builder, web-research, heavy-compute, mcp-network
   --auto-approve         Auto-approve all interactive prompts (YOLO mode)
   --prompt "<text>"      Send a prompt non-interactively and exit after completion
   --prompt-file <path>   Read prompt from a file (avoids shell quoting issues)

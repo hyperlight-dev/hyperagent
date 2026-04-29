@@ -35,5 +35,6 @@ export const ALLOWED_TOOLS = new Set<string>([
   "ask_user", // SDK protocol — structured questions to the user
   "list_mcp_servers", // List configured MCP servers + status
   "mcp_server_info", // Detailed MCP server info + tool schemas
+  "mcp_tool_info", // Focused MCP tool schema lookup
   "manage_mcp", // Connect/disconnect MCP servers
 ]);

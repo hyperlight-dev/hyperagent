@@ -15,6 +15,12 @@ import {
   generateMCPDeclarations,
   generateMCPModuleHints,
 } from "../src/agent/mcp/plugin-adapter.js";
+import {
+  findMCPTool,
+  isReadOnlyMCPTool,
+  selectMCPTools,
+} from "../src/agent/mcp/tool-utils.js";
+import { normaliseToolResult } from "../src/agent/mcp/client-manager.js";
 import type { MCPToolSchema } from "../src/agent/mcp/types.js";
 import {
   isMCPHttpConfig,
@@ -968,6 +974,7 @@ describe("generateMCPDeclarations", () => {
     // No declare module wrapper — validator can't parse ambient modules
     expect(decl).not.toContain("declare module");
     expect(decl).toContain("export declare function get_forecast");
+    expect(decl).toContain("Promise<unknown>");
     expect(decl).toContain("GetForecastInput");
     expect(decl).toContain("location");
   });
@@ -980,6 +987,91 @@ describe("generateMCPDeclarations", () => {
     expect(result.exports.length).toBe(1);
     expect(result.exports[0].name).toBe("get_forecast");
     expect(result.exports[0].kind).toBe("function");
+  });
+});
+
+describe("MCP tool utility helpers", () => {
+  const tools: MCPToolSchema[] = [
+    {
+      name: "ListChats",
+      originalName: "ListChats",
+      description: "List recent Teams chats",
+      inputSchema: {
+        type: "object",
+        properties: { top: { type: "number" } },
+      },
+    },
+    {
+      name: "SearchTeamsMessages",
+      originalName: "SearchTeamsMessages",
+      description: "Search Teams messages",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string", description: "Search text" },
+          top: { type: "number" },
+        },
+        required: ["message"],
+      },
+    },
+    {
+      name: "SendMessage",
+      originalName: "SendMessage",
+      description: "Send a Teams message",
+      inputSchema: {
+        type: "object",
+        properties: { chatId: { type: "string" }, message: { type: "string" } },
+        required: ["chatId", "message"],
+      },
+    },
+  ];
+
+  it("selects focused tools by query and preserves parameter schemas", () => {
+    const selection = selectMCPTools(tools, {
+      query: "teams messages",
+      limit: 2,
+    });
+
+    expect(selection.tools.map((tool) => tool.name)).toContain(
+      "SearchTeamsMessages",
+    );
+    expect(selection.tools.length).toBeLessThanOrEqual(2);
+    expect(selection.tools[0].parameters).toBeDefined();
+  });
+
+  it("matches explicit tool names case-insensitively", () => {
+    expect(findMCPTool(tools, "search-teams-messages")?.name).toBe(
+      "SearchTeamsMessages",
+    );
+  });
+
+  it("infers common list/search tools as read-only when annotations are absent", () => {
+    expect(isReadOnlyMCPTool(tools[0])).toBe(true);
+    expect(isReadOnlyMCPTool(tools[1])).toBe(true);
+    expect(isReadOnlyMCPTool(tools[2])).toBe(false);
+  });
+});
+
+describe("normaliseToolResult", () => {
+  it("unwraps a single JSON text response into data", () => {
+    const result = normaliseToolResult([
+      { type: "text", text: '{"messages":[{"body":"hello"}]}' },
+    ]);
+
+    expect(result.ok).toBe(true);
+    expect(result.data).toEqual({ messages: [{ body: "hello" }] });
+    expect(result.text).toContain("messages");
+  });
+
+  it("promotes the primary structured item and keeps secondary metadata", () => {
+    const result = normaliseToolResult([
+      { type: "text", text: '{"messages":[{"body":"hello"}]}' },
+      { type: "text", text: "CorrelationId: abc" },
+    ]);
+
+    expect(result.ok).toBe(true);
+    expect(result.data).toEqual({ messages: [{ body: "hello" }] });
+    expect(result.meta).toHaveLength(1);
   });
 });
 

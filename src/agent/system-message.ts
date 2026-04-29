@@ -132,6 +132,14 @@ MCP (Model Context Protocol) SERVERS:
 \${MCP_SECTION}
   async/await IS needed for libraries that use Promises internally.
 
+MCP HANDLER-ONLY EXECUTION:
+  The LLM must never call MCP server tools directly. Use this exact order:
+  list_mcp_servers → manage_mcp(connect) → mcp_tool_info → apply_profile("mcp-network") → register_handler.
+  MCP execution happens only inside generated handler code that imports from
+  host:mcp-<server> and awaits the selected MCP tool. If an MCP result is large,
+  first narrow tool args (limit/top/select/filter/query) in handler code before
+  using files.
+
 URLS: Do NOT guess URLs — they will 404. Discover via APIs or verify first.
 
 UNAVAILABLE: setTimeout, fetch(), Buffer, fs, process.
@@ -161,8 +169,14 @@ export function buildSystemMessage(params: SystemMessageParams): string {
     ? [
         "  MCP servers are configured. Call list_mcp_servers() to discover available",
         '  services and manage_mcp({action:"connect", name:"..."}) to connect them.',
-        "  Once connected, get tool schemas via mcp_server_info(name), then import",
-        '  tools with: import { tool_name } from "host:mcp-<name>"',
+        "  Once connected, call mcp_tool_info({name, query}) or mcp_tool_info({name, tools})",
+        "  to inspect only relevant schemas. Do NOT guess MCP parameter names.",
+        '  Before executing MCP handler code, call apply_profile("mcp-network") to allow network wall time.',
+        "  MCP tool execution MUST happen inside registered handler code, not as a direct LLM tool call.",
+        "  Register a handler that imports tools with:",
+        '  import { tool_name } from "host:mcp-<name>" and await every MCP call.',
+        "  If results are large, narrow args first (limit/top/select/filter/query).",
+        "  MCP results use {ok, data, text, error, raw}; check ok/error first.",
         "  Connection may prompt the user for approval (security review).",
         '  Do NOT try to manage_plugin("mcp:<name>") — MCP servers are NOT plugins.',
       ].join("\n")
