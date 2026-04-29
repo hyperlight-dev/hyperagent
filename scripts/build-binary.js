@@ -364,6 +364,14 @@ if (existsSync(skillsSrc)) {
   copyDirRecursive(skillsSrc, skillsDst);
 }
 
+// Copy MCP setup data needed by standalone CLI setup commands.
+const scriptsDst = join(LIB_DIR, "scripts");
+mkdirSync(scriptsDst, { recursive: true });
+const m365CatalogSrc = join(ROOT, "scripts", "m365-mcp-servers.json");
+if (existsSync(m365CatalogSrc)) {
+  copyFileSync(m365CatalogSrc, join(scriptsDst, "m365-mcp-servers.json"));
+}
+
 // Copy @github/copilot CLI (needed by copilot-sdk at runtime)
 // The SDK uses import.meta.resolve("@github/copilot/sdk") to find the CLI
 console.log("📦 Copying Copilot CLI runtime...");

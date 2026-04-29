@@ -106,3 +106,59 @@ describe("profile CLI flag", () => {
     expect(config.tune).toBe(true);
   });
 });
+
+describe("MCP setup CLI flags", () => {
+  it("parses standalone no-arg MCP setup commands", () => {
+    expect(parseCliArgs(["--mcp-setup-everything"]).mcpSetupCommand).toEqual({
+      kind: "setup-everything",
+    });
+    expect(parseCliArgs(["--mcp-setup-github"]).mcpSetupCommand).toEqual({
+      kind: "setup-github",
+    });
+    expect(parseCliArgs(["--mcp-show-config"]).mcpSetupCommand).toEqual({
+      kind: "show-config",
+    });
+  });
+
+  it("parses filesystem setup with default and explicit directories", () => {
+    expect(parseCliArgs(["--mcp-setup-filesystem"]).mcpSetupCommand).toEqual({
+      kind: "setup-filesystem",
+      dir: "/tmp/mcp-fs",
+    });
+    expect(
+      parseCliArgs(["--mcp-setup-filesystem", "/var/tmp/mcp"]).mcpSetupCommand,
+    ).toEqual({
+      kind: "setup-filesystem",
+      dir: "/var/tmp/mcp",
+    });
+  });
+
+  it("captures remaining args for setup helpers with pass-through options", () => {
+    expect(
+      parseCliArgs([
+        "--mcp-add-http",
+        "example",
+        "https://mcp.example.com/sse",
+        "client",
+        "tenant",
+        "scope.one,scope.two",
+        "browser",
+      ]).mcpSetupCommand,
+    ).toEqual({
+      kind: "add-http",
+      args: [
+        "example",
+        "https://mcp.example.com/sse",
+        "client",
+        "tenant",
+        "scope.one,scope.two",
+        "browser",
+      ],
+    });
+
+    expect(
+      parseCliArgs(["--mcp-m365-create-app", "--client-id", "abc"])
+        .mcpSetupCommand,
+    ).toEqual({ kind: "m365-create-app", args: ["--client-id", "abc"] });
+  });
+});

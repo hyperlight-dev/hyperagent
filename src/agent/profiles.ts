@@ -197,6 +197,31 @@ const HEAVY_COMPUTE_PROFILE: Profile = {
   plugins: [],
 };
 
+/**
+ * MCP network profile — for handlers that call external MCP services.
+ * Network I/O consumes wall-clock time while CPU remains low, so this
+ * bumps wall timeout without enabling file plugins or inflating CPU.
+ */
+const MCP_NETWORK_PROFILE: Profile = {
+  name: "mcp-network",
+  description: "MCP service calls — longer wall timeout, no file plugins",
+  patterns: [],
+  useCases: [
+    "Calling MCP tools from handler code",
+    "External service reads, searches, and lookups via MCP",
+    "Multi-call MCP handlers that wait on network I/O",
+  ],
+  limits: {
+    cpuTimeoutMs: 2000,
+    wallTimeoutMs: 30000,
+    heapMb: 32,
+    scratchMb: 32,
+    inputBufferKb: 4096,
+    outputBufferKb: 4096,
+  },
+  plugins: [],
+};
+
 // ── Profile Registry ─────────────────────────────────────────────────
 
 /** All built-in profiles, keyed by name. */
@@ -205,6 +230,7 @@ export const PROFILES: ReadonlyMap<string, Profile> = new Map([
   [FILE_BUILDER_PROFILE.name, FILE_BUILDER_PROFILE],
   [WEB_RESEARCH_PROFILE.name, WEB_RESEARCH_PROFILE],
   [HEAVY_COMPUTE_PROFILE.name, HEAVY_COMPUTE_PROFILE],
+  [MCP_NETWORK_PROFILE.name, MCP_NETWORK_PROFILE],
 ]);
 
 /** Get a profile by name, or undefined if not found. */

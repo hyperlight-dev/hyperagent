@@ -15,6 +15,7 @@ import type {
   MCPToolSchema,
   MCPToolAnnotations,
 } from "./types.js";
+import { isReadOnlyMCPTool } from "./tool-utils.js";
 
 /**
  * Callback that decides whether a write operation should proceed.
@@ -74,10 +75,10 @@ export function createMCPPluginAdapter(
         functions[tool.name] = async (...args: unknown[]): Promise<unknown> => {
           const toolArgs = (args[0] as Record<string, unknown>) ?? {};
 
-          // Write-safety gate: if the tool is not read-only, check
-          // with the gate before executing. The guest VM is paused
-          // during this check — it's safe to prompt the user.
-          if (gate && tool.annotations?.readOnlyHint !== true) {
+          // Write-safety gate: check tools that are not known or inferred
+          // read-only. The guest VM is paused during this check, so it is
+          // safe to prompt the user.
+          if (gate && !isReadOnlyMCPTool(tool)) {
             const allowed = await gate(
               conn.name,
               tool.name,
@@ -86,6 +87,7 @@ export function createMCPPluginAdapter(
             );
             if (!allowed) {
               return {
+                ok: false,
                 error: `Operation denied: ${tool.name} on ${conn.name} was blocked by the write-safety gate. The user declined the operation.`,
               };
             }
@@ -126,7 +128,7 @@ export function generateMCPDeclarations(
       : "Record<string, unknown>";
     lines.push(`/** ${tool.description} */`);
     lines.push(
-      `export declare function ${tool.name}(input: ${paramType}): unknown;`,
+      `export declare function ${tool.name}(input: ${paramType}): Promise<unknown>;`,
     );
     lines.push("");
   }
@@ -145,8 +147,8 @@ export function generateMCPModuleHints(
     overview: `MCP server "${serverName}" — ${tools.length} tool(s) available via host:mcp-${serverName}`,
     criticalRules: [
       `Import with: import { toolName } from "host:mcp-${serverName}"`,
-      "All calls are synchronous from the sandbox perspective (async auto-awaited)",
-      "Returns { error: string } on failure — always check for error field",
+      "All calls are async — use await",
+      "Returns { ok: boolean, data?: unknown, text?: string, error?: string } — always check ok/error",
     ],
     exports: tools.map((t) => ({
       name: t.name,

@@ -29,7 +29,7 @@ Add servers to `~/.hyperagent/config.json` (same format as VS Code's `mcp.json`)
 Or use the setup script:
 
 ```bash
-just mcp-setup-everything   # sets up the MCP everything test server
+hyperagent --mcp-setup-everything   # sets up the MCP everything test server
 ```
 
 ### 2. Start HyperAgent
@@ -127,6 +127,27 @@ are shown during approval.
 
 ## Commands
 
+### Standalone setup commands
+
+These command-line options run one setup/show action and then exit. They do
+not start an agent session, and they do not require the repository Justfile.
+
+| Command | Action |
+|---------|--------|
+| `hyperagent --mcp-setup-everything` | Configure the MCP everything test server. Requires npm/npx; first use downloads `@modelcontextprotocol/server-everything`. |
+| `hyperagent --mcp-setup-github` | Configure the GitHub MCP server. Requires npm/npx and `GITHUB_TOKEN`; the command will remind you to use `gh auth token` if needed. |
+| `hyperagent --mcp-setup-filesystem [dir]` | Configure the filesystem MCP server rooted at `dir` (default `/tmp/mcp-fs`). Requires npm/npx; first use downloads `@modelcontextprotocol/server-filesystem`. |
+| `hyperagent --mcp-show-config` | Print configured MCP servers from `~/.hyperagent/config.json`. |
+| `hyperagent --mcp-setup-workiq` | Configure Microsoft Work IQ stdio MCP. Pre-fetches `@microsoft/workiq@latest`, runs its interactive EULA command, then writes config. |
+| `hyperagent --mcp-add-http <name> <url> [clientId] [tenantId] [scopes] [flow]` | Add a generic HTTP MCP server, optionally with OAuth. |
+| `hyperagent --mcp-m365-create-app [args...]` | Create/reuse an Entra app registration for Agent 365 HTTP MCP servers. Requires Azure CLI and `az login`. |
+| `hyperagent --mcp-setup-m365 [args...]` | Configure Agent 365 per-service HTTP MCP servers and pre-approve them. |
+| `hyperagent --mcp-m365-refresh-servers [args...]` | Refresh the user M365 server catalog using a cached or supplied bearer token. |
+| `hyperagent --mcp-m365-show` | Show saved M365 app registration details. |
+
+The Justfile recipes with matching names are development conveniences for this
+repository; the `hyperagent` options above are the user-facing path.
+
 ### Slash commands
 
 | Command                | Action                                                |
@@ -216,7 +237,7 @@ gate uses the MCP spec's `ToolAnnotations` (hints from the server):
 
 The gate runs on the **host side** while the guest VM is paused — the
 LLM's handler code sees either a normal result or
-`{ error: "Operation denied..." }`. The LLM doesn't need to know about
+`{ ok: false, error: "Operation denied..." }`. The LLM doesn't need to know about
 the gate; it writes code normally.
 
 Example prompt shown to the user:
@@ -247,7 +268,7 @@ MCP tools with native PPTX generation in a single workflow.
 export GITHUB_TOKEN=$(gh auth token)
 
 # Configure the GitHub MCP server
-just mcp-setup-github
+hyperagent --mcp-setup-github
 ```
 
 This creates `~/.hyperagent/config.json` with the GitHub server configured,
@@ -341,7 +362,7 @@ registration.
 ### One-shot setup
 
 ```bash
-just mcp-setup-workiq
+hyperagent --mcp-setup-workiq
 ```
 
 This writes the following entry to `~/.hyperagent/config.json`:
@@ -417,11 +438,12 @@ Instead of the single stdio `workiq` server you can connect to the
 per-service Agent 365 HTTP endpoints directly. This gives you finer
 `/mcp enable` control per M365 service and uses MSAL for OAuth.
 
-The setup script uses the VS Code MCP extension's pre-registered client ID
-(`aebc6443-...`) which has `McpServers.*` scopes admin-consented in all
-M365 Copilot tenants — no per-tenant app registration needed.
+Use an Entra public-client app registration for OAuth. You can create or reuse
+one with `hyperagent --mcp-m365-create-app`, then configure the per-service MCP
+entries from the saved app details.
 
-21 servers are available (see the full list with `just mcp-setup-m365 list`).
+The bundled catalog includes the available Agent 365 servers (see the full list
+with `hyperagent --mcp-setup-m365 list`).
 Common ones:
 
 | Config entry         | Service                          |
@@ -437,24 +459,26 @@ Common ones:
 #### Setup
 
 ```bash
+# One-time: create or reuse an Entra public-client app registration
+hyperagent --mcp-m365-create-app
+
 # Configure all M365 servers with browser auth (one-time)
-just mcp-setup-m365 all \
-  aebc6443-996d-45c2-90f0-388ff96faa56 \
-  <your-tenant-id> \
-  "" browser
+hyperagent --mcp-setup-m365 all \
+  <your-client-id> <your-tenant-id> "" browser
 
 # Or a subset
-just mcp-setup-m365 "mail,teams,planner" \
-  aebc6443-996d-45c2-90f0-388ff96faa56 \
-  <your-tenant-id> \
-  "" browser
+hyperagent --mcp-setup-m365 "mail,teams,planner" \
+  <your-client-id> <your-tenant-id> "" browser
 
 # List available services
-just mcp-setup-m365 list
+hyperagent --mcp-setup-m365 list
 ```
 
 This writes config entries AND pre-approves all configured servers so the
 LLM can connect them without interactive prompts.
+
+If you just ran `hyperagent --mcp-m365-create-app`, you can pass empty strings
+for the client ID and tenant ID to use the saved app details.
 
 #### Auth flows
 
@@ -478,25 +502,23 @@ works with cached tokens.
 
 #### Custom Entra app registration
 
-If your tenant blocks the VS Code client ID, create your own app:
+If you already have a tenant-owned public-client app registration, pass it
+explicitly instead of using the saved app state:
 
 ```bash
-just mcp-m365-create-app
-# Then use your app's client ID:
-just mcp-setup-m365 all <your-client-id> <your-tenant-id> "" browser
+hyperagent --mcp-setup-m365 all <your-client-id> <your-tenant-id> "" browser
 ```
 
 #### Scope
 
-All servers use `ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/.default` (the Agent 365
-resource app ID with `.default`), which requests all pre-consented scopes in
-one shot. This matches what [a365cli](https://github.com/sozercan/a365cli) uses.
+All servers use the Agent 365 resource `.default` scope, which requests the
+pre-consented Agent 365 MCP scopes in one shot.
 
 #### Refreshing the server catalog
 
 ```bash
-just mcp-m365-refresh-servers     # uses cached OAuth token
-just mcp-m365-refresh-servers --token <bearer>  # explicit token
+hyperagent --mcp-m365-refresh-servers     # uses cached OAuth token
+hyperagent --mcp-m365-refresh-servers --token <bearer>  # explicit token
 ```
 
 ## HTTP Transport & OAuth

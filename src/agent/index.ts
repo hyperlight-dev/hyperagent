@@ -184,6 +184,12 @@ if (cli.showVersion) {
   process.exit(0);
 }
 
+// ── Standalone MCP setup/config commands: run and exit ──────────────
+if (cli.mcpSetupCommand) {
+  runMCPSetupCommand(cli.mcpSetupCommand, { contentRoot: CONTENT_ROOT });
+  process.exit(0);
+}
+
 // Propagate CLI → env vars (so sandbox-tool.js and other modules pick them up)
 process.env.COPILOT_MODEL = cli.model;
 process.env.HYPERLIGHT_CPU_TIMEOUT_MS = cli.cpuTimeout;
@@ -741,6 +747,7 @@ import {
   isMCPHttpConfig,
   isMCPStdioConfig,
   mcpConfigDisplayString,
+  type MCPToolSchema,
 } from "./mcp/types.js";
 import {
   createMCPClientManager,
@@ -758,6 +765,8 @@ import {
   auditMCPTools,
 } from "./mcp/approval.js";
 import { canAcquireSilently } from "./mcp/auth/msal-oauth.js";
+import { runMCPSetupCommand } from "./mcp/setup-commands.js";
+import { findMCPTool, selectMCPTools } from "./mcp/tool-utils.js";
 
 // Load MCP config from ~/.hyperagent/config.json
 let mcpManager: MCPClientManager | null = null;
@@ -3607,7 +3616,7 @@ const mcpServerInfoTool = defineTool("mcp_server_info", {
     "Get detailed information about a specific MCP server including its",
     "tool schemas, connection state, and TypeScript declarations.",
     "Use list_mcp_servers first to see available server names.",
-    "CALL THIS before writing handler code that uses host:mcp-* modules.",
+    "Prefer mcp_tool_info for focused schema lookup before choosing tools.",
   ].join("\n"),
   parameters: {
     type: "object",
@@ -3616,10 +3625,35 @@ const mcpServerInfoTool = defineTool("mcp_server_info", {
         type: "string",
         description: 'MCP server name (e.g. "github", "everything").',
       },
+      tools: {
+        type: "array",
+        description:
+          "Optional tool names to include. Use this to avoid huge all-server schema dumps.",
+        items: { type: "string" },
+      },
+      query: {
+        type: "string",
+        description:
+          'Optional search query for relevant tools (e.g. "messages chats recent").',
+      },
+      limit: {
+        type: "number",
+        description: "Maximum tools to return when filtering or searching.",
+      },
     },
     required: ["name"],
   },
-  handler: async ({ name }: { name: string }) => {
+  handler: async ({
+    name,
+    tools,
+    query,
+    limit,
+  }: {
+    name: string;
+    tools?: string[];
+    query?: string;
+    limit?: number;
+  }) => {
     const err = requireMCPEnabled();
     if (err) return { error: err };
 
@@ -3637,10 +3671,15 @@ const mcpServerInfoTool = defineTool("mcp_server_info", {
       };
     }
 
-    // Generate TypeScript declarations for the server's tools
+    const selection = selectMCPTools(conn.tools, { tools, query, limit });
+
+    // Generate TypeScript declarations for the selected tools
     let declarations: string | null = null;
-    if (conn.tools.length > 0) {
-      declarations = generateMCPDeclarations(conn.name, conn.tools);
+    if (selection.tools.length > 0) {
+      const selectedSchemas = selection.tools
+        .map((tool) => findMCPTool(conn.tools, tool.name))
+        .filter((tool): tool is MCPToolSchema => tool !== undefined);
+      declarations = generateMCPDeclarations(conn.name, selectedSchemas);
     }
 
     return {
@@ -3649,15 +3688,111 @@ const mcpServerInfoTool = defineTool("mcp_server_info", {
       transport: isMCPHttpConfig(conn.config) ? "http" : "stdio",
       endpoint: mcpConfigDisplayString(conn.config),
       toolCount: conn.tools.length,
-      tools: conn.tools.map((t) => ({
-        name: t.name,
-        description: t.description,
-        parameters: t.inputSchema,
-      })),
+      returnedToolCount: selection.tools.length,
+      totalMatches: selection.totalMatches,
+      missingTools: selection.missing,
+      tools: selection.tools,
       module: `host:mcp-${conn.name}`,
-      importPattern: `import { ${conn.tools.map((t) => t.name).join(", ")} } from "host:mcp-${conn.name}";`,
+      importPattern:
+        selection.tools.length > 0
+          ? `import { ${selection.tools.map((t) => t.name).join(", ")} } from "host:mcp-${conn.name}";`
+          : null,
       declarations,
       lastError: conn.lastError ?? null,
+      hint: "Use register_handler to import selected tools from the host:mcp-* module and execute MCP calls inside sandbox handler code.",
+    };
+  },
+});
+
+const mcpToolInfoTool = defineTool("mcp_tool_info", {
+  description: [
+    "Get focused schema information for relevant tools on one MCP server.",
+    "Use this before writing handler code so you do not guess parameter names.",
+    "Pass either explicit tools or a natural-language query.",
+    "After this, register a handler that imports the selected tools from host:mcp-<name>.",
+  ].join("\n"),
+  parameters: {
+    type: "object",
+    properties: {
+      name: {
+        type: "string",
+        description: 'MCP server name (e.g. "github", "work-iq-teams").',
+      },
+      tools: {
+        type: "array",
+        description: "Specific MCP tool names to inspect.",
+        items: { type: "string" },
+      },
+      query: {
+        type: "string",
+        description:
+          'Search terms for relevant tools (e.g. "last messages chats").',
+      },
+      limit: {
+        type: "number",
+        description: "Maximum matching tools to return; defaults to 8.",
+      },
+    },
+    required: ["name"],
+  },
+  handler: async ({
+    name,
+    tools,
+    query,
+    limit,
+  }: {
+    name: string;
+    tools?: string[];
+    query?: string;
+    limit?: number;
+  }) => {
+    const err = requireMCPEnabled();
+    if (err) return { error: err };
+
+    state.hasCalledListModules = true;
+
+    const conn = mcpManager!.getConnection(name);
+    if (!conn) {
+      const available = mcpManager!
+        .listServers()
+        .map((c) => c.name)
+        .join(", ");
+      return {
+        error: `MCP server "${name}" not found. Available: ${available || "(none)"}`,
+      };
+    }
+
+    if (conn.state !== "connected") {
+      return {
+        name: conn.name,
+        state: conn.state,
+        tools: [],
+        hint: `Connect first with manage_mcp({ action: "connect", name: "${conn.name}" }).`,
+      };
+    }
+
+    const selection = selectMCPTools(conn.tools, { tools, query, limit });
+    const selectedSchemas = selection.tools
+      .map((tool) => findMCPTool(conn.tools, tool.name))
+      .filter((tool): tool is MCPToolSchema => tool !== undefined);
+
+    return {
+      name: conn.name,
+      state: conn.state,
+      module: `host:mcp-${conn.name}`,
+      returnedToolCount: selection.tools.length,
+      totalMatches: selection.totalMatches,
+      missingTools: selection.missing,
+      tools: selection.tools,
+      declarations:
+        selectedSchemas.length > 0
+          ? generateMCPDeclarations(conn.name, selectedSchemas)
+          : null,
+      handlerImportPattern:
+        selection.tools.length > 0
+          ? `import { ${selection.tools.map((t) => t.name).join(", ")} } from "host:mcp-${conn.name}";`
+          : null,
+      handlerCallPattern: `const result = await ${selection.tools[0]?.name ?? "ToolName"}({ /* args from schema */ });`,
     };
   },
 });
@@ -3670,6 +3805,7 @@ const manageMCPTool = defineTool("manage_mcp", {
     "",
     "After connecting, the server's tools are available as host:mcp-<name>",
     "modules in handler code.",
+    "After connecting, use mcp_tool_info, then register a handler that imports and awaits the selected MCP tools.",
   ].join("\n"),
   parameters: {
     type: "object",
@@ -3711,6 +3847,8 @@ const manageMCPTool = defineTool("manage_mcp", {
           success: true,
           message: `"${params.name}" is already connected with ${conn.tools.length} tool(s).`,
           tools: conn.tools.map((t) => t.name),
+          nextStep:
+            "Call mcp_tool_info({ name, query }) to choose a tool, then register_handler with imports from host:mcp-<name>.",
         };
       }
 
@@ -3821,6 +3959,8 @@ const manageMCPTool = defineTool("manage_mcp", {
           message: `"${params.name}" connected with ${connected.tools.length} tool(s).`,
           module: `host:mcp-${params.name}`,
           tools: connected.tools.map((t) => t.name),
+          nextStep:
+            "Call mcp_tool_info({ name, query }) to choose a tool, then register_handler with imports from host:mcp-<name>.",
         };
       } catch (err) {
         return {
@@ -4640,6 +4780,7 @@ function buildSessionConfig() {
       // MCP SDK tools — gated inside handlers, always registered
       listMCPServersTool,
       mcpServerInfoTool,
+      mcpToolInfoTool,
       manageMCPTool,
       // Conditionally include tuning tool — only when --tune is active
       ...(state.tuneEnabled ? [llmThoughtTool] : []),
@@ -4675,6 +4816,7 @@ function buildSessionConfig() {
       // MCP tools — always listed, gated inside handler
       "list_mcp_servers",
       "mcp_server_info",
+      "mcp_tool_info",
       "manage_mcp",
       // Conditionally expose tuning tool
       ...(state.tuneEnabled ? ["llm_thought"] : []),

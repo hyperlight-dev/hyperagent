@@ -8,6 +8,7 @@
 // ─────────────────────────────────────────────────────────────────────
 
 import { readFileSync } from "node:fs";
+import type { MCPSetupCommand } from "./mcp/setup-commands.js";
 
 export interface CliConfig {
   model: string;
@@ -68,6 +69,18 @@ export interface CliConfig {
    * Show version and exit.
    */
   showVersion: boolean;
+  /**
+   * Standalone MCP setup/config command. Runs and exits before agent startup.
+   */
+  mcpSetupCommand?: MCPSetupCommand;
+}
+
+function setMCPSetupCommand(config: CliConfig, command: MCPSetupCommand): void {
+  if (config.mcpSetupCommand) {
+    console.error("Only one MCP setup option can be used per invocation");
+    process.exit(1);
+  }
+  config.mcpSetupCommand = command;
 }
 
 function printUsage(): void {
@@ -97,7 +110,7 @@ Options:
   --tune                 Capture LLM decision/reasoning logs to ~/.hyperagent/logs/
   --profile <name>       Apply resource profile at startup (limits only)
                          Stack: --profile "web-research heavy-compute"
-                         Profiles: default, file-builder, web-research, heavy-compute
+                         Profiles: default, file-builder, web-research, heavy-compute, mcp-network
   --auto-approve         Auto-approve all interactive prompts (YOLO mode)
   --prompt "<text>"      Send a prompt non-interactively and exit after completion
   --prompt-file <path>   Read prompt from a file (avoids shell quoting issues)
@@ -105,6 +118,19 @@ Options:
   --output-threshold <bytes>  Large output threshold (default: 20480 = 20KB)
   --version, -v        Show version and exit
   --help, -h           Show this help message
+
+Standalone MCP setup commands (run and exit):
+  --mcp-setup-everything       Configure the MCP everything test server
+  --mcp-setup-github           Configure the GitHub MCP server (uses GITHUB_TOKEN)
+  --mcp-setup-filesystem [dir] Configure the filesystem MCP server (default: /tmp/mcp-fs)
+  --mcp-show-config            Show configured MCP servers
+  --mcp-setup-workiq           Configure Microsoft Work IQ stdio MCP server
+  --mcp-add-http <name> <url> [clientId] [tenantId] [scopes] [flow]
+                               Add a generic HTTP MCP server
+  --mcp-m365-create-app [args...]  Create/reuse Entra app for M365 HTTP MCP
+  --mcp-setup-m365 [args...]       Configure Agent 365 HTTP MCP services
+  --mcp-m365-refresh-servers [args...] Refresh the M365 MCP server catalog
+  --mcp-m365-show              Show saved M365 app registration details
 
 Plugin commands (at the REPL prompt):
   /plugins               List discovered plugins
@@ -310,6 +336,56 @@ export function parseCliArgs(
       case "--version":
       case "-v":
         config.showVersion = true;
+        break;
+      case "--mcp-setup-everything":
+        setMCPSetupCommand(config, { kind: "setup-everything" });
+        break;
+      case "--mcp-setup-github":
+        setMCPSetupCommand(config, { kind: "setup-github" });
+        break;
+      case "--mcp-setup-filesystem": {
+        const next = argv[i + 1];
+        const dir = next && !next.startsWith("--") ? next : "/tmp/mcp-fs";
+        if (dir === next) i++;
+        setMCPSetupCommand(config, { kind: "setup-filesystem", dir });
+        break;
+      }
+      case "--mcp-show-config":
+        setMCPSetupCommand(config, { kind: "show-config" });
+        break;
+      case "--mcp-setup-workiq":
+        setMCPSetupCommand(config, { kind: "setup-workiq" });
+        break;
+      case "--mcp-add-http":
+        setMCPSetupCommand(config, {
+          kind: "add-http",
+          args: argv.slice(i + 1),
+        });
+        i = argv.length;
+        break;
+      case "--mcp-m365-create-app":
+        setMCPSetupCommand(config, {
+          kind: "m365-create-app",
+          args: argv.slice(i + 1),
+        });
+        i = argv.length;
+        break;
+      case "--mcp-setup-m365":
+        setMCPSetupCommand(config, {
+          kind: "m365-setup",
+          args: argv.slice(i + 1),
+        });
+        i = argv.length;
+        break;
+      case "--mcp-m365-refresh-servers":
+        setMCPSetupCommand(config, {
+          kind: "m365-refresh-servers",
+          args: argv.slice(i + 1),
+        });
+        i = argv.length;
+        break;
+      case "--mcp-m365-show":
+        setMCPSetupCommand(config, { kind: "m365-show" });
         break;
       case "--help":
       case "-h":

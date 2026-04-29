@@ -37,6 +37,16 @@ import {
   deleteCachedSession,
 } from "./session-cache.js";
 
+export interface MCPToolCallResult {
+  ok: boolean;
+  data?: unknown;
+  text?: string;
+  raw?: unknown;
+  meta?: unknown[];
+  error?: string;
+  truncated?: boolean;
+}
+
 /**
  * Create an MCP client manager that handles connection lifecycle,
  * tool discovery, and tool execution for configured MCP servers.
@@ -286,7 +296,7 @@ export function createMCPClientManager() {
     serverName: string,
     toolName: string,
     args: Record<string, unknown>,
-  ): Promise<unknown> {
+  ): Promise<MCPToolCallResult> {
     let conn = connections.get(serverName);
     if (!conn) {
       throw new Error(`[mcp] Unknown server: ${serverName}`);
@@ -327,20 +337,37 @@ export function createMCPClientManager() {
       // Check for errors
       if (result.isError) {
         const errorText = extractTextContent(result.content);
-        return { error: errorText };
+        return {
+          ok: false,
+          error: errorText,
+          text: errorText,
+          raw: result.content,
+        };
       }
 
-      // Extract content, enforce size limit
-      const content = extractContent(result.content);
-      const contentStr = JSON.stringify(content);
-      if (contentStr.length > MCP_MAX_RESPONSE_BYTES) {
+      // Extract content, enforce size limit against the useful payload first.
+      // raw duplicates the original MCP content and may be much larger than
+      // the parsed data/text the handler actually needs.
+      const normalised = normaliseToolResult(result.content);
+      const payloadSize = JSON.stringify({
+        data: normalised.data,
+        text: normalised.text,
+        meta: normalised.meta,
+      }).length;
+      if (payloadSize > MCP_MAX_RESPONSE_BYTES) {
         return {
-          error: `Response too large (${contentStr.length} bytes). Maximum is ${MCP_MAX_RESPONSE_BYTES} bytes.`,
+          ok: false,
+          error: `Response too large (${payloadSize} bytes). Maximum is ${MCP_MAX_RESPONSE_BYTES} bytes.`,
           truncated: true,
         };
       }
 
-      return content;
+      const fullSize = JSON.stringify(normalised).length;
+      if (fullSize > MCP_MAX_RESPONSE_BYTES) {
+        return { ...normalised, raw: undefined, truncated: true };
+      }
+
+      return normalised;
     } catch (err) {
       // Server may have died or network is down — mark as error for reconnect
       const msg = (err as Error).message;
@@ -355,7 +382,7 @@ export function createMCPClientManager() {
         conn.state = "error";
         conn.lastError = msg;
       }
-      return { error: `[mcp] Tool call failed: ${msg}` };
+      return { ok: false, error: `[mcp] Tool call failed: ${msg}` };
     }
   }
 
@@ -535,6 +562,70 @@ function extractContent(content: any[]): unknown {
     }
     return c;
   });
+}
+
+/**
+ * Convert arbitrary MCP content into the stable shape exposed to the LLM.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function normaliseToolResult(content: any[]): MCPToolCallResult {
+  const extracted = extractContent(content);
+  const text = extractTextContent(content);
+  const { data, meta } = selectPrimaryData(extracted);
+
+  return {
+    ok: true,
+    data,
+    ...(text ? { text } : {}),
+    raw: content,
+    ...(meta.length > 0 ? { meta } : {}),
+  };
+}
+
+function selectPrimaryData(extracted: unknown): {
+  data: unknown;
+  meta: unknown[];
+} {
+  if (!Array.isArray(extracted)) {
+    return { data: extracted, meta: [] };
+  }
+
+  const dataItems = extracted.filter(hasDataProperty);
+  if (dataItems.length === 0) {
+    return { data: extracted, meta: [] };
+  }
+
+  const structuredItems = dataItems.filter((item) => isStructured(item.data));
+  if (structuredItems.length === 1) {
+    return {
+      data: structuredItems[0].data,
+      meta: extracted.filter((item) => item !== structuredItems[0]),
+    };
+  }
+
+  if (structuredItems.length > 1) {
+    return {
+      data: structuredItems.map((item) => item.data),
+      meta: extracted.filter((item) => !structuredItems.includes(item)),
+    };
+  }
+
+  return {
+    data: dataItems.map((item) => item.data),
+    meta: extracted.filter((item) => !dataItems.includes(item)),
+  };
+}
+
+function hasDataProperty(value: unknown): value is { data: unknown } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Object.prototype.hasOwnProperty.call(value, "data")
+  );
+}
+
+function isStructured(value: unknown): boolean {
+  return typeof value === "object" && value !== null;
 }
 
 /**
