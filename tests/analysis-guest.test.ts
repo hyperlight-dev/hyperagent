@@ -170,7 +170,160 @@ describe("analysis-guest", () => {
         });
 
         expect(result.valid).toBe(true);
+        expect(result.isModule).toBe(true);
         expect(result.errors).toHaveLength(0);
+      });
+
+      it("validateJavaScript should treat plain handler declarations as module mode", async () => {
+        if (!isAvailable) return;
+
+        const source = `
+        function handler(event) {
+          return { result: event.data };
+        }
+      `;
+
+        const result = await validateJavaScript(source, {
+          handlerName: "test-handler",
+          registeredHandlers: [],
+          availableModules: [],
+          expectHandler: true,
+        });
+
+        expect(result.valid).toBe(true);
+        expect(result.isModule).toBe(true);
+        expect(result.errors).toHaveLength(0);
+      });
+
+      it("validateJavaScript should accept async handler declarations", async () => {
+        if (!isAvailable) return;
+
+        const source = `
+        async function handler(event) {
+          const value = await Promise.resolve(event.data);
+          return { result: value };
+        }
+      `;
+
+        const result = await validateJavaScript(source, {
+          handlerName: "test-handler",
+          registeredHandlers: [],
+          availableModules: [],
+          expectHandler: true,
+        });
+
+        expect(result.valid).toBe(true);
+        expect(result.errors).toHaveLength(0);
+      });
+
+      it("validateJavaScript should reject arrow handlers with repair guidance", async () => {
+        if (!isAvailable) return;
+
+        const source = `
+        const handler = (event) => {
+          return { result: event.data };
+        };
+        export { handler };
+      `;
+
+        const result = await validateJavaScript(source, {
+          handlerName: "test-handler",
+          registeredHandlers: [],
+          availableModules: [],
+          expectHandler: true,
+        });
+
+        expect(result.valid).toBe(false);
+        expect(result.errors[0]?.type).toBe("structure");
+        expect(result.errors[0]?.message).toContain("not an arrow function");
+        expect(result.errors[0]?.message).toContain("function handler(event)");
+      });
+
+      it("validateJavaScript should accept custom handler parameter names", async () => {
+        if (!isAvailable) return;
+
+        const source = `
+        function handler(input) {
+          return { result: input.data };
+        }
+      `;
+
+        const result = await validateJavaScript(source, {
+          handlerName: "test-handler",
+          registeredHandlers: [],
+          availableModules: [],
+          expectHandler: true,
+        });
+
+        expect(result.valid).toBe(true);
+        expect(result.errors).toHaveLength(0);
+      });
+
+      it("validateJavaScript should accept handlers without parameters", async () => {
+        if (!isAvailable) return;
+
+        const source = `
+        function handler() {
+          return { result: "ok" };
+        }
+      `;
+
+        const result = await validateJavaScript(source, {
+          handlerName: "test-handler",
+          registeredHandlers: [],
+          availableModules: [],
+          expectHandler: true,
+        });
+
+        expect(result.valid).toBe(true);
+        expect(result.errors).toHaveLength(0);
+      });
+
+      it("validateJavaScript should reject nested returns without handler return", async () => {
+        if (!isAvailable) return;
+
+        const source = `
+        function handler(event) {
+          function buildResult() {
+            return { result: event.data };
+          }
+        }
+      `;
+
+        const result = await validateJavaScript(source, {
+          handlerName: "test-handler",
+          registeredHandlers: [],
+          availableModules: [],
+          expectHandler: true,
+        });
+
+        expect(result.valid).toBe(false);
+        expect(result.errors[0]?.type).toBe("structure");
+        expect(result.errors[0]?.message).toContain("MUST return a value");
+      });
+
+      it("validateJavaScript should reject renamed handler functions", async () => {
+        if (!isAvailable) return;
+
+        const source = `
+        function handle(event) {
+          return { result: event.data };
+        }
+      `;
+
+        const result = await validateJavaScript(source, {
+          handlerName: "test-handler",
+          registeredHandlers: [],
+          availableModules: [],
+          expectHandler: true,
+        });
+
+        expect(result.valid).toBe(false);
+        expect(result.errors[0]?.type).toBe("structure");
+        expect(result.errors[0]?.message).toContain(
+          "must be named exactly 'handler'",
+        );
+        expect(result.errors[0]?.message).toContain("Found function 'handle'");
       });
 
       it("validateJavaScript should reject syntax errors", async () => {

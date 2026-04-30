@@ -42,9 +42,14 @@ EVERYTHING goes through sandbox tools — register_handler, execute_javascript, 
 ║  MANDATORY HANDLER FORMAT — YOUR CODE WILL BE REJECTED WITHOUT THIS ║
 ╚══════════════════════════════════════════════════════════════════════╝
 
-Every register_handler call MUST define: function handler(event) { ... return result; }
+Every register_handler call MUST define a real handler function with one of these signatures:
+  function handler(event) { ... return result; }
+  async function handler(event) { ... return result; }  // only when using await
+
 The function MUST be named exactly "handler". Not Handler, handle, main, run, process.
-Code without "function handler" is ALWAYS rejected by the validator.
+The parameter name is flexible; examples use "event" because execute_javascript passes JSON event data.
+Handlers that do not need input may omit the parameter: function handler() { ... }.
+Code without "function handler" or "async function handler" is ALWAYS rejected by the validator.
 
 TEMPLATE — copy this structure every time:
   import * as pptx from "ha:pptx";        // imports at top
@@ -54,7 +59,10 @@ TEMPLATE — copy this structure every time:
   }
 
 RULES:
-  - function handler(event) — EXACTLY this signature, no exceptions
+  - Use function handler(event) for normal code
+  - Use async function handler(event) only if the handler contains await
+  - Do NOT use arrow handlers: const handler = (event) => { ... } is rejected
+  - Parameter names are flexible: event, input, data, args, or no parameter are all allowed
   - MUST return a value — handler without return = runtime error
   - event is JSON in, return value is JSON out
   - One-shot: runs once, returns, done

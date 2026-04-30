@@ -469,6 +469,7 @@ pub fn validate_javascript(source: &str, context: &ValidationContext) -> Validat
     let imports = extract_imports(&clean);
     let has_handler_export = check_handler_export(&clean);
     let has_handler_function = check_handler_function(&clean);
+    let handler_signature_issue = check_handler_signature_issue(&clean);
     let is_module = check_is_module(&clean);
 
     // 1. Check handler name conflicts FIRST (cheap check)
@@ -543,41 +544,41 @@ pub fn validate_javascript(source: &str, context: &ValidationContext) -> Validat
     if context.expect_handler && !has_handler_export && !has_handler_function {
         errors.push(ValidationError {
             error_type: "structure".to_string(),
-            message: concat!(
-                "Handler code MUST define: function handler(event) { ... return result; }\n",
+            message: handler_signature_issue.as_ref().map(|(message, _)| message.clone()).unwrap_or_else(|| concat!(
+                "Handler code MUST define: function handler(...) { ... return result; }\n",
                 "  The function MUST be named exactly 'handler' (not Handler, handle, main, run).\n",
-                "  It MUST accept one argument (event) and MUST return a value.\n",
+                "  The handler may accept one JSON argument, conventionally named 'event'.\n",
+                "  Use async function handler(...) only if the handler contains await.\n",
+                "  Do NOT use arrow handlers like const handler = (event) => { ... }.\n",
                 "  Example:\n",
                 "    import * as pptx from 'ha:pptx';\n",
                 "    function handler(event) {\n",
                 "      const result = pptx.createPresentation();\n",
                 "      return { success: true, data: result };\n",
                 "    }"
-            ).to_string(),
-            line: None,
+            ).to_string()),
+            line: handler_signature_issue.as_ref().and_then(|(_, line)| *line),
             column: None,
         });
     }
 
     // 4b. If handler exists, check it has a return statement and correct signature
     if context.expect_handler && (has_handler_export || has_handler_function) {
+        if let Some((message, line)) = handler_signature_issue {
+            errors.push(ValidationError {
+                error_type: "structure".to_string(),
+                message,
+                line,
+                column: None,
+            });
+        }
+
         // Check for return statement inside handler (uses comment-stripped source)
         let has_return = check_handler_has_return(&clean);
         if !has_return {
             errors.push(ValidationError {
                 error_type: "structure".to_string(),
                 message: "Handler function MUST return a value. Without 'return' you will get: 'The handler function did not return a value'. Fix: add 'return { ... };' at the end of your handler function.".to_string(),
-                line: None,
-                column: None,
-            });
-        }
-
-        // Check handler takes at least one parameter
-        let has_param = check_handler_has_param(&clean);
-        if !has_param {
-            errors.push(ValidationError {
-                error_type: "structure".to_string(),
-                message: "Handler function MUST accept an event parameter: function handler(event) { ... return result; }. Without it you cannot receive input from execute_javascript.".to_string(),
                 line: None,
                 column: None,
             });
@@ -993,13 +994,72 @@ fn check_handler_function(source: &str) -> bool {
     if source.contains("function handler") {
         return true;
     }
-    if source.contains("const handler")
-        || source.contains("let handler")
-        || source.contains("var handler")
-    {
-        return true;
-    }
     false
+}
+
+/// Diagnose handler declarations that look close but are not the required shape.
+fn check_handler_signature_issue(source: &str) -> Option<(String, Option<u32>)> {
+    for (line_index, line) in source.lines().enumerate() {
+        let trimmed = line.trim();
+        let line_number = Some((line_index + 1) as u32);
+
+        if trimmed.contains("=>")
+            && (trimmed.contains("handler")
+                || trimmed.contains("Handler")
+                || trimmed.contains("handle")
+                || trimmed.contains("main")
+                || trimmed.contains("run"))
+        {
+            return Some((
+                concat!(
+                    "Handler must be a function declaration, not an arrow function. ",
+                    "Fix: replace it with function handler(event) { ... return result; } ",
+                    "or async function handler(event) { ... return result; } if you use await."
+                )
+                .to_string(),
+                line_number,
+            ));
+        }
+
+        if trimmed.starts_with("export default function handler") {
+            return Some((
+                concat!(
+                    "Handler must be declared as function handler(...) or async function handler(...). ",
+                    "Do not use export default function handler(...)."
+                )
+                .to_string(),
+                line_number,
+            ));
+        }
+
+        let mut declaration = trimmed;
+        if let Some(rest) = declaration.strip_prefix("export ") {
+            declaration = rest.trim_start();
+        }
+        if let Some(rest) = declaration.strip_prefix("async ") {
+            declaration = rest.trim_start();
+        }
+
+        if let Some(rest) = declaration.strip_prefix("function ") {
+            let name_end = rest
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '$'))
+                .unwrap_or(rest.len());
+            let name = &rest[..name_end];
+            if name == "handler" {
+                continue;
+            } else if matches!(name, "Handler" | "handle" | "main" | "run" | "process") {
+                return Some((
+                    alloc::format!(
+                        "Handler function must be named exactly 'handler'. Found function '{}'. Fix: rename it to function handler(event) {{ ... return result; }}.",
+                        name
+                    ),
+                    line_number,
+                ));
+            }
+        }
+    }
+
+    None
 }
 
 /// Check if the handler function contains a return statement.
@@ -1033,6 +1093,14 @@ fn check_handler_has_return(source: &str) -> bool {
                             found_return = true;
                         }
                     }
+                    b'f' => {
+                        if rest[i..].starts_with("function ")
+                            && let Some(after_nested) = skip_nested_block(rest, i)
+                        {
+                            i = after_nested;
+                            continue;
+                        }
+                    }
                     _ => {}
                 }
                 i += 1;
@@ -1059,56 +1127,43 @@ fn check_handler_has_return(source: &str) -> bool {
     false
 }
 
-/// Check if the handler function has at least one parameter.
-fn check_handler_has_param(source: &str) -> bool {
-    // Simple string search — more reliable than regex in no_std
-    for line in source.lines() {
-        let trimmed = line.trim();
-        // Match: function handler(something or export function handler(something
-        if trimmed.contains("function handler(") {
-            // Check if there's a non-empty param: handler( followed by non-) non-whitespace
-            if let Some(paren_pos) = trimmed.find("handler(") {
-                let after_paren = &trimmed[paren_pos + 8..];
-                if let Some(c) = after_paren.trim_start().chars().next()
-                    && c != ')'
-                {
-                    return true;
-                }
-            }
-        }
-        // Arrow: const handler = (event) => or handler = event =>
-        // Must verify it actually has a parameter, not just () =>
-        if (trimmed.contains("const handler") || trimmed.contains("let handler"))
-            && trimmed.contains("=>")
-        {
-            // Check for non-empty parens: handler = (something) =>
-            if let Some(eq_pos) = trimmed.find('=') {
-                let after_eq = trimmed[eq_pos + 1..].trim_start();
-                // Skip any second '=' (==)
-                if after_eq.starts_with('=') {
-                    // Not an assignment — skip
-                } else if after_eq.starts_with('(') {
-                    // Parenthesised params: check for non-empty (x) vs ()
-                    if let Some(close) = after_eq.find(')') {
-                        let params = after_eq[1..close].trim();
-                        if !params.is_empty() {
-                            return true;
-                        }
-                    }
-                } else if !after_eq.starts_with("=>") {
-                    // Bare param without parens: handler = event => ...
-                    return true;
-                }
-            }
-        }
+fn skip_nested_block(source: &str, start: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut open_brace = start;
+    while open_brace < bytes.len() && bytes[open_brace] != b'{' {
+        open_brace += 1;
     }
-    false
+    if open_brace >= bytes.len() {
+        return None;
+    }
+
+    let mut depth = 1;
+    let mut index = open_brace + 1;
+    while index < bytes.len() && depth > 0 {
+        match bytes[index] {
+            b'{' => depth += 1,
+            b'}' => depth -= 1,
+            _ => {}
+        }
+        index += 1;
+    }
+
+    Some(index)
 }
 
 /// Check if source uses ES module syntax.
 fn check_is_module(source: &str) -> bool {
     let patterns = [
-        "import ", "import\t", "import\n", "import{", "export ", "export\t", "export\n", "export{",
+        "import ",
+        "import\t",
+        "import\n",
+        "import{",
+        "export ",
+        "export\t",
+        "export\n",
+        "export{",
+        "function handler",
+        "async function handler",
     ];
     for pattern in patterns {
         if source.contains(pattern) {
@@ -2231,6 +2286,103 @@ mod tests {
             "Expected valid, got errors: {:?}",
             result.errors
         );
+    }
+
+    #[test]
+    fn test_handler_declaration_is_module_mode() {
+        let source = r#"
+            function handler(event) {
+                return { done: true };
+            }
+        "#;
+        let result = validate_javascript(source, &default_context());
+        assert!(
+            result.valid,
+            "Expected valid, got errors: {:?}",
+            result.errors
+        );
+        assert!(result.is_module);
+    }
+
+    #[test]
+    fn test_rejects_arrow_handler_with_guidance() {
+        let source = r#"
+            const handler = (event) => {
+                return { result: event.data };
+            };
+            export { handler };
+        "#;
+        let result = validate_javascript(source, &default_context());
+        assert!(!result.valid);
+        assert!(result.errors.iter().any(|e| {
+            e.error_type == "structure"
+                && e.message.contains("not an arrow function")
+                && e.message.contains("function handler(event)")
+        }));
+    }
+
+    #[test]
+    fn test_accepts_custom_handler_parameter_name() {
+        let source = r#"
+            function handler(input) {
+                return { result: input.data };
+            }
+        "#;
+        let result = validate_javascript(source, &default_context());
+        assert!(
+            result.valid,
+            "Expected valid, got errors: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn test_accepts_handler_without_parameter() {
+        let source = r#"
+            function handler() {
+                return { result: "ok" };
+            }
+        "#;
+        let result = validate_javascript(source, &default_context());
+        assert!(
+            result.valid,
+            "Expected valid, got errors: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn test_rejects_nested_return_without_handler_return() {
+        let source = r#"
+            function handler(event) {
+                function buildResult() {
+                    return { result: event.data };
+                }
+            }
+        "#;
+        let result = validate_javascript(source, &default_context());
+        assert!(!result.valid);
+        assert!(
+            result.errors.iter().any(|e| {
+                e.error_type == "structure" && e.message.contains("MUST return a value")
+            })
+        );
+    }
+
+    #[test]
+    fn test_rejects_renamed_handler_function() {
+        let source = r#"
+            function handle(event) {
+                return { result: event.data };
+            }
+        "#;
+        let result = validate_javascript(source, &default_context());
+        assert!(!result.valid);
+        assert!(result.errors.iter().any(|e| {
+            e.error_type == "structure"
+                && e.message.contains("must be named exactly 'handler'")
+                && e.message.contains("Found function 'handle'")
+        }));
     }
 
     // =========================================================================

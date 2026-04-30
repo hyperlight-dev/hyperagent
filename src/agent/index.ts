@@ -1293,7 +1293,10 @@ const registerHandlerTool = defineTool("register_handler", {
     "The code is compiled but NOT executed — call execute_javascript to run it.",
     "",
     "REQUIRED: Code must define `function handler(event) { ... return result; }`",
+    "Use `async function handler(event)` only when the handler contains await.",
     "The function MUST be named exactly 'handler' — not Handler, handle, main.",
+    "The parameter name is flexible; use 'event' by convention, or omit it if unused.",
+    "Do NOT use arrow handlers such as `const handler = (event) => { ... }`.",
     "",
     "⚠️ TO UPDATE EXISTING CODE: Use get_handler_source first!",
     "When fixing errors, call get_handler_source(name) to get current code,",
@@ -1332,8 +1335,9 @@ const registerHandlerTool = defineTool("register_handler", {
       code: {
         type: "string",
         description:
-          "JavaScript source code. Simple mode: use `return` for output. " +
-          "Module mode: define `function handler(event) { ... }`.",
+          "JavaScript source code. Define `function handler(event) { ... return result; }`, " +
+          "`function handler() { ... return result; }` if no input is needed, " +
+          "or `async function handler(event) { ... return result; }` if using await.",
       },
     },
     required: ["name", "code"],
@@ -2893,9 +2897,10 @@ const HELP_TOPICS: Record<string, string> = {
     "- Handlers CANNOT call other handlers — they are isolated modules",
     "- YOU orchestrate: pass handler A's result as handler B's event",
     "",
-    "TWO CODE STYLES (auto-detected):",
-    "- Simple: no 'function handler' → wrapped as function body, locals reset each call",
-    "- Module: defines 'function handler(event)' → module-level state persists",
+    "HANDLER CODE STYLE:",
+    "- Every handler must define function handler(event) or async function handler(event)",
+    "- The function name is mandatory; parameter names are flexible, and zero parameters are allowed",
+    "- Module-level state persists across execute_javascript calls",
     "",
     "COMMON MISTAKES:",
     "- Function must be named exactly 'handler' (not Handler, handle, main)",
@@ -2949,7 +2954,7 @@ const HELP_TOPICS: Record<string, string> = {
   debugging: [
     "DEBUGGING TIPS:",
     "- 'not a function' = you guessed a method name. Call module_info/plugin_info to verify.",
-    "- register_handler returns codeSize and mode (module/simple) — check these",
+    "- register_handler returns codeSize and mode — check these",
     "- If handler errors, try a minimal version first",
     "- Build up complexity gradually — add one feature at a time",
     "- Use try/catch inside handlers to catch runtime errors cleanly",

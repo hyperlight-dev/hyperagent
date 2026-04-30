@@ -256,6 +256,26 @@ describe("registerHandler", () => {
     expect(r.handlers).toContain("counter");
   });
 
+  it("should execute module handlers with custom parameter names", async () => {
+    const code = "function handler(input) { return { value: input.value }; }";
+    const r = await tool.registerHandler("custom-param", code);
+    expect(r.success).toBe(true);
+
+    const exec = await tool.executeJavaScript("custom-param", { value: 42 });
+    expect(exec.success).toBe(true);
+    expect(exec.result).toEqual({ value: 42 });
+  });
+
+  it("should execute module handlers without parameters", async () => {
+    const code = 'function handler() { return { value: "no-input" }; }';
+    const r = await tool.registerHandler("no-param", code);
+    expect(r.success).toBe(true);
+
+    const exec = await tool.executeJavaScript("no-param", { ignored: true });
+    expect(exec.success).toBe(true);
+    expect(exec.result).toEqual({ value: "no-input" });
+  });
+
   it("should report no-op when same name+code registered again", async () => {
     const r = await tool.registerHandler("calc", "return 42;");
     expect(r.success).toBe(true);
