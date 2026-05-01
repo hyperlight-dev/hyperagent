@@ -44,6 +44,7 @@ EVERYTHING goes through sandbox tools — register_handler, execute_javascript, 
 
 Every register_handler call MUST define a real handler function with one of these signatures:
   function handler(event) { ... return result; }
+  function handler() { ... return result; }              // when no input is needed
   async function handler(event) { ... return result; }  // only when using await
 
 The function MUST be named exactly "handler". Not Handler, handle, main, run, process.

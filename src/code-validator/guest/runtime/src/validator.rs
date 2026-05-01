@@ -564,6 +564,7 @@ pub fn validate_javascript(source: &str, context: &ValidationContext) -> Validat
 
     // 4b. If handler exists, check it has a return statement and correct signature
     if context.expect_handler && (has_handler_export || has_handler_function) {
+        let has_signature_issue = handler_signature_issue.is_some();
         if let Some((message, line)) = handler_signature_issue {
             errors.push(ValidationError {
                 error_type: "structure".to_string(),
@@ -573,15 +574,19 @@ pub fn validate_javascript(source: &str, context: &ValidationContext) -> Validat
             });
         }
 
-        // Check for return statement inside handler (uses comment-stripped source)
-        let has_return = check_handler_has_return(&clean);
-        if !has_return {
-            errors.push(ValidationError {
-                error_type: "structure".to_string(),
-                message: "Handler function MUST return a value. Without 'return' you will get: 'The handler function did not return a value'. Fix: add 'return { ... };' at the end of your handler function.".to_string(),
-                line: None,
-                column: None,
-            });
+        // Only check for return when handler is a real function declaration and
+        // has no signature issues — invalid shapes (arrow handlers, etc.) can
+        // cause misleading "MUST return" errors.
+        if !has_signature_issue && has_handler_function {
+            let has_return = check_handler_has_return(&clean);
+            if !has_return {
+                errors.push(ValidationError {
+                    error_type: "structure".to_string(),
+                    message: "Handler function MUST return a value. Without 'return' you will get: 'The handler function did not return a value'. Fix: add 'return { ... };' at the end of your handler function.".to_string(),
+                    line: None,
+                    column: None,
+                });
+            }
         }
     }
 
@@ -1064,6 +1069,8 @@ fn check_handler_signature_issue(source: &str) -> Option<(String, Option<u32>)> 
 
 /// Check if the handler function contains a return statement.
 /// Scans ONLY the handler function body (brace-matched) for 'return'.
+/// Skips nested function declarations, generator functions, and arrow
+/// function bodies so their returns are not counted as handler returns.
 fn check_handler_has_return(source: &str) -> bool {
     // Source is already comment-stripped — just brace-match the handler body
     if let Some(handler_pos) = source.find("function handler") {
@@ -1094,11 +1101,30 @@ fn check_handler_has_return(source: &str) -> bool {
                         }
                     }
                     b'f' => {
-                        if rest[i..].starts_with("function ")
+                        // Skip nested function and function* declarations
+                        if (rest[i..].starts_with("function ")
+                            || rest[i..].starts_with("function*"))
                             && let Some(after_nested) = skip_nested_block(rest, i)
                         {
                             i = after_nested;
                             continue;
+                        }
+                    }
+                    b'=' => {
+                        // Skip arrow function bodies: => { ... }
+                        if rest[i..].starts_with("=>") {
+                            let after_arrow = rest[i + 2..].trim_start();
+                            if after_arrow.starts_with('{') {
+                                // Find the position of the opening brace in the
+                                // original rest slice and skip the braced body
+                                let arrow_brace_offset = rest.len() - after_arrow.len();
+                                if let Some(after_nested) =
+                                    skip_nested_block(rest, arrow_brace_offset)
+                                {
+                                    i = after_nested;
+                                    continue;
+                                }
+                            }
                         }
                     }
                     _ => {}
