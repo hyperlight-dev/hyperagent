@@ -31,7 +31,7 @@
   },
   "dependencies": {
     "@azure/msal-node": "^5.1.4",
-    "@github/copilot-sdk": "^0.2.1",
+    "@github/copilot-sdk": "^0.3.0",
     "@hyperlight/js-host-api": "file:deps/js-host-api",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "boxen": "^8.0.1",
