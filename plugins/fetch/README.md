@@ -18,34 +18,32 @@ You: /plugin enable fetch allowedDomains=api.github.com,*.example.com
 Guest code:
 
 ```javascript
-const fetch = require('host:fetch');
+const fetch = require("host:fetch");
 
 // GET returns metadata only — body is read separately
-const res = fetch.get('https://api.github.com/repos/deislabs/hyperlight');
+const res = fetch.get("https://api.github.com/repos/deislabs/hyperlight");
 if (res.error) {
-    console.log('Failed:', res.error);
+  console.log("Failed:", res.error);
 } else {
-    // Read the body (same pattern for small or large responses)
-    let body = '';
-    let chunk;
-    do {
-        chunk = fetch.read('https://api.github.com/repos/deislabs/hyperlight');
-        body += chunk.data;
-    } while (!chunk.done);
+  // Read the body (same pattern for small or large responses)
+  let body = "";
+  let chunk;
+  do {
+    chunk = fetch.read("https://api.github.com/repos/deislabs/hyperlight");
+    body += chunk.data;
+  } while (!chunk.done);
 
-    if (res.contentType === 'application/json') {
-        const data = JSON.parse(body);
-        console.log(data.full_name); // "deislabs/hyperlight"
-    }
+  if (res.contentType === "application/json") {
+    const data = JSON.parse(body);
+    console.log(data.full_name); // "deislabs/hyperlight"
+  }
 }
 ```
 
 ## Security Model
 
 This is the most security-sensitive plugin — it opens a controlled channel
-between untrusted guest code and the internet. The design was reviewed by
-the **Three Musketeers** (security, architecture, and DX reviewers),
-resulting in 20+ security measures.
+between untrusted guest code and the internet.
 
 | Layer                              | Defence                                                                                                        |
 | ---------------------------------- | -------------------------------------------------------------------------------------------------------------- |
@@ -62,7 +60,7 @@ resulting in 20+ security measures.
 | **Timing side-channel**            | 200ms minimum response delay on ALL code paths (blocked, allowed, error).                                      |
 | **Connection isolation**           | `keepAlive: false`, `maxSockets: 1` per request. No connection reuse.                                          |
 | **Single in-flight**               | Promise mutex — only one request at a time. No concurrency.                                                    |
-| **Audit logging**                  | JSONL to `~/.hyperagent/fetch-log.jsonl`. File mode `0600`. Auto-rotation at 5000 entries.                |
+| **Audit logging**                  | JSONL to `~/.hyperagent/fetch-log.jsonl`. File mode `0600`. Auto-rotation at 5000 entries.                     |
 | **Content-Type gating**            | Response Content-Type must match the allowlist. Non-matching types rejected.                                   |
 | **SSRF masking**                   | Private/internal IP blocking masked behind generic `fetch failed: request error` to avoid leaking topology.    |
 
@@ -77,18 +75,18 @@ overridden via inline config.
 | `allowedDomains`          | `array`   | _(none)_                              | ✅       | Allowed domains. Empty = all blocked. Supports `*.example.com` wildcards. |
 | `allowPost`               | `boolean` | `false`                               | ✅       | Enable POST requests (GET always available).                              |
 | `allowedRequestHeaders`   | `array`   | `Authorization, Content-Type, Accept` | ❌       | Headers the guest may set.                                                |
-| `allowedContentTypes`     | `array`   | `application/json, text/*`    | ❌       | Allowed response Content-Type prefixes.                                   |
+| `allowedContentTypes`     | `array`   | `application/json, text/*`            | ❌       | Allowed response Content-Type prefixes.                                   |
 | `userAgent`               | `string`  | `hyperlight-fetch/1.0`                | ❌       | Static User-Agent header sent on all requests.                            |
 | `connectTimeoutMs`        | `number`  | `5000`                                | ❌       | TCP+TLS connect timeout (1000-10000ms).                                   |
 | `readTimeoutMs`           | `number`  | `10000`                               | ❌       | Read timeout (1000-30000ms).                                              |
-| `maxResponseSizeKb`       | `number`  | `256`                                 | ❌       | Max response body (1-8192 KB).                                            |
+| `maxResponseSizeKb`       | `number`  | `1024`                                | ❌       | Max response body (1-65536 KB).                                           |
 | `readSizeKb`              | `number`  | `48`                                  | ❌       | Max body returned per read() call (8-256 KB).                             |
 | `responseCacheTtlSeconds` | `number`  | `300`                                 | ❌       | Response body cache TTL on host (30-600s).                                |
 | `maxRequestBodySizeKb`    | `number`  | `4`                                   | ❌       | Max POST body (1-64 KB).                                                  |
 | `maxRequestsPerMinute`    | `number`  | `30`                                  | ❌       | Sliding window per-minute cap (1-60).                                     |
 | `maxRequestsPerHour`      | `number`  | `100`                                 | ❌       | Per-session hourly cap (1-500).                                           |
 | `maxDomainsPerSession`    | `number`  | `5`                                   | ❌       | Unique domains per session (1-20).                                        |
-| `maxDataReceivedKb`       | `number`  | `512`                                 | ❌       | Total data budget per session (1-16384 KB).                               |
+| `maxDataReceivedKb`       | `number`  | `2048`                                | ❌       | Total data budget per session (1-1048576 KB).                             |
 | `returnXRequestId`        | `boolean` | `false`                               | ❌       | Include `X-Request-Id` in response.                                       |
 
 ### Inline Config Examples
@@ -96,7 +94,7 @@ overridden via inline config.
 ```
 /plugin enable fetch allowedDomains=api.github.com
 /plugin enable fetch allowedDomains=api.github.com,*.example.com allowPost=true
-/plugin enable fetch allowedDomains=api.github.com maxRequestsPerMinute=10 maxResponseSizeKb=128
+/plugin enable fetch allowedDomains=api.github.com maxRequestsPerMinute=10 maxResponseSizeKb=65536 maxDataReceivedKb=1048576
 ```
 
 ## Functions
@@ -201,54 +199,54 @@ The system message includes all categories so the LLM knows which are retryable 
 ## Guest Usage Examples
 
 ```javascript
-const fetch = require('host:fetch');
+const fetch = require("host:fetch");
 
 // --- Helper to read the full body ---
 function readBody(url) {
-    let body = '';
-    let chunk;
-    do {
-        chunk = fetch.read(url);
-        body += chunk.data;
-    } while (!chunk.done);
-    return body;
+  let body = "";
+  let chunk;
+  do {
+    chunk = fetch.read(url);
+    body += chunk.data;
+  } while (!chunk.done);
+  return body;
 }
 
 // Simple GET — result is metadata, body is read separately
-const url = 'https://api.example.com/data';
+const url = "https://api.example.com/data";
 const res = fetch.get(url);
 if (res.error) {
-    console.log('Error:', res.error);
+  console.log("Error:", res.error);
 } else {
-    const body = readBody(url);
-    if (res.contentType === 'application/json') {
-        const data = JSON.parse(body);
-        console.log(data);
-    } else {
-        console.log(body); // HTML, plain text, etc.
-    }
+  const body = readBody(url);
+  if (res.contentType === "application/json") {
+    const data = JSON.parse(body);
+    console.log(data);
+  } else {
+    console.log(body); // HTML, plain text, etc.
+  }
 }
 
 // GET with headers
-const authedUrl = 'https://api.example.com/me';
+const authedUrl = "https://api.example.com/me";
 const authed = fetch.get(authedUrl, {
-    headers: { Authorization: 'Bearer token123' },
+  headers: { Authorization: "Bearer token123" },
 });
 if (authed.ok) {
-    const profile = JSON.parse(readBody(authedUrl));
-    console.log(profile);
+  const profile = JSON.parse(readBody(authedUrl));
+  console.log(profile);
 }
 
 // POST (if enabled)
-const postUrl = 'https://api.example.com/submit';
+const postUrl = "https://api.example.com/submit";
 const posted = fetch.post(
-    postUrl,
-    { key: 'value' },
-    { headers: { 'Content-Type': 'application/json' } }
+  postUrl,
+  { key: "value" },
+  { headers: { "Content-Type": "application/json" } },
 );
 if (posted.ok) {
-    const result = JSON.parse(readBody(postUrl));
-    console.log(result);
+  const result = JSON.parse(readBody(postUrl));
+  console.log(result);
 }
 ```
 

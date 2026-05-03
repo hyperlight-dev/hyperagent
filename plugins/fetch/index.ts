@@ -110,10 +110,10 @@ export const SCHEMA = {
   maxResponseSizeKb: {
     type: "number" as const,
     description:
-      "Maximum total response body size in KB (max 8192). Responses larger than this are rejected.",
+      "Maximum total response body size in KB (max 65536). Responses larger than this are rejected.",
     default: 1024,
     minimum: 1,
-    maximum: 8192,
+    maximum: 65536,
   },
   readSizeKb: {
     type: "number" as const,
@@ -161,10 +161,10 @@ export const SCHEMA = {
   },
   maxDataReceivedKb: {
     type: "number" as const,
-    description: "Maximum total response data per session in KB",
+    description: "Maximum total response data per session in KB (max 1048576)",
     default: 2048,
     minimum: 1,
-    maximum: 16384,
+    maximum: 1048576,
   },
   returnXRequestId: {
     type: "boolean" as const,
@@ -2850,7 +2850,7 @@ export function createHostFunctions(config?: FetchConfig): FetchHostFunctions {
     1000,
   );
   const maxResponseBytes =
-    safeNumericConfig(cfg.maxResponseSizeKb, 256, 8192) * 1024;
+    safeNumericConfig(cfg.maxResponseSizeKb, 1024, 65536) * 1024;
   const readSizeBytes = safeNumericConfig(cfg.readSizeKb, 48, 256, 8) * 1024;
   const responseCacheTtlMs =
     safeNumericConfig(cfg.responseCacheTtlSeconds, 300, 600, 30) * 1000;
@@ -2868,7 +2868,7 @@ export function createHostFunctions(config?: FetchConfig): FetchHostFunctions {
   }
   const maxDomains = safeNumericConfig(cfg.maxDomainsPerSession, 5, 20);
   const maxDataReceivedBytes =
-    safeNumericConfig(cfg.maxDataReceivedKb, 512, 16384) * 1024;
+    safeNumericConfig(cfg.maxDataReceivedKb, 2048, 1048576) * 1024;
   const returnXRequestId = !!cfg.returnXRequestId;
   const conditionalCacheMax = safeNumericConfig(
     cfg.conditionalCacheMaxEntries,
