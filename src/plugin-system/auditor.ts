@@ -15,7 +15,11 @@ import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { approveAll, type CopilotClient } from "@github/copilot-sdk";
+import {
+  approveAll,
+  type CopilotClient,
+  type SessionEvent,
+} from "@github/copilot-sdk";
 import type {
   PluginManifest,
   AuditResult,
@@ -655,130 +659,126 @@ export async function deepAudit(
       }
       signal?.addEventListener("abort", onAbort, { once: true });
 
-      const unsubscribe = auditSession.on(
-        (event: { type: string; data?: Record<string, unknown> }) => {
-          // Trace every event type so we can see what's happening
-          trace(
-            `event: ${event.type} ${JSON.stringify(event.data ?? {}).slice(0, 300)}`,
-          );
+      const unsubscribe = auditSession.on((event: SessionEvent) => {
+        // Trace every event type so we can see what's happening
+        trace(
+          `event: ${event.type} ${JSON.stringify(event.data ?? {}).slice(0, 300)}`,
+        );
 
-          // Only reset inactivity timer on CONTENT-BEARING events.
-          // Usage events and other housekeeping must NOT reset the
-          // timer — otherwise the audit can hang indefinitely getting
-          // usage events with no actual content.
-          const isContentEvent =
-            event.type === "assistant.message" ||
-            event.type === "assistant.message_delta" ||
-            event.type === "assistant.reasoning_delta" ||
-            event.type === "assistant.turn_start" ||
-            event.type === "assistant.turn_end";
+        // Only reset inactivity timer on CONTENT-BEARING events.
+        // Usage events and other housekeeping must NOT reset the
+        // timer — otherwise the audit can hang indefinitely getting
+        // usage events with no actual content.
+        const isContentEvent =
+          event.type === "assistant.message" ||
+          event.type === "assistant.message_delta" ||
+          event.type === "assistant.reasoning_delta" ||
+          event.type === "assistant.turn_start" ||
+          event.type === "assistant.turn_end";
 
-          if (isContentEvent) {
-            clearTimeout(timeoutId);
-            timeoutId = setTimeout(() => {
-              unsubscribe();
-              signal?.removeEventListener("abort", onAbort);
-              reject(
-                new Error(
-                  `Audit timed out — no events for ${AUDIT_INACTIVITY_MS / 1000}s`,
-                ),
-              );
-            }, AUDIT_INACTIVITY_MS);
-          }
-
-          if (event.type === "assistant.message") {
-            // Final complete message — extract content
-            const content = (event.data as { content?: string })?.content;
-            if (content) text = content;
-          } else if (event.type === "assistant.reasoning_delta") {
-            // Model is reasoning — forward to progress callback.
-            // The progress callback handles display logic (e.g.
-            // suppressing the preview after streaming starts).
-            const delta = (event.data as { deltaContent?: string })
-              ?.deltaContent;
-            if (delta) {
-              progress("reasoning", delta);
-            }
-          } else if (event.type === "assistant.message_delta") {
-            // Streaming delta — accumulate text for the final response.
-            // Skip whitespace-only deltas for progress display — the
-            // model can emit "\n\n" before reasoning starts (undocumented
-            // behaviour). We still accumulate the text but don't trigger
-            // the "Receiving audit report" UI for whitespace.
-            const delta = (event.data as { deltaContent?: string })
-              ?.deltaContent;
-            if (delta) {
-              text += delta;
-              if (text.trim().length > 0) {
-                progress(
-                  "streaming",
-                  `Receiving audit report (${text.length.toLocaleString()} chars)...`,
-                );
-              }
-            }
-          } else if (
-            event.type === "assistant.turn_start" ||
-            event.type === "assistant.turn_end"
-          ) {
-            // Turn lifecycle events — the CLI server fires these during
-            // multi-call continuation loops. They're the ONLY reliable
-            // life sign during dead zones where no message/reasoning
-            // deltas arrive (known SDK bug — see github/copilot-sdk#524).
-            // Forward to progress for spinner feedback.
-            const turnId = (event.data as { turnId?: string })?.turnId;
-            progress(
-              "turn",
-              `${event.type === "assistant.turn_start" ? "Turn" : "Turn complete"} ${turnId ?? ""}`.trim(),
-            );
-          } else if (event.type === "assistant.usage") {
-            // Accumulate usage stats — don't print each one.
-            // We emit a single aggregate summary at completion.
-            const d = event.data as {
-              inputTokens?: number;
-              outputTokens?: number;
-              cacheReadTokens?: number;
-              cost?: number;
-              duration?: number;
-            };
-            totalInputTokens += d.inputTokens ?? 0;
-            totalOutputTokens += d.outputTokens ?? 0;
-            totalCacheReadTokens += d.cacheReadTokens ?? 0;
-            totalCost += d.cost ?? 0;
-            totalDurationMs += d.duration ?? 0;
-            usageEventCount++;
-            // Update spinner so user knows it's still alive
-            progress(
-              "usage-tick",
-              `Analysis in progress (${usageEventCount} API call${usageEventCount === 1 ? "" : "s"})...`,
-            );
-          } else if (event.type === "session.idle") {
-            clearTimeout(timeoutId);
+        if (isContentEvent) {
+          clearTimeout(timeoutId);
+          timeoutId = setTimeout(() => {
             unsubscribe();
             signal?.removeEventListener("abort", onAbort);
-            // Emit aggregated usage summary
-            if (usageEventCount > 0) {
+            reject(
+              new Error(
+                `Audit timed out — no events for ${AUDIT_INACTIVITY_MS / 1000}s`,
+              ),
+            );
+          }, AUDIT_INACTIVITY_MS);
+        }
+
+        if (event.type === "assistant.message") {
+          // Final complete message — extract content
+          const content = (event.data as { content?: string })?.content;
+          if (content) text = content;
+        } else if (event.type === "assistant.reasoning_delta") {
+          // Model is reasoning — forward to progress callback.
+          // The progress callback handles display logic (e.g.
+          // suppressing the preview after streaming starts).
+          const delta = (event.data as { deltaContent?: string })?.deltaContent;
+          if (delta) {
+            progress("reasoning", delta);
+          }
+        } else if (event.type === "assistant.message_delta") {
+          // Streaming delta — accumulate text for the final response.
+          // Skip whitespace-only deltas for progress display — the
+          // model can emit "\n\n" before reasoning starts (undocumented
+          // behaviour). We still accumulate the text but don't trigger
+          // the "Receiving audit report" UI for whitespace.
+          const delta = (event.data as { deltaContent?: string })?.deltaContent;
+          if (delta) {
+            text += delta;
+            if (text.trim().length > 0) {
               progress(
-                "usage",
-                JSON.stringify({
-                  inputTokens: totalInputTokens,
-                  outputTokens: totalOutputTokens,
-                  cacheReadTokens: totalCacheReadTokens,
-                  cost: totalCost,
-                  duration: totalDurationMs,
-                }),
+                "streaming",
+                `Receiving audit report (${text.length.toLocaleString()} chars)...`,
               );
             }
-            resolve(text);
-          } else if (event.type === "session.error") {
-            clearTimeout(timeoutId);
-            unsubscribe();
-            signal?.removeEventListener("abort", onAbort);
-            const msg =
-              (event.data as { message?: string })?.message ?? "unknown error";
-            reject(new Error(msg));
           }
-        },
-      );
+        } else if (
+          event.type === "assistant.turn_start" ||
+          event.type === "assistant.turn_end"
+        ) {
+          // Turn lifecycle events — the CLI server fires these during
+          // multi-call continuation loops. They're the ONLY reliable
+          // life sign during dead zones where no message/reasoning
+          // deltas arrive (known SDK bug — see github/copilot-sdk#524).
+          // Forward to progress for spinner feedback.
+          const turnId = (event.data as { turnId?: string })?.turnId;
+          progress(
+            "turn",
+            `${event.type === "assistant.turn_start" ? "Turn" : "Turn complete"} ${turnId ?? ""}`.trim(),
+          );
+        } else if (event.type === "assistant.usage") {
+          // Accumulate usage stats — don't print each one.
+          // We emit a single aggregate summary at completion.
+          const d = event.data as {
+            inputTokens?: number;
+            outputTokens?: number;
+            cacheReadTokens?: number;
+            cost?: number;
+            duration?: number;
+          };
+          totalInputTokens += d.inputTokens ?? 0;
+          totalOutputTokens += d.outputTokens ?? 0;
+          totalCacheReadTokens += d.cacheReadTokens ?? 0;
+          totalCost += d.cost ?? 0;
+          totalDurationMs += d.duration ?? 0;
+          usageEventCount++;
+          // Update spinner so user knows it's still alive
+          progress(
+            "usage-tick",
+            `Analysis in progress (${usageEventCount} API call${usageEventCount === 1 ? "" : "s"})...`,
+          );
+        } else if (event.type === "session.idle") {
+          clearTimeout(timeoutId);
+          unsubscribe();
+          signal?.removeEventListener("abort", onAbort);
+          // Emit aggregated usage summary
+          if (usageEventCount > 0) {
+            progress(
+              "usage",
+              JSON.stringify({
+                inputTokens: totalInputTokens,
+                outputTokens: totalOutputTokens,
+                cacheReadTokens: totalCacheReadTokens,
+                cost: totalCost,
+                duration: totalDurationMs,
+              }),
+            );
+          }
+          resolve(text);
+        } else if (event.type === "session.error") {
+          clearTimeout(timeoutId);
+          unsubscribe();
+          signal?.removeEventListener("abort", onAbort);
+          const msg =
+            (event.data as { message?: string })?.message ?? "unknown error";
+          reject(new Error(msg));
+        }
+      });
 
       // Start inactivity timer
       timeoutId = setTimeout(() => {

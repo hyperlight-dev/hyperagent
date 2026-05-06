@@ -4,6 +4,7 @@
 // requiring users to download the repository Justfile or helper scripts.
 
 import { createHash } from "node:crypto";
+import { delimiter } from "node:path";
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
@@ -1142,10 +1143,13 @@ function refreshM365Servers(argv: string[], contentRoot: string): void {
   const endpoint = catalog.discoverEndpoint;
   if (!endpoint) fail("M365 catalog is missing discoverEndpoint");
 
-  const token = args.token ?? loadTokenFromCache();
+  const token =
+    args.token ??
+    loadTokenFromCache() ??
+    acquireDiscoveryToken(catalog, args, contentRoot);
   if (!token) {
     fail(
-      "No bearer token found. Provide --token <bearer>, or connect any work-iq-* server once to seed ~/.hyperagent/mcp-tokens/.",
+      "No bearer token found. Provide --token <bearer>, run hyperagent --mcp-m365-create-app, or connect any work-iq-* server once to seed ~/.hyperagent/mcp-tokens/.",
     );
   }
 
@@ -1258,22 +1262,174 @@ process.stdout.write(await response.text());
   }
 }
 
-function parseRefreshArgs(argv: string[]): {
+function acquireDiscoveryToken(
+  catalog: Catalog,
+  args: RefreshArgs,
+  contentRoot: string,
+): string | undefined {
+  const state = readJson<SavedM365State>(M365_STATE_FILE);
+  const clientId = args.clientId ?? state?.clientId;
+  const tenantId = args.tenantId ?? state?.tenantId;
+  const scope =
+    args.scope ?? `${catalog.resourceId ?? AGENT365_RESOURCE_ID}/.default`;
+  if (!clientId) return undefined;
+
+  logStep(`No cached token found; acquiring one with MSAL (${args.flow})`);
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+import { createRequire } from "node:module";
+import { execFile } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+const require = createRequire(import.meta.url);
+const msal = require("@azure/msal-node");
+const cacheDir = join(homedir(), ".hyperagent", "mcp-tokens");
+const cacheFile = join(cacheDir, "m365-discovery.msal.json");
+const clientId = process.env.HYPERAGENT_M365_CLIENT_ID;
+const tenantId = process.env.HYPERAGENT_M365_TENANT_ID;
+const scope = process.env.HYPERAGENT_M365_SCOPE;
+const flow = process.env.HYPERAGENT_M365_FLOW;
+if (!clientId || !scope || !flow) process.exit(2);
+
+function openBrowser(url) {
+  console.error("[mcp]    If the browser doesn't open, visit:");
+  console.error("[mcp]    " + url);
+  const [bin, args] = process.platform === "darwin"
+    ? ["open", [url]]
+    : process.platform === "win32"
+      ? ["cmd.exe", ["/c", "start", "", url]]
+      : ["xdg-open", [url]];
+  execFile(bin, args, { timeout: 10000 }, () => {});
+}
+
+const cachePlugin = {
+  async beforeCacheAccess(ctx) {
+    if (existsSync(cacheFile)) ctx.tokenCache.deserialize(readFileSync(cacheFile, "utf8"));
+  },
+  async afterCacheAccess(ctx) {
+    if (ctx.cacheHasChanged) {
+      mkdirSync(cacheDir, { recursive: true, mode: 0o700 });
+      writeFileSync(cacheFile, ctx.tokenCache.serialize(), { mode: 0o600 });
+    }
+  },
+};
+
+const pca = new msal.PublicClientApplication({
+  auth: {
+    clientId,
+    authority: tenantId
+      ? \`https://login.microsoftonline.com/\${tenantId}\`
+      : "https://login.microsoftonline.com/organizations",
+  },
+  cache: { cachePlugin },
+  system: { loggerOptions: { logLevel: msal.LogLevel.Warning } },
+});
+
+const scopes = [scope, "offline_access"];
+const accounts = await pca.getAllAccounts();
+let token = null;
+if (accounts.length > 0) {
+  try {
+    token = await pca.acquireTokenSilent({ account: accounts[0], scopes });
+  } catch {}
+}
+if (!token && flow === "device-code") {
+  token = await pca.acquireTokenByDeviceCode({
+    scopes,
+    deviceCodeCallback: (response) => {
+      console.error("");
+      console.error("[mcp] 🔐 Device code authentication required");
+      console.error("[mcp]    " + response.message);
+      console.error("");
+    },
+  });
+}
+if (!token && flow === "browser") {
+  console.error("[mcp] 🔐 Opening browser for authentication...");
+  token = await pca.acquireTokenInteractive({
+    scopes,
+    openBrowser: async (url) => openBrowser(url),
+    successTemplate: "<html><body><h1>Authentication Successful</h1><p>You can close this window and return to HyperAgent.</p><script>setTimeout(()=>window.close(),2000)</script></body></html>",
+    errorTemplate: "<html><body><h1>Authentication Failed</h1><p>Check the terminal for details.</p></body></html>",
+  });
+}
+if (!token?.accessToken) throw new Error("MSAL did not return an access token");
+process.stdout.write(token.accessToken);
+`,
+    ],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        NODE_PATH: nodePathForContentRoot(contentRoot),
+        HYPERAGENT_M365_CLIENT_ID: clientId,
+        HYPERAGENT_M365_TENANT_ID: tenantId ?? "",
+        HYPERAGENT_M365_SCOPE: scope,
+        HYPERAGENT_M365_FLOW: args.flow,
+      },
+      maxBuffer: 10 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "inherit"],
+    },
+  );
+
+  if (result.error)
+    fail(`MSAL token acquisition failed: ${result.error.message}`);
+  if (result.status !== 0) fail("MSAL token acquisition failed");
+  const token = result.stdout.trim();
+  if (token) logSuccess("Acquired discovery token with MSAL");
+  return token || undefined;
+}
+
+function nodePathForContentRoot(contentRoot: string): string {
+  const entries = [
+    join(contentRoot, "node_modules"),
+    join(contentRoot, "..", "..", "node_modules"),
+    process.env.NODE_PATH ?? "",
+  ].filter(Boolean);
+  return entries.join(delimiter);
+}
+
+interface RefreshArgs {
   token?: string;
+  clientId?: string;
+  tenantId?: string;
+  scope?: string;
+  flow: "browser" | "device-code";
   includeCustom: boolean;
-} {
-  const parsed: { token?: string; includeCustom: boolean } = {
+}
+
+function parseRefreshArgs(argv: string[]): RefreshArgs {
+  const parsed: RefreshArgs = {
+    flow: "browser",
     includeCustom: false,
   };
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
     if (arg === "--token" && index + 1 < argv.length) {
       parsed.token = argv[++index];
+    } else if (arg === "--client-id" && index + 1 < argv.length) {
+      parsed.clientId = argv[++index];
+    } else if (arg === "--tenant-id" && index + 1 < argv.length) {
+      parsed.tenantId = argv[++index];
+    } else if (arg === "--scope" && index + 1 < argv.length) {
+      parsed.scope = argv[++index];
+    } else if (arg === "--flow" && index + 1 < argv.length) {
+      const flow = argv[++index];
+      if (flow !== "browser" && flow !== "device-code") {
+        fail(`--flow must be "browser" or "device-code" (got: ${flow})`);
+      }
+      parsed.flow = flow;
     } else if (arg === "--include-custom") {
       parsed.includeCustom = true;
     } else if (arg === "--help" || arg === "-h") {
       console.log(
-        "Usage: hyperagent --mcp-m365-refresh-servers [--token <bearer>] [--include-custom]",
+        "Usage: hyperagent --mcp-m365-refresh-servers [--token <bearer>] [--client-id ID] [--tenant-id ID] [--scope SCOPE] [--flow browser|device-code] [--include-custom]",
       );
       process.exit(0);
     } else {

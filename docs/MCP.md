@@ -142,7 +142,7 @@ not start an agent session, and they do not require the repository Justfile.
 | `hyperagent --mcp-add-http <name> <url> [clientId] [tenantId] [scopes] [flow]` | Add a generic HTTP MCP server, optionally with OAuth. |
 | `hyperagent --mcp-m365-create-app [args...]` | Create/reuse an Entra app registration for Agent 365 HTTP MCP servers. Requires Azure CLI and `az login`. |
 | `hyperagent --mcp-setup-m365 [args...]` | Configure Agent 365 per-service HTTP MCP servers and pre-approve them. |
-| `hyperagent --mcp-m365-refresh-servers [args...]` | Refresh the user M365 server catalog using a cached or supplied bearer token. |
+| `hyperagent --mcp-m365-refresh-servers [args...]` | Refresh the user M365 server catalog using a supplied bearer token, cached MSAL token, or saved M365 app details. |
 | `hyperagent --mcp-m365-show` | Show saved M365 app registration details. |
 
 The Justfile recipes with matching names are development conveniences for this
@@ -517,7 +517,8 @@ pre-consented Agent 365 MCP scopes in one shot.
 #### Refreshing the server catalog
 
 ```bash
-hyperagent --mcp-m365-refresh-servers     # uses cached OAuth token
+hyperagent --mcp-m365-refresh-servers     # uses cached token or MSAL browser auth
+hyperagent --mcp-m365-refresh-servers --flow device-code  # SSH/headless auth
 hyperagent --mcp-m365-refresh-servers --token <bearer>  # explicit token
 ```
 
