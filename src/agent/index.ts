@@ -2038,9 +2038,10 @@ const executeJavascriptTool = defineTool("execute_javascript", {
             result:
               `Result saved to ${relativePath} (${(fullResultBytes / 1024).toFixed(1)} KB).\n` +
               `Preview (first 500 chars):\n${preview}\n\n` +
-              `Use read_output("${relativePath}") to read the full result.\n` +
-              `Use read_output("${relativePath}", startLine, endLine) for specific sections.\n` +
-              `You can also read this file from handler code via host:fs-read.`,
+              `IMPORTANT: Read the full output by writing a handler that reads "${relativePath}" via host:fs-read.\n` +
+              `Process the data in handler code — do NOT summarize or propose changes based only on the preview.\n` +
+              `Only use read_output("${relativePath}") directly if you need a quick look at a specific section;\n` +
+              `read_output("${relativePath}", startLine, endLine) supports line ranges.`,
             ...(consoleOutput?.length ? { consoleOutput } : {}),
             _resourceStats: resourceStats,
             _stats: stats ?? undefined,
@@ -2898,7 +2899,7 @@ const HELP_TOPICS: Record<string, string> = {
     "- YOU orchestrate: pass handler A's result as handler B's event",
     "",
     "HANDLER CODE STYLE:",
-    "- Every handler must define function handler(event) or async function handler(event)",
+    "- Every handler must define function handler(...) or async function handler(...)",
     "- The function name is mandatory; parameter names are flexible, and zero parameters are allowed",
     "- Module-level state persists across execute_javascript calls",
     "",

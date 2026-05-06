@@ -1003,7 +1003,12 @@ fn check_handler_function(source: &str) -> bool {
 }
 
 /// Diagnose handler declarations that look close but are not the required shape.
+/// If a valid `function handler` already exists at the top level, skip the
+/// misnamed-function check so nested helpers (e.g. `function process(...)`) are
+/// not flagged as errors.
 fn check_handler_signature_issue(source: &str) -> Option<(String, Option<u32>)> {
+    let has_valid_handler = check_handler_function(source);
+
     for (line_index, line) in source.lines().enumerate() {
         let trimmed = line.trim();
         let line_number = Some((line_index + 1) as u32);
@@ -1052,7 +1057,9 @@ fn check_handler_signature_issue(source: &str) -> Option<(String, Option<u32>)> 
             let name = &rest[..name_end];
             if name == "handler" {
                 continue;
-            } else if matches!(name, "Handler" | "handle" | "main" | "run" | "process") {
+            } else if !has_valid_handler
+                && matches!(name, "Handler" | "handle" | "main" | "run" | "process")
+            {
                 return Some((
                     alloc::format!(
                         "Handler function must be named exactly 'handler'. Found function '{}'. Fix: rename it to function handler(event) {{ ... return result; }}.",
@@ -1101,8 +1108,11 @@ fn check_handler_has_return(source: &str) -> bool {
                         }
                     }
                     b'f' => {
-                        // Skip nested function and function* declarations
+                        // Skip nested function declarations, generators, and
+                        // anonymous function expressions (function(...) { ... })
                         if (rest[i..].starts_with("function ")
+                            || rest[i..].starts_with("function(")
+                            || rest[i..].starts_with("function*(")
                             || rest[i..].starts_with("function*"))
                             && let Some(after_nested) = skip_nested_block(rest, i)
                         {
