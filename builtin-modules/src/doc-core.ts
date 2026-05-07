@@ -12,9 +12,10 @@
 
 // ── Colour Utilities ─────────────────────────────────────────────────
 
+/** Regex for a valid 6-character hex colour (with optional #). */
+const HEX_RE = /^#?[0-9A-Fa-f]{6}$/;
+
 /**
- * Convert a hex colour string to normalised format (strip leading #, uppercase).
- * This is the **lenient** version — it does NOT throw on bad input.
  * Normalise and validate a hex colour string.
  *
  * Throws on invalid input (non-hex strings, XML fragments, named
@@ -27,9 +28,16 @@
  * @throws {Error} If hex is not a valid 6-character hex colour
  */
 export function hexColor(hex: string): string {
-  if (typeof hex !== "string" || !/^#?[0-9A-Fa-f]{6}$/.test(hex)) {
+  if (typeof hex !== "string" || !HEX_RE.test(hex)) {
+    // Safely render non-string values without risking Symbol/object toString
+    const display =
+      typeof hex === "string"
+        ? hex.length > 30
+          ? hex.slice(0, 30) + "..."
+          : hex
+        : `[${typeof hex}]`;
     throw new Error(
-      `Invalid hex colour: "${typeof hex === "string" && hex.length > 30 ? hex.slice(0, 30) + "..." : hex}". ` +
+      `Invalid hex colour: "${display}". ` +
         `Expected a 6-character hex string like "2196F3" or "#FF9800".`,
     );
   }
@@ -325,8 +333,7 @@ export function isDark(hex: string): boolean {
 // three layers deep. Every error message is LLM-actionable: it tells
 // the caller WHAT is wrong, WHY, and HOW to fix it.
 
-/** Regex for a valid 6-character hex colour (with optional #). */
-const HEX_RE = /^#?[0-9A-Fa-f]{6}$/;
+// HEX_RE is defined at the top of the file alongside hexColor().
 
 /**
  * Validate and normalise a hex colour string.

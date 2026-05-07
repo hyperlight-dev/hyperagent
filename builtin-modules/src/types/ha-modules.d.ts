@@ -43,8 +43,6 @@ declare module "ha:crc32" {
 
 declare module "ha:doc-core" {
   /**
-   * Convert a hex colour string to normalised format (strip leading #, uppercase).
-   * This is the **lenient** version — it does NOT throw on bad input.
    * Normalise and validate a hex colour string.
    *
    * Throws on invalid input (non-hex strings, XML fragments, named

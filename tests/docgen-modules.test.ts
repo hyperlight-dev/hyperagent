@@ -51,6 +51,50 @@ describe("ooxml-core", () => {
     it("should handle already-clean input", () => {
       expect(core.hexColor("ABCDEF")).toBe("ABCDEF");
     });
+
+    it("should throw on XML fragment input", () => {
+      expect(() =>
+        core.hexColor(
+          '<p:bg><p:bgPr><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></p:bgPr></p:bg>',
+        ),
+      ).toThrow("Invalid hex colour");
+    });
+
+    it("should throw on named colour", () => {
+      expect(() => core.hexColor("red")).toThrow("Invalid hex colour");
+    });
+
+    it("should throw on 3-char shorthand", () => {
+      expect(() => core.hexColor("FFF")).toThrow("Invalid hex colour");
+    });
+
+    it("should throw on rgb() notation", () => {
+      expect(() => core.hexColor("rgb(255,0,0)")).toThrow("Invalid hex colour");
+    });
+
+    it("should throw on empty string", () => {
+      expect(() => core.hexColor("")).toThrow("Invalid hex colour");
+    });
+
+    it("should truncate long strings in error message", () => {
+      const longXml = "<a:gradFill>" + "x".repeat(100);
+      try {
+        core.hexColor(longXml);
+      } catch (e: unknown) {
+        const msg = (e as Error).message;
+        expect(msg).toContain("...");
+        expect(msg.length).toBeLessThan(200);
+      }
+    });
+
+    it("should safely handle non-string input", () => {
+      expect(() => core.hexColor(42 as unknown as string)).toThrow(
+        "Invalid hex colour",
+      );
+      expect(() => core.hexColor(null as unknown as string)).toThrow(
+        "Invalid hex colour",
+      );
+    });
   });
 
   describe("themes", () => {
