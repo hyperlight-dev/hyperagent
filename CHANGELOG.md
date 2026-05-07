@@ -6,9 +6,92 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-05-07
+
+### Added
+
+- **Estimated cost in token display** — Per-request and session-level cost estimates based on model list pricing (Claude, OpenAI, Gemini). Shows cache savings breakdown. New `getModelPricing()` and `estimateCost()` exports for reuse (#114)
+- **Actionable limit error messages** — Every plugin error about a breached configurable limit now tells the LLM which config field to increase via `manage_plugin` (21 messages across fs-read, fs-write, fetch) (#112)
+- **Configurable plugin limits** — Previously hardcoded ceilings (per-call chunk sizes, rate limits, session budgets, etc.) are now user-configurable with no artificial maximums. Includes `maxReadChunkKb`, `maxListResults`, `maxWriteChunkKb`, `maxRedirects`, `maxJsonResponseBytes`, `maxTextResponseBytes` and more (#106)
+- **Clarifying questions for skills** — pptx-expert, pdf-expert, xlsx-expert skills now include structured "Clarifying Questions" sections that tell the LLM what to ask when details are missing (#110)
+- **Cache write token tracking** — `cacheWriteTokens` from the SDK is now accumulated in session state for accurate cost calculation (#114)
+
+### Fixed
+
+- **ha:pdf import validation failure** — Native module resolution loop broke early when a transitive dependency (e.g. `ha:ziplib`) had no JS source, producing a cryptic empty error. Now checks `moduleJsons` and `dtsSources` alongside `sources` before breaking (#111)
+- **PPTX shape ID collision on restore** — `restorePresentation()` set the shape ID counter AFTER `createPresentation()`, causing duplicate IDs when shapes were created between the two calls. Counter is now restored FIRST. Includes fallback max-ID scan for legacy serialized data (#113)
+- **Plugin config silently clamped** — `safeNumericConfig` from `path-jail.ts` defaults to a 10 MB ceiling. Plugin code that omitted the ceiling arg had values like `maxWriteSizeKb: 20480` silently clamped to 10240 (#106)
+- **fetchJSON/fetchText byte counting** — Used `body.length` (UTF-16 code units) instead of `Buffer.byteLength(body, 'utf8')` for the configured byte limit check (#106)
+
 ### Changed
 
-- **Trusted npm publishing** — Publish workflow now uses OIDC trusted publishing with `--provenance` for release-triggered publishes, eliminating the need for a long-lived `NPM_TOKEN` secret. Manual `workflow_dispatch` publishes fall back to `NPM_TOKEN`.
+- **Handler validation guidance** — Stricter handler shape requirements with better error messages; nested helper functions no longer trigger false-positive misnamed-handler errors; `function(` expressions properly skipped in return detection (#105, #101)
+- **SDK forward compatibility** — Use SDK `SessionEvent` type for forward compat with copilot-sdk 0.3.0 (#100)
+
+## [v0.4.2] - 2026-04-29
+
+### Added
+
+- **MSAL M365 server discovery** — Bootstrap MCP server discovery for Microsoft 365 services using MSAL authentication (#97)
+
+## [v0.4.1] - 2026-04-29
+
+### Fixed
+
+- **Release smoke test** — Removed fragile package size check from post-publish smoke test (#96)
+
+## [v0.4.0] - 2026-04-29
+
+### Fixed
+
+- **MCP tool discovery flow** — Improved MCP tool discovery and connection lifecycle (#95)
+- **Bold slash command detection** — Detect suggested slash commands wrapped in markdown bold formatting (#94)
+- **npm package size** — Reduced published package size and hardened post-publish smoke test (#93)
+
+## [v0.3.0] - 2026-04-28
+
+### Added
+
+- **Excel XLSX module** — Promoted `ha:xlsx` to a builtin module with workbook, sheet, chart, pivot table, and conditional formatting APIs (#86)
+- **M365 MCP integration** — Microsoft 365 MCP server support for calendar, email, and Teams (#83)
+- **`/plugins` alias** — `/plugins` now works as an alias for `/plugin` (#84)
+
+### Fixed
+
+- **Handler edits and MCP gateway** — Improved handler edit flow and MCP gateway module loading (#88)
+
+### Changed
+
+- **README** — Restructured to be capabilities-first (#87)
+- **CI** — Added post-publish smoke test job (#85)
+
+## [v0.2.3] - 2026-04-23
+
+### Fixed
+
+- **npm install** — Fixed package installation issues (#79)
+
+## [v0.2.2] - 2026-04-23
+
+### Fixed
+
+- **Publish workflow** — Fixed npm publishing workflow and updated release documentation (#77, #78)
+
+## [v0.2.1] - 2026-04-23
+
+### Added
+
+- **PDF document support** — Full PDF generation with flow layout, charts, themes, and font embedding via `ha:pdf`, `ha:pdf-charts`, and `ha:doc-core` modules (#51)
+- **MCP integration** — Model Context Protocol support for external tool servers with SSE and stdio transports (#57)
+- **Kubernetes deployment** — AKS and KIND deployment manifests with Hyperlight DaemonSet and agent pods (#54)
+- **Token usage tracking** — Per-request and session-total token counts with cache hit reporting (#58)
+- **Trusted npm publishing** — OIDC-based publishing with `--provenance` (#62)
+- **Dependabot automation** — Enhanced Dependabot config with auto-approval for patch updates (#20, #45)
+
+### Fixed
+
+- **Hyperlight dependency alignment** — Aligned code-validator Hyperlight deps with hyperlight-js to prevent version skew (#64)
+- **npm publish** — Fixed publish workflow issues (#76)
 
 ## [v0.1.6] - 2026-03-27
 
@@ -173,6 +256,16 @@ Initial public release.
 - Path jailing for filesystem plugins
 - SSRF protection for fetch plugin (DNS + post-connect IP validation)
 
+[v0.5.0]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.5.0
+[v0.4.2]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.4.2
+[v0.4.1]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.4.1
+[v0.4.0]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.4.0
+[v0.3.0]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.3.0
+[v0.2.3]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.2.3
+[v0.2.2]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.2.2
+[v0.2.1]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.2.1
+[v0.1.6]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.1.6
+[v0.1.5]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.1.5
 [v0.1.4]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.1.4
 [v0.1.3]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.1.3
 [v0.1.2]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.1.2
