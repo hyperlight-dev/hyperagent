@@ -2464,6 +2464,47 @@ describe("layout helpers", () => {
       });
       expect(pres2._images[0].relId).toBe("rIdImage1");
     });
+
+    it("should preserve shape ID counter across serialize/restore", () => {
+      // Part 1: Create presentation with several shapes
+      const pres1 = pptx.createPresentation();
+      pptx.titleSlide(pres1, { title: "Slide 1" });
+      pptx.contentSlide(pres1, { title: "Slide 2", body: "Content" });
+      pptx.contentSlide(pres1, { title: "Slide 3", body: "More" });
+
+      const state = pres1.serialize();
+      // Counter should be > 1 after creating shapes
+      expect(state.shapeIdCounter).toBeGreaterThan(1);
+
+      // Part 2: Restore and add slide numbers (which create new shapes)
+      const pres2 = pptx.restorePresentation(state);
+      pptx.addSlideNumbers(pres2);
+
+      // Should NOT throw duplicate shape ID validation errors
+      const zip = pres2.buildZip();
+      expect(zip).toBeInstanceOf(Uint8Array);
+      expect(zip.length).toBeGreaterThan(0);
+    });
+
+    it("should scan slides for max ID when shapeIdCounter is missing", () => {
+      // Simulate a legacy serialized presentation without shapeIdCounter
+      const pres1 = pptx.createPresentation();
+      pptx.titleSlide(pres1, { title: "Title" });
+      pptx.contentSlide(pres1, { title: "Content", body: "Body" });
+
+      const state = pres1.serialize();
+      // Remove the counter to simulate legacy data
+      delete (state as Record<string, unknown>).shapeIdCounter;
+
+      // Restore should scan and find max ID from shapes
+      const pres2 = pptx.restorePresentation(state);
+      pptx.addSlideNumbers(pres2);
+
+      // Should NOT throw duplicate shape ID validation errors
+      const zip = pres2.buildZip();
+      expect(zip).toBeInstanceOf(Uint8Array);
+      expect(zip.length).toBeGreaterThan(0);
+    });
   });
 });
 

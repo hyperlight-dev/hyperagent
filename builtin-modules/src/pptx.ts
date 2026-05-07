@@ -3916,7 +3916,9 @@ function textFitsInBox(
  * @param items - Array of shape XML strings or objects with toString()
  * @returns Combined XML string
  */
-export function shapes(items: Array<ShapeFragment | null | undefined>): ShapeFragment {
+export function shapes(
+  items: Array<ShapeFragment | null | undefined>,
+): ShapeFragment {
   if (!Array.isArray(items)) {
     throw new Error(
       `shapes(): expected an array of ShapeFragment items, but got ${typeof items}. ` +
@@ -4389,6 +4391,25 @@ export interface ValidationResult {
  * @returns ValidationResult with any issues found
  * @internal
  */
+
+/** Regex to extract shape IDs from OOXML slide shapes XML.
+ * Used by both validation (duplicate detection) and restore (max ID scan). */
+const SHAPE_ID_REGEX = /<p:cNvPr\s+id="(\d+)"/g;
+
+/**
+ * Scan slide shapes XML and return all numeric shape IDs found.
+ * @param shapes - Raw OOXML shapes XML string from a slide
+ * @returns Array of numeric shape IDs
+ */
+function _extractShapeIds(shapes: string): number[] {
+  const ids: number[] = [];
+  for (const m of shapes.matchAll(SHAPE_ID_REGEX)) {
+    const n = parseInt(m[1], 10);
+    if (Number.isFinite(n)) ids.push(n);
+  }
+  return ids;
+}
+
 function _validatePresentation(
   slides: SlideData[],
   charts: ChartEntry[],
@@ -4422,7 +4443,11 @@ function _validatePresentation(
     if (topTags) {
       for (const tag of topTags) {
         const nodeName = tag.match(/<(p:\w+)/)?.[1];
-        if (nodeName && !ALLOWED_SHAPE_NODES.has(nodeName) && nodeName !== "p:txBody") {
+        if (
+          nodeName &&
+          !ALLOWED_SHAPE_NODES.has(nodeName) &&
+          nodeName !== "p:txBody"
+        ) {
           // Only warn for unexpected nodes (not errors, since some are legit internal use)
           warnings.push({
             code: "PPTX_UNEXPECTED_SHAPE_NODE",
@@ -4436,11 +4461,11 @@ function _validatePresentation(
     }
 
     // A3: Detect duplicate shape IDs within a slide
-    const idMatches = shapes.matchAll(/<p:cNvPr\s+id="(\d+)"/g);
+    const slideShapeIds = _extractShapeIds(shapes);
     const slideIds = new Set<string>();
-    for (const m of idMatches) {
-      const id = m[1];
-      if (slideIds.has(id)) {
+    for (const id of slideShapeIds) {
+      const idStr = String(id);
+      if (slideIds.has(idStr)) {
         errors.push({
           code: "PPTX_DUPLICATE_SHAPE_ID",
           severity: "error",
@@ -4449,15 +4474,16 @@ function _validatePresentation(
           hint: "Each shape must have a unique ID. This usually means shapes were copy-pasted incorrectly.",
         });
       }
-      slideIds.add(id);
+      slideIds.add(idStr);
       // Track globally too
-      if (!globalShapeIds.has(id)) globalShapeIds.set(id, []);
-      globalShapeIds.get(id)!.push(i);
+      if (!globalShapeIds.has(idStr)) globalShapeIds.set(idStr, []);
+      globalShapeIds.get(idStr)!.push(i);
     }
 
     // A4: Check balanced required tags
     for (const tag of ["p:sp", "p:pic", "p:graphicFrame", "p:cxnSp"]) {
-      const opens = (shapes.match(new RegExp(`<${tag}[\\s>]`, "g")) || []).length;
+      const opens = (shapes.match(new RegExp(`<${tag}[\\s>]`, "g")) || [])
+        .length;
       const closes = (shapes.match(new RegExp(`</${tag}>`, "g")) || []).length;
       if (opens !== closes) {
         errors.push({
@@ -4521,19 +4547,20 @@ function _validatePresentation(
         errors.push({
           code: "PPTX_CHART_MISSING_ROOT",
           severity: "error",
-          message: "Chart XML missing required <c:chartSpace> or <c:chart> elements.",
+          message:
+            "Chart XML missing required <c:chartSpace> or <c:chart> elements.",
           part: entry.name,
           hint: "Regenerate the chart using barChart/pieChart/lineChart/comboChart.",
         });
       }
 
       // B3b: Axis ID/crossAx consistency (for bar/line/combo charts)
-      const axIds = [...xml.matchAll(/<c:axId val="(\d+)"\/>/g)].map((m) =>
-        m[1],
+      const axIds = [...xml.matchAll(/<c:axId val="(\d+)"\/>/g)].map(
+        (m) => m[1],
       );
-      const crossAxIds = [
-        ...xml.matchAll(/<c:crossAx val="(\d+)"\/>/g),
-      ].map((m) => m[1]);
+      const crossAxIds = [...xml.matchAll(/<c:crossAx val="(\d+)"\/>/g)].map(
+        (m) => m[1],
+      );
       for (const crossId of crossAxIds) {
         if (!axIds.includes(crossId)) {
           errors.push({
@@ -4937,7 +4964,9 @@ export function createPresentation(opts?: CreatePresentationOptions) {
         );
       }
       // Validate and convert ShapeFragment(s) to XML, then delegate to internal method
-      const shapesStr = fragmentsToXml(shapesInput as ShapeFragment | ShapeFragment[]);
+      const shapesStr = fragmentsToXml(
+        shapesInput as ShapeFragment | ShapeFragment[],
+      );
       pres._addBodyRaw(shapesStr, slideOpts);
     },
 
@@ -5869,6 +5898,29 @@ export function restorePresentation(state: SerializedPresentation): Pres {
     );
   }
 
+  // Restore shape ID counter FIRST — before createPresentation or any other
+  // function that might generate shapes. This prevents ID collisions when
+  // the module's global counter has been reset (e.g., handler recompilation
+  // resets ESM module-level variables to initial values).
+  if (
+    typeof state.shapeIdCounter === "number" &&
+    Number.isFinite(state.shapeIdCounter) &&
+    Number.isInteger(state.shapeIdCounter) &&
+    state.shapeIdCounter >= 1
+  ) {
+    setShapeIdCounter(state.shapeIdCounter);
+  } else if (state.slides && Array.isArray(state.slides)) {
+    // No valid saved counter — scan existing slides to find the max shape ID
+    // so new shapes don't collide with restored ones.
+    let maxId = 1;
+    for (const slide of state.slides) {
+      for (const id of _extractShapeIds(slide.shapes)) {
+        if (id > maxId) maxId = id;
+      }
+    }
+    setShapeIdCounter(maxId);
+  }
+
   // Recreate the presentation with the same options
   const pres = createPresentation({
     theme: state.themeName,
@@ -5897,12 +5949,6 @@ export function restorePresentation(state: SerializedPresentation): Pres {
   }
   if (state.chartEntries && Array.isArray(state.chartEntries)) {
     pres._chartEntries = state.chartEntries;
-  }
-
-  // Restore shape ID counter to prevent duplicate IDs when adding new shapes
-  // This is critical for addSlideNumbers/addFooter called after restore
-  if (typeof state.shapeIdCounter === "number") {
-    setShapeIdCounter(state.shapeIdCounter);
   }
 
   return pres;
