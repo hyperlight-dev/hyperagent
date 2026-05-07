@@ -140,6 +140,8 @@ const MODEL_PRICING: Array<{ prefix: string; pricing: ModelPricing }> = [
 
 /**
  * Look up pricing for a model by name prefix.
+ * Matches against known model prefixes, requiring a word boundary
+ * (end-of-string or '-') after the prefix to avoid misclassification.
  * Returns undefined if no matching pricing tier is found.
  */
 export function getModelPricing(
@@ -147,12 +149,18 @@ export function getModelPricing(
 ): ModelPricing | undefined {
   if (!modelName) return undefined;
   const lower = modelName.toLowerCase();
-  return MODEL_PRICING.find((entry) => lower.startsWith(entry.prefix))?.pricing;
+  return MODEL_PRICING.find((entry) => {
+    if (!lower.startsWith(entry.prefix)) return false;
+    // Require word boundary after prefix: end-of-string or '-'
+    const afterPrefix = lower[entry.prefix.length];
+    return afterPrefix === undefined || afterPrefix === "-";
+  })?.pricing;
 }
 
 /**
  * Calculate the estimated cost in USD for a set of token counts.
- * Returns undefined if pricing is not available for the model.
+ * The inputTokens parameter should be non-cached input only (total
+ * input minus cache reads) to avoid double-counting.
  */
 export function estimateCost(
   pricing: ModelPricing,
@@ -204,9 +212,15 @@ export function formatUsageStats(d: UsageData): string | null {
   // Estimated cost for this request based on model pricing
   const pricing = getModelPricing(d.model);
   if (pricing) {
+    // Subtract cache reads from input to avoid double-counting —
+    // inputTokens typically includes the cached portion.
+    const nonCachedInput = Math.max(
+      0,
+      (d.inputTokens ?? 0) - (d.cacheReadTokens ?? 0),
+    );
     const reqCost = estimateCost(
       pricing,
-      d.inputTokens ?? 0,
+      nonCachedInput,
       d.outputTokens ?? 0,
       d.cacheReadTokens ?? 0,
       d.cacheWriteTokens ?? 0,
@@ -241,7 +255,7 @@ export function formatTokenSummary(state: {
   totalCacheWriteTokens: number;
   totalRequests: number;
   totalTurns: number;
-  currentModel: string;
+  currentModel?: string;
 }): string[] {
   const total = state.totalInputTokens + state.totalOutputTokens;
   const lines: string[] = [];
