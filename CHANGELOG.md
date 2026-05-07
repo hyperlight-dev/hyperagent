@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **PPTX hex colour XML injection** — `hexColor()` did no validation, allowing non-hex strings (like gradient XML) to be embedded as `srgbClr val` attributes, producing corrupt OOXML that PowerPoint would repair by stripping entire slides. Now validates with `HEX_RE` and throws descriptive errors (#115)
 - **ha:pdf import validation failure** — Native module resolution loop broke early when a transitive dependency (e.g. `ha:ziplib`) had no JS source, producing a cryptic empty error. Now checks `moduleJsons` and `dtsSources` alongside `sources` before breaking (#111)
 - **PPTX shape ID collision on restore** — `restorePresentation()` set the shape ID counter AFTER `createPresentation()`, causing duplicate IDs when shapes were created between the two calls. Counter is now restored FIRST. Includes fallback max-ID scan for legacy serialized data (#113)
 - **Plugin config silently clamped** — `safeNumericConfig` from `path-jail.ts` defaults to a 10 MB ceiling. Plugin code that omitted the ceiling arg had values like `maxWriteSizeKb: 20480` silently clamped to 10240 (#106)
