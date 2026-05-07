@@ -252,6 +252,9 @@ export interface AgentState {
   /** Cumulative cache-read tokens across all LLM requests this session. */
   totalCacheReadTokens: number;
 
+  /** Cumulative cache-write tokens across all LLM requests this session. */
+  totalCacheWriteTokens: number;
+
   /** Total number of LLM API requests (one per assistant.usage event). */
   totalRequests: number;
 
@@ -339,6 +342,7 @@ export function createAgentState(
     totalInputTokens: 0,
     totalOutputTokens: 0,
     totalCacheReadTokens: 0,
+    totalCacheWriteTokens: 0,
     totalRequests: 0,
     totalTurns: 0,
   };

@@ -435,6 +435,7 @@ export function registerEventHandler(
         state.totalInputTokens += usageData.inputTokens ?? 0;
         state.totalOutputTokens += usageData.outputTokens ?? 0;
         state.totalCacheReadTokens += usageData.cacheReadTokens ?? 0;
+        state.totalCacheWriteTokens += usageData.cacheWriteTokens ?? 0;
         state.totalRequests += 1;
 
         // Ensure stats appear on a new line — streamed
