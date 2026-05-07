@@ -15,13 +15,24 @@
 /**
  * Convert a hex colour string to normalised format (strip leading #, uppercase).
  * This is the **lenient** version — it does NOT throw on bad input.
- * Prefer `requireHex()` at public API boundaries; this is kept for
- * internal paths where the value has already been validated.
+ * Normalise and validate a hex colour string.
+ *
+ * Throws on invalid input (non-hex strings, XML fragments, named
+ * colours, rgb() notation, etc.) to prevent malformed OOXML output.
+ * Prefer `requireHex()` at public API boundaries for more descriptive
+ * error messages with parameter names.
  *
  * @param hex - Colour like "#2196F3" or "2196F3"
  * @returns Normalised colour like "2196F3"
+ * @throws {Error} If hex is not a valid 6-character hex colour
  */
 export function hexColor(hex: string): string {
+  if (typeof hex !== "string" || !/^#?[0-9A-Fa-f]{6}$/.test(hex)) {
+    throw new Error(
+      `Invalid hex colour: "${typeof hex === "string" && hex.length > 30 ? hex.slice(0, 30) + "..." : hex}". ` +
+        `Expected a 6-character hex string like "2196F3" or "#FF9800".`,
+    );
+  }
   return hex.replace(/^#/, "").toUpperCase();
 }
 
