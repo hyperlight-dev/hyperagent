@@ -2456,6 +2456,11 @@ const configureSandboxTool = defineTool("configure_sandbox", {
     "Call proactively if you can predict a task needs more resources",
     "(e.g. ZIP/PPTX building, multiple network calls, large data processing).",
     "Also call reactively when a limit error tells you which limit was hit.",
+    "",
+    "COMMON MEMORY ERRORS:",
+    "  'Out of physical memory' / 'Guest aborted: 13' → increase SCRATCH (not heap)",
+    "  'malloc failed' / 'out of memory' → increase HEAP",
+    "  'buffer to push data' → increase inputBuffer or outputBuffer",
   ].join("\n"),
   parameters: {
     type: "object",
@@ -5328,7 +5333,7 @@ function buildSessionConfig() {
         // For sandbox memory errors, tell the LLM about the current
         // heap size and how to suggest an increase to the user.
         if (
-          toolName === "execute_javascript" &&
+          (toolName === "execute_javascript" || toolName === "execute_bash") &&
           toolResult.resultType === "failure" &&
           /out of memory|out of physical memory|heap|stack overflow|guest aborted/i.test(
             toolResult.error ?? "",
@@ -5340,10 +5345,10 @@ function buildSessionConfig() {
           return {
             additionalContext:
               `Current heap: ${heapMb}MB, scratch: ${scratchMb}MB. ` +
-              `If the error says "Out of physical memory" or "Guest aborted: 13", ` +
-              `the scratch setting is too low — suggest /set scratch <MB> (e.g. double it). ` +
-              `For general OOM, suggest /set heap <MB>. ` +
-              `Or try breaking the computation into smaller pieces.`,
+              `IMPORTANT: "Out of physical memory" or "Guest aborted: 13" means SCRATCH is too low, NOT heap. ` +
+              `Call configure_sandbox({ scratch: ${scratchMb * 2} }) to double scratch memory. ` +
+              `For "malloc failed" or general OOM, call configure_sandbox({ heap: ${heapMb * 2} }). ` +
+              `For "buffer" errors, increase inputBuffer or outputBuffer.`,
           };
         }
 
