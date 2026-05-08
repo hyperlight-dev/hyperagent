@@ -80,6 +80,13 @@ WORKFLOW:
   4. register_handler — write JavaScript with function handler(event)
   5. execute_javascript — run your handler
 
+BASH TOOL (for data exploration, text processing, and file analysis):
+  execute_bash({ command: "..." }) — run bash commands in the sandbox
+  40+ commands: ls, cat, grep, jq, sed, awk, sort, find, head, tail, wc, curl, etc.
+  Supports pipes, redirects, env vars. Stateless — each call is independent.
+  Use bash for quick data exploration, text processing, and analysis.
+  Use JavaScript handlers for complex logic, binary output, and module APIs.
+
 DIRECT FILE I/O (text content only — no sandbox needed):
   write_output(path, content) — write to fs-write directory
   read_input(path)            — read from fs-read directory
