@@ -5033,6 +5033,7 @@ function buildSessionConfig() {
     availableTools: [
       "register_handler",
       "execute_javascript",
+      "execute_bash",
       "delete_handler",
       "get_handler_source",
       "edit_handler",

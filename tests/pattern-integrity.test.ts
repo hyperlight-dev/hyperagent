@@ -162,6 +162,25 @@ describe("pattern-integrity", () => {
             `Add it to src/agent/tool-gating.ts.`,
         ).toBe(true);
       });
+
+      it(`tool "${toolName}" is in availableTools`, () => {
+        // availableTools is a separate SDK list that controls which tools
+        // the model can SEE. Without this, the tool exists but is invisible.
+        const availableToolsMatch = indexSource.match(
+          /availableTools:\s*\[([\s\S]*?)\]/,
+        );
+        expect(
+          availableToolsMatch,
+          "Could not find availableTools array in index.ts",
+        ).toBeTruthy();
+        const availableList = availableToolsMatch![1];
+        expect(
+          availableList.includes(`"${toolName}"`),
+          `Tool "${toolName}" is defined via defineTool() but NOT in availableTools. ` +
+            `The model cannot see tools that aren't in availableTools. ` +
+            `Add "${toolName}" to the availableTools array in buildSessionConfig().`,
+        ).toBe(true);
+      });
     }
   });
 });
