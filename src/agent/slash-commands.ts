@@ -276,6 +276,18 @@ export async function handleSlashCommand(
       return true;
     }
 
+    case "/markdown":
+    case "/md": {
+      // Toggle markdown rendering — buffers output instead of streaming
+      // and renders through marked-terminal for proper formatting.
+      state.markdownEnabled = !state.markdownEnabled;
+      console.log(
+        `  📝 Markdown rendering: ${state.markdownEnabled ? C.ok("ON") + C.dim(" (output buffered, not streamed)") : C.err("OFF") + C.dim(" (raw streaming)")}`,
+      );
+      console.log();
+      return true;
+    }
+
     case "/timeout": {
       const kind = parts[1]?.toLowerCase();
       const ms = parseInt(parts[2], 10);

@@ -95,6 +95,14 @@ export interface AgentState {
   verboseOutput: boolean;
 
   /**
+   * Markdown rendering mode. When true, LLM output is buffered
+   * (not streamed character-by-character) and rendered through
+   * marked-terminal for proper headings, code blocks, lists, etc.
+   * Toggled via `/markdown` command or `--markdown` CLI flag.
+   */
+  markdownEnabled: boolean;
+
+  /**
    * Reasoning effort level for audit sessions, or null → "medium".
    * Minimum is "medium" — audits should never skimp on thinking.
    * Changed via `/reasoning audit <low|medium|high|xhigh>`.
@@ -296,6 +304,7 @@ export function createAgentState(
     scratchOverride: null,
     reasoningEffort: null,
     verboseOutput: cli.verbose,
+    markdownEnabled: cli.markdown ?? false,
     auditReasoningEffort: null,
 
     // Session management

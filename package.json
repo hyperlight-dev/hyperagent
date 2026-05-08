@@ -36,9 +36,12 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "boxen": "^8.0.1",
     "hyperlight-analysis": "file:src/code-validator/guest",
+    "marked": "^15.0.12",
+    "marked-terminal": "^7.3.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/marked-terminal": "^6.1.1",
     "@types/node": "^25.3.3",
     "@types/pngjs": "^6.0.5",
     "@xarsh/ooxml-validator": "^0.1.10",

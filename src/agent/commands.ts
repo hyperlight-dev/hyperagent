@@ -110,6 +110,23 @@ const COMMANDS: readonly CommandEntry[] = Object.freeze([
       "\n" +
       "Also: --verbose CLI flag or HYPERAGENT_VERBOSE=1.",
   },
+  {
+    completion: "/markdown",
+    help: "Toggle markdown rendering for LLM output",
+    detail:
+      "Toggles terminal markdown rendering on/off.\n" +
+      "\n" +
+      "When ON:\n" +
+      "  • LLM output is buffered (not streamed character-by-character)\n" +
+      "  • Rendered with ANSI colours: headings, bold, code blocks, lists, tables\n" +
+      "  • Much more readable for structured responses\n" +
+      "\n" +
+      "When OFF (default):\n" +
+      "  • Raw text streamed in real-time (faster perceived response)\n" +
+      "  • Markdown syntax shown as-is (# headings, **bold**, ```code```)\n" +
+      "\n" +
+      "Also: --markdown CLI flag or HYPERAGENT_MARKDOWN=1.",
+  },
 
   // ── Timeouts & Buffers ───────────────────────────────────
   {
