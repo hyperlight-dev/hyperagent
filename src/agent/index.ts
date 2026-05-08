@@ -119,6 +119,7 @@ import {
   printExtendedReasoningNotice,
   formatTokenSummary,
 } from "./llm-output.js";
+import { renderMarkdown, looksLikeMarkdown } from "./markdown-renderer.js";
 
 // ── Session Timing ───────────────────────────────────────────────────
 // Track session start time to display total elapsed time on exit.
@@ -5810,8 +5811,17 @@ async function processMessage(
     // assistant.message content can be empty when the response
     // was delivered via message_delta events.
     const responseForSuggestions = content || state.streamedText;
-    if (!state.streamedContent && content) {
-      console.log(content);
+    if (state.markdownEnabled && state.streamedText) {
+      // Markdown mode: output was buffered (not streamed). Render now.
+      const rendered = renderMarkdown(state.streamedText);
+      console.log(rendered);
+    } else if (!state.streamedContent && content) {
+      // Non-streamed fallback (rare) — render through markdown if enabled
+      if (state.markdownEnabled && looksLikeMarkdown(content)) {
+        console.log(renderMarkdown(content));
+      } else {
+        console.log(content);
+      }
     }
     console.log();
     return responseForSuggestions || undefined;

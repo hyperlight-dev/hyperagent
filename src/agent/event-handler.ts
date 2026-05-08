@@ -232,8 +232,12 @@ export function registerEventHandler(
           process.stdout.write(`${ANSI.reset}\n\n`);
         }
         // Stream response text token-by-token to stdout
+        // When markdown mode is enabled, buffer silently — the
+        // complete response is rendered at the end by processMessage.
         if (event.data?.deltaContent) {
-          process.stdout.write(event.data.deltaContent);
+          if (!state.markdownEnabled) {
+            process.stdout.write(event.data.deltaContent);
+          }
           state.streamedContent = true;
           state.streamedText += event.data.deltaContent;
         }
