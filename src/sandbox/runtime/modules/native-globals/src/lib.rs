@@ -23,6 +23,7 @@ use alloc::vec::Vec;
 
 use rquickjs::{Ctx, Function, Result as QjsResult, TypedArray};
 use core::sync::atomic::{AtomicU64, Ordering};
+use digest::Digest;
 
 // ── TextEncoder ─────────────────────────────────────────────────────────
 //
@@ -231,6 +232,44 @@ fn math_random() -> QjsResult<f64> {
     Ok((r >> 11) as f64 / (1u64 << 53) as f64)
 }
 
+// ── crypto.subtle.digest (SHA-1 / SHA-256) ──────────────────────────
+//
+// Implements the SubtleCrypto.digest() API needed by just-bash's
+// sha1sum and sha256sum commands. Uses RustCrypto crates (no_std,
+// audited) — not hand-rolled.
+//
+// API: crypto.subtle.digest(algorithm, data) → ArrayBuffer
+//   algorithm: "SHA-1" or "SHA-256"
+//   data: Uint8Array (or ArrayBuffer view)
+//   returns: Uint8Array containing the hash bytes
+
+/// Compute SHA-1 or SHA-256 digest. Called from JS via crypto.subtle.digest().
+fn crypto_subtle_digest<'js>(
+    ctx: Ctx<'js>,
+    algorithm: String,
+    data: Vec<u8>,
+) -> QjsResult<TypedArray<'js, u8>> {
+    let hash_bytes: Vec<u8> = match algorithm.as_str() {
+        "SHA-1" => {
+            let mut hasher = sha1::Sha1::new();
+            hasher.update(&data);
+            hasher.finalize().to_vec()
+        }
+        "SHA-256" => {
+            let mut hasher = sha2::Sha256::new();
+            hasher.update(&data);
+            hasher.finalize().to_vec()
+        }
+        _ => {
+            return Err(rquickjs::Error::new_from_js(
+                "string",
+                "supported algorithm (SHA-1 or SHA-256)",
+            ));
+        }
+    };
+    TypedArray::new(ctx, hash_bytes)
+}
+
 // ── Public setup function ────────────────────────────────────────────────
 //
 // Called by custom_globals! macro during runtime init.
@@ -325,12 +364,15 @@ pub fn setup_globals(ctx: &Ctx<'_>) -> QjsResult<()> {
     // Backed by x86_64 RDRAND hardware instruction — true randomness.
     let get_random_values_fn = Function::new(ctx.clone(), crypto_get_random_values)?;
     let random_uuid_fn = Function::new(ctx.clone(), crypto_random_uuid)?;
+    let subtle_digest_fn = Function::new(ctx.clone(), crypto_subtle_digest)?;
     globals.set("__ha_getRandomValues", get_random_values_fn)?;
     globals.set("__ha_randomUUID", random_uuid_fn)?;
+    globals.set("__ha_subtleDigest", subtle_digest_fn)?;
     ctx.eval::<(), _>(r#"
         (function() {
             const getRandomValues = globalThis.__ha_getRandomValues;
             const randomUUID = globalThis.__ha_randomUUID;
+            const subtleDigest = globalThis.__ha_subtleDigest;
             if (typeof globalThis.crypto === 'undefined') {
                 globalThis.crypto = {};
             }
@@ -340,8 +382,22 @@ pub fn setup_globals(ctx: &Ctx<'_>) -> QjsResult<()> {
                 return array;
             };
             globalThis.crypto.randomUUID = randomUUID;
+            // SubtleCrypto.digest — returns Promise<ArrayBuffer> matching the Web API.
+            // Backed by RustCrypto sha1/sha2 crates (no_std, audited).
+            globalThis.crypto.subtle = {
+                digest: function(algorithm, data) {
+                    try {
+                        const bytes = new Uint8Array(data instanceof ArrayBuffer ? data : data.buffer || data);
+                        const result = subtleDigest(algorithm, Array.from(bytes));
+                        return Promise.resolve(result.buffer);
+                    } catch (e) {
+                        return Promise.reject(e);
+                    }
+                }
+            };
             delete globalThis.__ha_getRandomValues;
             delete globalThis.__ha_randomUUID;
+            delete globalThis.__ha_subtleDigest;
         })();
     "#)?;
 

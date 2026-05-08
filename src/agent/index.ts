@@ -2049,8 +2049,9 @@ const executeJavascriptTool = defineTool("execute_javascript", {
             result:
               `Result saved to ${relativePath} (${(fullResultBytes / 1024).toFixed(1)} KB).\n` +
               `Preview (first 500 chars):\n${preview}\n\n` +
-              `IMPORTANT: Read the full output by writing a handler that reads "${relativePath}" via host:fs-read.\n` +
-              `Process the data in handler code — do NOT summarize or propose changes based only on the preview.\n` +
+              `IMPORTANT: Read the full output by writing a handler that reads "${relativePath}" via host:fs-read,\n` +
+              `or use execute_bash to process it (e.g. cat, grep, jq, head, wc).\n` +
+              `Process the data in handler code or bash — do NOT summarize or propose changes based only on the preview.\n` +
               `Only use read_output("${relativePath}") directly if you need a quick look at a specific section;\n` +
               `read_output("${relativePath}", startLine, endLine) supports line ranges.`,
             ...(consoleOutput?.length ? { consoleOutput } : {}),
@@ -2296,6 +2297,10 @@ const executeBashTool = defineTool("execute_bash", {
     "  Data: jq, yq (JSON/YAML processing)",
     "  Net:  curl (requires fetch plugin enabled — use apply_profile('web-research') first)",
     "  Meta: date, env, whoami, hostname, basename, dirname, which, readlink",
+    "",
+    "POSIX FLAGS ONLY: This is a pure-JS bash interpreter, not GNU coreutils.",
+    "  GNU-only flags will fail (e.g. sort -R, grep -P, sed -i).",
+    "  Stick to POSIX-standard flags for all commands.",
     "",
     "NOT AVAILABLE: rm, mv, ln, wget, python, node, sleep, ssh, git, apt",
     "  - For file deletion, there is no command available",

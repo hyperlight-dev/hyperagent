@@ -8,3 +8,6 @@ unexpected_cfgs = { level = "allow", check-cfg = ['cfg(hyperlight)'] }
 
 [dependencies]
 rquickjs = { version = "0.11", default-features = false, features = ["bindgen", "macro"] }
+sha1 = { version = "0.10", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+digest = { version = "0.10", default-features = false }
