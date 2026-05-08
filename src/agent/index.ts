@@ -2232,6 +2232,54 @@ export async function handler(event) {
 /** Whether the bash runner handler has been registered this session. */
 let bashRunnerRegistered = false;
 
+/**
+ * Dedicated sandbox for bash execution. Separate from the main JS sandbox
+ * so the 1.4 MB bash module doesn't compete with pptx/pdf/xlsx modules
+ * for memory during compilation. Created lazily on first execute_bash call.
+ */
+let bashSandbox: ReturnType<typeof createSandboxTool> | null = null;
+
+/**
+ * Create (or return existing) dedicated bash sandbox.
+ * Only loads ha:bash module — no pptx, pdf, xlsx overhead.
+ */
+async function getBashSandbox() {
+  if (bashSandbox && bashRunnerRegistered) return bashSandbox;
+
+  // Load the bash module source from disk
+  const bashModulePath = join(getModulesDir(), "bash.js");
+  if (!existsSync(bashModulePath)) {
+    return null;
+  }
+  const bashSource = readFileSync(bashModulePath, "utf-8");
+
+  // Create a lightweight sandbox with only ha:bash loaded
+  bashSandbox = createSandboxTool({
+    heapSizeMb: 64,
+    scratchSizeMb: 32,
+    inputBufferKb: 2048,
+    outputBufferKb: 2048,
+    cpuTimeoutMs: 10000,
+    wallClockTimeoutMs: 15000,
+  });
+
+  // Load ONLY the bash module — no pptx/pdf/xlsx
+  bashSandbox.setModules([{ name: "bash", source: bashSource }]);
+
+  // Register the bash runner handler
+  console.error(`  ${C.dim("🐚 Initialising bash sandbox...")}`);
+  const reg = await bashSandbox.registerHandler(
+    "sys-bash-runner",
+    BASH_RUNNER_HANDLER,
+  );
+  if (!reg.success) {
+    bashSandbox = null;
+    return null;
+  }
+  bashRunnerRegistered = true;
+  return bashSandbox;
+}
+
 const executeBashTool = defineTool("execute_bash", {
   description: [
     "Execute a bash command in the sandbox using a pure-JS bash interpreter.",
@@ -2281,28 +2329,14 @@ const executeBashTool = defineTool("execute_bash", {
       return { error: "command is required and must be a non-empty string." };
     }
 
-    // Auto-register the internal bash runner handler on first use
-    if (!bashRunnerRegistered) {
-      console.error(`  ${C.dim("🐚 Initialising bash runner...")}`);
-      const reg = await sandbox.registerHandler(
-        "sys-bash-runner",
-        BASH_RUNNER_HANDLER,
-      );
-      if (!reg.success) {
-        return {
-          error: `Failed to initialise bash runner: ${reg.error}. This is an internal error — try reset_sandbox and retry.`,
-        };
-      }
-      bashRunnerRegistered = true;
+    // Get the dedicated bash sandbox (created lazily, separate from main JS sandbox)
+    const bs = await getBashSandbox();
+    if (!bs) {
+      return {
+        error:
+          "Bash module not available. Ensure builtin-modules/bash.js exists (run: just build-bash).",
+      };
     }
-
-    // Build per-call timeout overrides
-    const overrides: { cpuTimeoutMs?: number; wallClockTimeoutMs?: number } =
-      {};
-    if (state.cpuTimeoutOverride !== null)
-      overrides.cpuTimeoutMs = state.cpuTimeoutOverride;
-    if (state.wallTimeoutOverride !== null)
-      overrides.wallClockTimeoutMs = state.wallTimeoutOverride;
 
     // Log bash command to code log (same as show-code for JS handlers)
     if (state.showCodeEnabled) {
@@ -2311,11 +2345,7 @@ const executeBashTool = defineTool("execute_bash", {
     sandbox.writeCode(`// ── bash ──\n$ ${command}\n`);
 
     const { success, result, error, consoleOutput, stats, timing } =
-      await sandbox.executeJavaScript(
-        "sys-bash-runner",
-        { command },
-        overrides,
-      );
+      await bs.executeJavaScript("sys-bash-runner", { command });
 
     if (state.showTimingEnabled && timing) {
       console.error(
@@ -4458,8 +4488,11 @@ const listModulesTool = defineTool("list_modules", {
     state.hasCalledListModules = true;
 
     try {
-      // Filter out internal modules (names starting with _)
-      const modules = listModules().filter((m) => !m.name.startsWith("_"));
+      // Filter out internal modules (names starting with _) and bash
+      // (bash runs in its own sandbox, not importable by JS handlers)
+      const modules = listModules().filter(
+        (m) => !m.name.startsWith("_") && m.name !== "bash",
+      );
       const result = modules.map((m) => ({
         name: m.name,
         description: m.description,
@@ -4593,11 +4626,16 @@ const moduleInfoTool = defineTool("module_info", {
     state.hasCalledListModules = true;
 
     try {
-      // Block access to internal modules (names starting with _)
-      if (name.startsWith("_")) {
+      // Block access to internal modules and bash (bash runs in its own sandbox)
+      if (name.startsWith("_") || name === "bash") {
         const available = listModules()
-          .filter((m) => !m.name.startsWith("_"))
+          .filter((m) => !m.name.startsWith("_") && m.name !== "bash")
           .map((m) => m.name);
+        if (name === "bash") {
+          return {
+            error: `ha:bash is not importable in JavaScript handlers. Use the execute_bash tool instead.`,
+          };
+        }
         return {
           error: `Module "${name}" not found. Available: ${available.join(", ") || "(none)"}`,
         };
@@ -4913,8 +4951,10 @@ function loadAllModules(): void {
     }
   }
 
-  // Load all modules into the sandbox cache
-  const allModules = listModules();
+  // Load all modules into the sandbox cache.
+  // Exclude ha:bash — it runs in its own dedicated sandbox (getBashSandbox())
+  // to avoid competing with pptx/pdf/xlsx for memory during compilation.
+  const allModules = listModules().filter((m) => m.name !== "bash");
   if (allModules.length > 0) {
     sandbox.setModules(
       allModules.map((m) => ({ name: m.name, source: m.source })),
@@ -4922,24 +4962,6 @@ function loadAllModules(): void {
     debugLog(
       `Loaded ${allModules.length} modules: ${allModules.map((m) => m.name).join(", ")}`,
     );
-
-    // If ha:bash module is loaded, pre-configure sandbox resources.
-    // The bash bundle is ~1.4 MB minified and needs a larger heap than the
-    // default 16 MB. 64 MB is the tested minimum with all modules loaded.
-    // Buffers need 2048 KB to transit the module source via addModule().
-    if (allModules.some((m) => m.name === "bash")) {
-      const { heapMb } = sandbox.getEffectiveMemorySizes();
-      const { inputKb, outputKb } = sandbox.getEffectiveBufferSizes();
-      if (heapMb < 64) {
-        sandbox.setMemorySizes(64);
-      }
-      if (inputKb < 2048 || outputKb < 2048) {
-        sandbox.setBufferSizes(
-          Math.max(inputKb, 2048),
-          Math.max(outputKb, 2048),
-        );
-      }
-    }
   }
 }
 

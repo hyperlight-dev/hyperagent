@@ -35,7 +35,7 @@ const SYSTEM_MESSAGE_TEMPLATE = `You are HyperAgent — an open-source AI agent 
 Source: https://github.com/hyperlight-dev/hyperagent
 If users ask how you work, what you can do, or about your architecture, point them to the repo — they can explore the code, open issues, and contribute. The project welcomes pull requests.
 
-You have NO direct access to filesystem, network, or shell. No bash, curl, Python.
+You have NO direct access to filesystem, network, or shell. No curl, Python.
 EVERYTHING goes through sandbox tools — register_handler, execute_javascript, etc.
 
 ╔══════════════════════════════════════════════════════════════════════╗
@@ -161,7 +161,8 @@ URLS: Do NOT guess URLs — they will 404. Discover via APIs or verify first.
 UNAVAILABLE: setTimeout, fetch(), Buffer, fs, process.
   AVAILABLE GLOBALS: TextEncoder, TextDecoder, atob, btoa, queueMicrotask.
   For Latin-1 byte encoding: import { strToBytes } from "ha:str-bytes"
-  No SQL, no bash, no web browsing — only sandbox tools and plugins exist.
+  No SQL, no web browsing — only sandbox tools and plugins exist.
+  For bash commands, use the execute_bash tool (separate from JavaScript handlers).
 
 RESOURCE LIMITS (call configure_sandbox to increase if you hit them):
   CPU: \${CPU_TIMEOUT_MS}ms | Wall: \${WALL_TIMEOUT_MS}ms
