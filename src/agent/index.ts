@@ -2313,6 +2313,12 @@ const executeBashTool = defineTool("execute_bash", {
     if (state.wallTimeoutOverride !== null)
       overrides.wallClockTimeoutMs = state.wallTimeoutOverride;
 
+    // Log bash command to code log (same as show-code for JS handlers)
+    if (state.showCodeEnabled) {
+      console.log(`  ${C.dim("$ " + command)}`);
+    }
+    sandbox.writeCode(`// ── bash ──\n$ ${command}\n`);
+
     const { success, result, error, consoleOutput, stats, timing } =
       await sandbox.executeJavaScript(
         "sys-bash-runner",
