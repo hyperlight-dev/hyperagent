@@ -2140,6 +2140,221 @@ const executeJavascriptTool = defineTool("execute_javascript", {
   },
 });
 
+// ── Tool: execute_bash ───────────────────────────────────────────────
+//
+// Runs bash commands inside the Hyperlight sandbox using just-bash
+// (a pure-JS bash interpreter). Commands execute in the same sandbox
+// as JavaScript handlers — same plugins, same baseDir, same isolation.
+//
+// Stateless: each call creates a fresh Bash instance. Use && or ;
+// to chain commands that share state within a single call.
+//
+// The internal _bash_runner handler is auto-registered on first use.
+
+/** Bash commands available in the sandbox. */
+const BASH_SUPPORTED_COMMANDS = [
+  "echo",
+  "cat",
+  "grep",
+  "fgrep",
+  "egrep",
+  "rg",
+  "head",
+  "tail",
+  "wc",
+  "sort",
+  "uniq",
+  "find",
+  "tree",
+  "diff",
+  "sed",
+  "awk",
+  "tr",
+  "cut",
+  "paste",
+  "join",
+  "xargs",
+  "tee",
+  "printf",
+  "seq",
+  "env",
+  "printenv",
+  "date",
+  "basename",
+  "dirname",
+  "readlink",
+  "which",
+  "whoami",
+  "hostname",
+  "jq",
+  "yq",
+  "base64",
+  "md5sum",
+  "sha256sum",
+  "cp",
+  "mkdir",
+  "touch",
+  "chmod",
+  "ls",
+  "stat",
+  "du",
+  "file",
+  "rev",
+  "nl",
+  "fold",
+  "expand",
+  "column",
+  "comm",
+  "tac",
+  "od",
+  "expr",
+  "true",
+  "time",
+] as const;
+
+/** Handler code for the internal bash runner. */
+const BASH_RUNNER_HANDLER = `
+import { Bash, InMemoryFs } from "ha:bash";
+
+export async function handler(event) {
+  const e = typeof event === 'string' ? JSON.parse(event) : event;
+  const bash = new Bash({
+    commands: ${JSON.stringify([...BASH_SUPPORTED_COMMANDS])},
+  });
+  const result = await bash.exec(e.command || "echo 'No command provided'");
+  return {
+    stdout: result.stdout,
+    stderr: result.stderr,
+    exitCode: result.exitCode,
+  };
+}`;
+
+/** Whether the bash runner handler has been registered this session. */
+let bashRunnerRegistered = false;
+
+const executeBashTool = defineTool("execute_bash", {
+  description: [
+    "Execute a bash command in the sandbox using a pure-JS bash interpreter.",
+    "The command runs inside the same Hyperlight micro-VM as JavaScript handlers.",
+    "",
+    "STATELESS: each call is a fresh shell. Use && or ; to chain commands.",
+    "The filesystem is shared with JavaScript handlers (same baseDir).",
+    "",
+    "SUPPORTED COMMANDS:",
+    "  Text: echo, cat, grep, rg, head, tail, wc, sort, uniq, sed, awk, tr,",
+    "        cut, paste, join, xargs, tee, rev, nl, fold, tac, column, comm,",
+    "        diff, printf, seq, expr, base64, md5sum, sha256sum, od",
+    "  Files: ls, find, tree, cp, mkdir, touch, chmod, stat, du, file",
+    "  Data: jq, yq (JSON/YAML processing)",
+    "  Meta: date, env, whoami, hostname, basename, dirname, which, readlink",
+    "",
+    "NOT AVAILABLE: rm, mv, ln, curl, wget, python, node, sleep, ssh, git, apt",
+    "  - For HTTP requests, use the fetch plugin (manage_plugin/apply_profile)",
+    "  - For file deletion, there is no command available",
+    "  - For complex logic, use register_handler with JavaScript instead",
+    "",
+    "EXAMPLES:",
+    '  execute_bash({ command: "ls -la" })',
+    "  execute_bash({ command: \"cat data.json | jq '.results[] | .name' | sort | uniq -c | sort -rn | head -10\" })",
+    '  execute_bash({ command: "grep -r TODO . | wc -l" })',
+    "  execute_bash({ command: \"find . -name '*.json' | head -5\" })",
+  ].join("\n"),
+  parameters: {
+    type: "object",
+    properties: {
+      command: {
+        type: "string",
+        description:
+          "The bash command to execute. Supports pipes (|), " +
+          "redirects (>, >>), command chaining (&&, ;), " +
+          "variables (FOO=bar; echo $FOO), and subshells ($(...)).",
+      },
+    },
+    required: ["command"],
+  },
+  handler: async ({ command }: { command: string }) => {
+    if (
+      !command ||
+      typeof command !== "string" ||
+      command.trim().length === 0
+    ) {
+      return { error: "command is required and must be a non-empty string." };
+    }
+
+    // Auto-register the internal bash runner handler on first use
+    if (!bashRunnerRegistered) {
+      // Bash module needs at least 64 MB heap for compilation
+      const { heapMb } = sandbox.getEffectiveMemorySizes();
+      if (heapMb < 64) {
+        console.error(
+          `  ${C.dim("🐚 Increasing heap to 64 MB for bash module...")}`,
+        );
+        sandbox.setMemorySizes(64);
+      }
+
+      console.error(`  ${C.dim("🐚 Initialising bash runner...")}`);
+      const reg = await sandbox.registerHandler(
+        "sys-bash-runner",
+        BASH_RUNNER_HANDLER,
+      );
+      if (!reg.success) {
+        return {
+          error: `Failed to initialise bash runner: ${reg.error}. This is an internal error — try reset_sandbox and retry.`,
+        };
+      }
+      bashRunnerRegistered = true;
+    }
+
+    // Build per-call timeout overrides
+    const overrides: { cpuTimeoutMs?: number; wallClockTimeoutMs?: number } =
+      {};
+    if (state.cpuTimeoutOverride !== null)
+      overrides.cpuTimeoutMs = state.cpuTimeoutOverride;
+    if (state.wallTimeoutOverride !== null)
+      overrides.wallClockTimeoutMs = state.wallTimeoutOverride;
+
+    const { success, result, error, consoleOutput, stats, timing } =
+      await sandbox.executeJavaScript(
+        "sys-bash-runner",
+        { command },
+        overrides,
+      );
+
+    if (state.showTimingEnabled && timing) {
+      console.error(
+        `  ${C.dim(`⏱️  ${timing.totalMs}ms (exec: ${timing.executeMs}ms)`)}`,
+      );
+    }
+
+    if (success && result) {
+      const stdout = String(result.stdout ?? "");
+      const stderr = String(result.stderr ?? "");
+      const exitCode = Number(result.exitCode ?? 0);
+
+      // Show output to user
+      if (stdout) {
+        console.log(stdout.endsWith("\n") ? stdout.slice(0, -1) : stdout);
+      }
+      if (stderr) {
+        console.error(`  ${C.dim(stderr.trimEnd())}`);
+      }
+
+      return {
+        stdout,
+        stderr,
+        exitCode,
+        ...(consoleOutput?.length ? { consoleOutput } : {}),
+      };
+    } else {
+      console.error(`  ${C.err("❌ " + (error ?? "Unknown bash error"))}`);
+      return {
+        error: error ?? "Bash execution failed",
+        ...(consoleOutput?.length ? { consoleOutput } : {}),
+      };
+    }
+  },
+});
+
 // ── Tool: reset_sandbox ──────────────────────────────────────────────
 
 const sandboxResetTool = defineTool("reset_sandbox", {
@@ -2159,6 +2374,7 @@ const sandboxResetTool = defineTool("reset_sandbox", {
   },
   handler: async () => {
     const result = await sandbox.resetSandbox();
+    bashRunnerRegistered = false; // Force re-registration on next execute_bash
     if (result.success) {
       console.error(
         `  ${C.ok("🔄 Sandbox state reset")} (${result.handlers?.length ?? 0} handlers preserved, ha:shared-state preserved)`,
@@ -4775,6 +4991,7 @@ function buildSessionConfig() {
     tools: [
       registerHandlerTool,
       executeJavascriptTool,
+      executeBashTool,
       deleteHandlerTool,
       deleteHandlersTool,
       getHandlerSourceTool,

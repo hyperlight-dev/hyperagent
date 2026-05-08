@@ -1,0 +1,11 @@
+{
+  "name": "bash",
+  "description": "Sandboxed bash interpreter powered by just-bash. Provides 40+ Unix commands (ls, grep, jq, curl, sed, awk, etc.) running entirely in JavaScript inside the Hyperlight micro-VM.",
+  "author": "system",
+  "mutable": false,
+  "type": "script",
+  "sourceHash": "sha256:b93c50f5137c5d1e",
+  "hints": {
+    "overview": "Pure-JS bash interpreter for the sandbox. Used internally by the execute_bash tool — not intended for direct import in handlers."
+  }
+}

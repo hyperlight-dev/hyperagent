@@ -42,6 +42,8 @@
     "@types/node": "^25.3.3",
     "@types/pngjs": "^6.0.5",
     "@xarsh/ooxml-validator": "^0.1.10",
+    "esbuild": "^0.28.0",
+    "just-bash": "^2.14.4",
     "pdf-parse": "^2.4.5",
     "pixelmatch": "^7.1.0",
     "pngjs": "^7.0.0",

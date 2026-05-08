@@ -148,6 +148,10 @@ setup: ensure-tools install
 build: install
     @echo "✅ Build complete — run 'just start' to launch the agent"
 
+# Rebuild the ha:bash bundle from just-bash (only needed when just-bash updates)
+build-bash:
+    node scripts/bash-bundle/build.mjs
+
 # Build everything in release mode (hyperlight-js, guest runtime, NAPI addon)
 build-release: install-release
     @echo "✅ Release build complete — run 'just start-release' to launch"
