@@ -214,7 +214,7 @@ fn crypto_random_uuid() -> QjsResult<String> {
     let time_hi = ((r1 >> 32) as u16 & 0x0FFF) | 0x4000; // version 4
     let clock_seq = ((r2 >> 48) as u16 & 0x3FFF) | 0x8000; // variant 10xx
 
-    Ok(alloc::format!(
+    Ok(format!(
         "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
         (r1 & 0xFFFF_FFFF) as u32,
         ((r1 >> 32) & 0xFFFF) as u16,
