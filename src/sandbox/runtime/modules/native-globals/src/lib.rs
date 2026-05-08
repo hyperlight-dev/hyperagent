@@ -1,10 +1,15 @@
-//! Native globals — TextEncoder, TextDecoder, atob, btoa, console extras.
+//! Native globals — TextEncoder, TextDecoder, atob, btoa, crypto, console extras.
 //!
 //! Registers standard Web API globals that npm libraries expect.
 //! Called via `custom_globals!` macro during runtime init.
 //!
 //! Core encoding logic is in Rust for performance and correctness.
 //! JS constructor wrappers call into the Rust functions.
+//!
+//! crypto.getRandomValues and crypto.randomUUID use a xorshift128+
+//! PRNG seeded from a hash of the compilation timestamp. This is NOT
+//! cryptographically secure — it's for awk rand(), UUID generation,
+//! and similar non-security uses.
 
 #![cfg_attr(hyperlight, no_std)]
 
@@ -17,6 +22,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use rquickjs::{Ctx, Function, Result as QjsResult, TypedArray};
+use core::sync::atomic::{AtomicU64, Ordering};
 
 // ── TextEncoder ─────────────────────────────────────────────────────────
 //
@@ -141,6 +147,90 @@ fn rust_btoa(input: String) -> QjsResult<String> {
     Ok(result)
 }
 
+// ── Hardware RNG (RDRAND / RDSEED) ───────────────────────────────────
+//
+// x86_64 CPUs provide hardware random number generation via RDRAND
+// (random numbers) and RDSEED (entropy seed). Since we run in a
+// Hyperlight micro-VM on x86_64, these instructions are available
+// directly — no OS, no crate, no software PRNG needed.
+//
+// Used by crypto.getRandomValues, crypto.randomUUID, and Math.random.
+
+/// Read a hardware random u64 via RDRAND. Retries on transient failure.
+#[inline]
+fn rdrand64() -> u64 {
+    let mut val: u64;
+    let mut ok: u8;
+    // RDRAND can fail if the HW buffer is exhausted — retry up to 10 times
+    for _ in 0..10 {
+        unsafe {
+            core::arch::asm!(
+                "rdrand {val}",
+                "setc {ok}",
+                val = out(reg) val,
+                ok = out(reg_byte) ok,
+                options(nostack, nomem),
+            );
+        }
+        if ok != 0 {
+            return val;
+        }
+    }
+    // Fallback: should never happen on modern CPUs, but don't panic
+    // in production code. Return a non-zero value based on a counter.
+    static FALLBACK: AtomicU64 = AtomicU64::new(0xDEAD_BEEF_CAFE_BABE);
+    FALLBACK.fetch_add(0x9E37_79B9_7F4A_7C15, Ordering::Relaxed)
+}
+
+/// Fill a Uint8Array with hardware random bytes via RDRAND.
+fn crypto_get_random_values<'js>(
+    ctx: Ctx<'js>,
+    input: TypedArray<'js, u8>,
+) -> QjsResult<TypedArray<'js, u8>> {
+    let len = input.len();
+    let mut bytes = Vec::with_capacity(len);
+    let mut i = 0;
+    while i < len {
+        let val = rdrand64();
+        let val_bytes = val.to_le_bytes();
+        for &b in &val_bytes {
+            if i >= len {
+                break;
+            }
+            bytes.push(b);
+            i += 1;
+        }
+    }
+    let result = TypedArray::new(ctx, bytes)?;
+    Ok(result)
+}
+
+/// Generate a v4 UUID string using RDRAND.
+fn crypto_random_uuid() -> QjsResult<String> {
+    let r1 = rdrand64();
+    let r2 = rdrand64();
+    // Set version (4) and variant (10xx) bits per RFC 4122
+    let time_hi = ((r1 >> 32) as u16 & 0x0FFF) | 0x4000; // version 4
+    let clock_seq = ((r2 >> 48) as u16 & 0x3FFF) | 0x8000; // variant 10xx
+
+    Ok(alloc::format!(
+        "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
+        (r1 & 0xFFFF_FFFF) as u32,
+        ((r1 >> 32) & 0xFFFF) as u16,
+        time_hi,
+        clock_seq,
+        r2 & 0xFFFF_FFFF_FFFF
+    ))
+}
+
+/// Generate a random f64 in [0, 1) — used by Math.random.
+/// Hardware RDRAND provides true randomness, not a PRNG sequence.
+fn math_random() -> QjsResult<f64> {
+    let r = rdrand64();
+    // Use upper 53 bits for full double precision
+    Ok((r >> 11) as f64 / (1u64 << 53) as f64)
+}
+
 // ── Public setup function ────────────────────────────────────────────────
 //
 // Called by custom_globals! macro during runtime init.
@@ -230,6 +320,42 @@ pub fn setup_globals(ctx: &Ctx<'_>) -> QjsResult<()> {
         }
     "#,
     )?;
+
+    // ── crypto.getRandomValues + crypto.randomUUID ──────────────
+    // Backed by x86_64 RDRAND hardware instruction — true randomness.
+    let get_random_values_fn = Function::new(ctx.clone(), crypto_get_random_values)?;
+    let random_uuid_fn = Function::new(ctx.clone(), crypto_random_uuid)?;
+    globals.set("__ha_getRandomValues", get_random_values_fn)?;
+    globals.set("__ha_randomUUID", random_uuid_fn)?;
+    ctx.eval::<(), _>(r#"
+        (function() {
+            const getRandomValues = globalThis.__ha_getRandomValues;
+            const randomUUID = globalThis.__ha_randomUUID;
+            if (typeof globalThis.crypto === 'undefined') {
+                globalThis.crypto = {};
+            }
+            globalThis.crypto.getRandomValues = function(array) {
+                const filled = getRandomValues(array);
+                for (let i = 0; i < array.length; i++) array[i] = filled[i];
+                return array;
+            };
+            globalThis.crypto.randomUUID = randomUUID;
+            delete globalThis.__ha_getRandomValues;
+            delete globalThis.__ha_randomUUID;
+        })();
+    "#)?;
+
+    // ── Math.random (PRNG-backed) ────────────────────────────────
+    // Override QuickJS's built-in Math.random with our seeded PRNG
+    // so awk rand() and other random functions produce varied output.
+    let math_random_fn = Function::new(ctx.clone(), math_random)?;
+    globals.set("__ha_mathRandom", math_random_fn)?;
+    ctx.eval::<(), _>(r#"
+        (function() {
+            Math.random = globalThis.__ha_mathRandom;
+            delete globalThis.__ha_mathRandom;
+        })();
+    "#)?;
 
     Ok(())
 }

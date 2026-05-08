@@ -26,7 +26,9 @@ const entryFile = join(stubDir, "entry.mjs");
 
 // Check prerequisites
 if (!existsSync(join(repoRoot, "node_modules", "just-bash"))) {
-  console.error("Error: just-bash not found in node_modules. Run npm install first.");
+  console.error(
+    "Error: just-bash not found in node_modules. Run npm install first.",
+  );
   process.exit(1);
 }
 
@@ -46,6 +48,7 @@ const aliasArgs = [
   `--alias:seek-bzip=${join(stubDir, "bzip-stub.mjs")}`,
   `--alias:node-liblzma=${join(stubDir, "liblzma-stub.mjs")}`,
   `--alias:@mongodb-js/zstd=${join(stubDir, "zstd-stub.mjs")}`,
+  `--alias:sql.js=${join(stubDir, "sqljs-stub.mjs")}`,
 ].join(" ");
 
 const tmpBundle = join(stubDir, "_tmp_bundle.js");
@@ -73,7 +76,8 @@ if(typeof globalThis.URLSearchParams==='undefined'){globalThis.URLSearchParams=c
 if(typeof globalThis.Buffer==='undefined'){const _e=new TextEncoder();globalThis.Buffer={from(d,e){if(typeof d==='string'){if(e==='base64'){const b=atob(d);const a=new Uint8Array(b.length);for(let i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return a}return _e.encode(d)}if(d instanceof Uint8Array)return d;if(Array.isArray(d))return new Uint8Array(d);return new Uint8Array(0)},isBuffer(o){return o instanceof Uint8Array},concat(l){const t=l.reduce((s,b)=>s+b.length,0);const r=new Uint8Array(t);let o=0;for(const b of l){r.set(b,o);o+=b.length}return r},alloc(s){return new Uint8Array(s)},byteLength(s,e){if(typeof s==='string')return _e.encode(s).length;return s.length}}}
 if(typeof globalThis.process==='undefined'){globalThis.process={env:{},nextTick(fn){queueMicrotask(fn)},execPath:'/usr/bin/node',mainModule:null,umask(){return 18},type:'renderer'}}
 if(typeof globalThis.AbortController==='undefined'){globalThis.AbortController=class AbortController{constructor(){this.signal={aborted:false,addEventListener(){}}}abort(){this.signal.aborted=true}}}
-if(typeof globalThis.crypto==='undefined'||!globalThis.crypto.randomUUID){if(!globalThis.crypto)globalThis.crypto={};globalThis.crypto.randomUUID=function(){const h='0123456789abcdef';let u='';for(let i=0;i<36;i++){if(i===8||i===13||i===18||i===23)u+='-';else u+=h[Math.floor(Math.random()*16)]}return u}}
+// crypto.getRandomValues, crypto.randomUUID, and Math.random are provided
+// natively by the Hyperlight runtime via RDRAND — no JS polyfill needed.
 if(typeof globalThis.setTimeout==='undefined'){globalThis.setTimeout=(fn)=>{fn();return 0};globalThis.clearTimeout=()=>{};globalThis.setInterval=()=>0;globalThis.clearInterval=()=>{}}
 if(typeof globalThis.performance==='undefined'){globalThis.performance={now(){return Date.now()}}}
 // ── End Polyfills ────────────────────────────────────────────────────
@@ -85,7 +89,9 @@ const output = polyfills + bundleSource;
 writeFileSync(outFile, output);
 
 // Clean up temp file
-try { require("node:fs").unlinkSync(tmpBundle); } catch {}
+try {
+  require("node:fs").unlinkSync(tmpBundle);
+} catch {}
 
 const sizeKb = (output.length / 1024).toFixed(0);
 console.log(`\\n✅ Built builtin-modules/bash.js (${sizeKb} KB)`);

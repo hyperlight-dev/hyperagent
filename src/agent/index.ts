@@ -2246,10 +2246,10 @@ const executeBashTool = defineTool("execute_bash", {
     "        diff, printf, seq, expr, base64, md5sum, sha256sum, od",
     "  Files: ls, find, tree, cp, mkdir, touch, chmod, stat, du, file",
     "  Data: jq, yq (JSON/YAML processing)",
+    "  Net:  curl (requires fetch plugin enabled — use apply_profile('web-research') first)",
     "  Meta: date, env, whoami, hostname, basename, dirname, which, readlink",
     "",
-    "NOT AVAILABLE: rm, mv, ln, curl, wget, python, node, sleep, ssh, git, apt",
-    "  - For HTTP requests, use the fetch plugin (manage_plugin/apply_profile)",
+    "NOT AVAILABLE: rm, mv, ln, wget, python, node, sleep, ssh, git, apt",
     "  - For file deletion, there is no command available",
     "  - For complex logic, use register_handler with JavaScript instead",
     "",
@@ -2283,15 +2283,6 @@ const executeBashTool = defineTool("execute_bash", {
 
     // Auto-register the internal bash runner handler on first use
     if (!bashRunnerRegistered) {
-      // Bash module needs at least 64 MB heap for compilation
-      const { heapMb } = sandbox.getEffectiveMemorySizes();
-      if (heapMb < 64) {
-        console.error(
-          `  ${C.dim("🐚 Increasing heap to 64 MB for bash module...")}`,
-        );
-        sandbox.setMemorySizes(64);
-      }
-
       console.error(`  ${C.dim("🐚 Initialising bash runner...")}`);
       const reg = await sandbox.registerHandler(
         "sys-bash-runner",
@@ -4931,6 +4922,24 @@ function loadAllModules(): void {
     debugLog(
       `Loaded ${allModules.length} modules: ${allModules.map((m) => m.name).join(", ")}`,
     );
+
+    // If ha:bash module is loaded, pre-configure sandbox resources.
+    // The bash bundle is ~1.4 MB minified and needs a larger heap than the
+    // default 16 MB. 64 MB is the tested minimum with all modules loaded.
+    // Buffers need 2048 KB to transit the module source via addModule().
+    if (allModules.some((m) => m.name === "bash")) {
+      const { heapMb } = sandbox.getEffectiveMemorySizes();
+      const { inputKb, outputKb } = sandbox.getEffectiveBufferSizes();
+      if (heapMb < 64) {
+        sandbox.setMemorySizes(64);
+      }
+      if (inputKb < 2048 || outputKb < 2048) {
+        sandbox.setBufferSizes(
+          Math.max(inputKb, 2048),
+          Math.max(outputKb, 2048),
+        );
+      }
+    }
   }
 }
 
