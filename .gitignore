@@ -53,3 +53,5 @@ plugins/plugin-schema-types.d.ts
 plugins/plugin-schema-types.js
 plugins/host-modules.d.ts
 output-hyperagent**/**scripts/bash-bundle/_tmp_bundle.js
+output-hyperagent-*/
+scripts/bash-bundle/_tmp_bundle.js
