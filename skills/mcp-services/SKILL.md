@@ -29,6 +29,7 @@ allowed-tools:
   - mcp_tool_info
   - manage_mcp
   - execute_javascript
+  - execute_bash
   - delete_handler
   - get_handler_source
   - edit_handler
