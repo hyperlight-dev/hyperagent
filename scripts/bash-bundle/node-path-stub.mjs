@@ -11,13 +11,18 @@ export function resolve(...parts) {
   return normalize(result || "/");
 }
 export function normalize(p) {
+  const absolute = p.startsWith("/");
   const parts = p.split("/");
   const out = [];
   for (const part of parts) {
-    if (part === "..") { if (out.length > 1) out.pop(); }
+    if (part === "..") {
+      if (out.length > 0) out.pop();
+      else if (!absolute) out.push("..");
+    }
     else if (part !== "." && part !== "") out.push(part);
   }
-  return (p.startsWith("/") ? "/" : "") + out.join("/") || ".";
+  const normalized = (absolute ? "/" : "") + out.join("/");
+  return normalized || (absolute ? "/" : ".");
 }
 export function dirname(p) {
   const i = p.lastIndexOf("/");

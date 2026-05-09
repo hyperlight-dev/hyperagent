@@ -990,6 +990,12 @@ async function syncPluginsToSandbox(): Promise<void> {
   // Hand the registrations to the sandbox — it will rebuild on next call
   // Await is important: saves shared-state before invalidating the sandbox
   await sandbox.setPlugins(registrations);
+
+  // Keep bash sandbox in sync — same plugins, same host modules.
+  // Without this, execute_bash can't use curl (fetch plugin) or filesystem.
+  if (bashSandbox) {
+    await bashSandbox.setPlugins(registrations);
+  }
 }
 
 // ── Mutable Agent State ──────────────────────────────────────────────
@@ -2267,6 +2273,10 @@ async function getBashSandbox() {
   // Load ONLY the bash module — no pptx/pdf/xlsx
   bashSandbox.setModules([{ name: "bash", source: bashSource }]);
 
+  // Sync enabled plugins so bash has the same host modules as the
+  // main JS sandbox (fs-read, fs-write, fetch, MCP adapters, etc.).
+  await syncPluginsToSandbox();
+
   // Register the bash runner handler
   console.error(`  ${C.dim("🐚 Initialising bash sandbox...")}`);
   const reg = await bashSandbox.registerHandler(
@@ -2284,10 +2294,10 @@ async function getBashSandbox() {
 const executeBashTool = defineTool("execute_bash", {
   description: [
     "Execute a bash command in the sandbox using a pure-JS bash interpreter.",
-    "The command runs inside the same Hyperlight micro-VM as JavaScript handlers.",
+    "The command runs inside a dedicated Hyperlight micro-VM (separate from JavaScript handlers).",
     "",
     "STATELESS: each call is a fresh shell. Use && or ; to chain commands.",
-    "The filesystem is shared with JavaScript handlers (same baseDir).",
+    "The filesystem is shared with JavaScript handlers (same baseDir, same plugins).",
     "",
     "SUPPORTED COMMANDS:",
     "  Text: echo, cat, grep, rg, head, tail, wc, sort, uniq, sed, awk, tr,",
@@ -2406,7 +2416,10 @@ const sandboxResetTool = defineTool("reset_sandbox", {
   },
   handler: async () => {
     const result = await sandbox.resetSandbox();
-    bashRunnerRegistered = false; // Force re-registration on next execute_bash
+    // Also reset the bash sandbox — it's a separate instance.
+    // Setting it to null forces re-creation on next execute_bash call.
+    bashSandbox = null;
+    bashRunnerRegistered = false;
     if (result.success) {
       console.error(
         `  ${C.ok("🔄 Sandbox state reset")} (${result.handlers?.length ?? 0} handlers preserved, ha:shared-state preserved)`,
@@ -5338,7 +5351,7 @@ function buildSessionConfig() {
         // For sandbox memory errors, tell the LLM about the current
         // heap size and how to suggest an increase to the user.
         if (
-          (toolName === "execute_javascript" || toolName === "execute_bash") &&
+          toolName === "execute_javascript" &&
           toolResult.resultType === "failure" &&
           /out of memory|out of physical memory|heap|stack overflow|guest aborted/i.test(
             toolResult.error ?? "",
@@ -5354,6 +5367,23 @@ function buildSessionConfig() {
               `Call configure_sandbox({ scratch: ${scratchMb * 2} }) to double scratch memory. ` +
               `For "malloc failed" or general OOM, call configure_sandbox({ heap: ${heapMb * 2} }). ` +
               `For "buffer" errors, increase inputBuffer or outputBuffer.`,
+          };
+        }
+
+        // For bash sandbox memory errors, guide with fixed limits (no configure_sandbox)
+        if (
+          toolName === "execute_bash" &&
+          toolResult.resultType === "failure" &&
+          /out of memory|out of physical memory|heap|stack overflow|guest aborted/i.test(
+            toolResult.error ?? "",
+          )
+        ) {
+          return {
+            additionalContext:
+              `The bash sandbox has fixed resource limits (64MB heap, 32MB scratch). ` +
+              `configure_sandbox does NOT affect execute_bash — it only controls the JavaScript sandbox. ` +
+              `To work around this, break the command into smaller pieces or use ` +
+              `register_handler with JavaScript for memory-intensive operations.`,
           };
         }
 

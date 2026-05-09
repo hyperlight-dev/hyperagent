@@ -6,14 +6,16 @@
 //! Core encoding logic is in Rust for performance and correctness.
 //! JS constructor wrappers call into the Rust functions.
 //!
-//! crypto.getRandomValues and crypto.randomUUID use a xorshift128+
-//! PRNG seeded from a hash of the compilation timestamp. This is NOT
-//! cryptographically secure — it's for awk rand(), UUID generation,
-//! and similar non-security uses.
+//! crypto.getRandomValues, crypto.randomUUID, and Math.random use the
+//! x86_64 RDRAND hardware instruction for random number generation.
+//! RDRAND provides high-quality randomness but is NOT guaranteed
+//! cryptographically secure in all hypervisor environments — treat
+//! it as suitable for UUIDs, awk rand(), hashing nonces, etc.
 
 #![cfg_attr(hyperlight, no_std)]
 
 #[cfg(hyperlight)]
+#[macro_use]
 extern crate alloc;
 
 #[cfg(hyperlight)]
@@ -21,9 +23,9 @@ use alloc::string::String;
 #[cfg(hyperlight)]
 use alloc::vec::Vec;
 
-use rquickjs::{Ctx, Function, Result as QjsResult, TypedArray};
 use core::sync::atomic::{AtomicU64, Ordering};
 use digest::Digest;
+use rquickjs::{Ctx, Function, Result as QjsResult, TypedArray};
 
 // ── TextEncoder ─────────────────────────────────────────────────────────
 //
@@ -158,6 +160,9 @@ fn rust_btoa(input: String) -> QjsResult<String> {
 // Used by crypto.getRandomValues, crypto.randomUUID, and Math.random.
 
 /// Read a hardware random u64 via RDRAND. Retries on transient failure.
+///
+/// Only available on x86_64 — Hyperlight micro-VMs always target this arch.
+#[cfg(target_arch = "x86_64")]
 #[inline]
 fn rdrand64() -> u64 {
     let mut val: u64;
@@ -181,6 +186,15 @@ fn rdrand64() -> u64 {
     // in production code. Return a non-zero value based on a counter.
     static FALLBACK: AtomicU64 = AtomicU64::new(0xDEAD_BEEF_CAFE_BABE);
     FALLBACK.fetch_add(0x9E37_79B9_7F4A_7C15, Ordering::Relaxed)
+}
+
+/// Fallback for non-x86_64 targets (e.g. clippy cross-compilation).
+/// Uses an atomic counter — NOT random, but keeps the build working.
+#[cfg(not(target_arch = "x86_64"))]
+#[inline]
+fn rdrand64() -> u64 {
+    static COUNTER: AtomicU64 = AtomicU64::new(0xDEAD_BEEF_CAFE_BABE);
+    COUNTER.fetch_add(0x9E37_79B9_7F4A_7C15, Ordering::Relaxed)
 }
 
 /// Fill a Uint8Array with hardware random bytes via RDRAND.
@@ -368,7 +382,8 @@ pub fn setup_globals(ctx: &Ctx<'_>) -> QjsResult<()> {
     globals.set("__ha_getRandomValues", get_random_values_fn)?;
     globals.set("__ha_randomUUID", random_uuid_fn)?;
     globals.set("__ha_subtleDigest", subtle_digest_fn)?;
-    ctx.eval::<(), _>(r#"
+    ctx.eval::<(), _>(
+        r#"
         (function() {
             const getRandomValues = globalThis.__ha_getRandomValues;
             const randomUUID = globalThis.__ha_randomUUID;
@@ -387,7 +402,14 @@ pub fn setup_globals(ctx: &Ctx<'_>) -> QjsResult<()> {
             globalThis.crypto.subtle = {
                 digest: function(algorithm, data) {
                     try {
-                        const bytes = new Uint8Array(data instanceof ArrayBuffer ? data : data.buffer || data);
+                        let bytes;
+                        if (data instanceof ArrayBuffer) {
+                            bytes = new Uint8Array(data);
+                        } else if (ArrayBuffer.isView(data)) {
+                            bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+                        } else {
+                            bytes = new Uint8Array(data);
+                        }
                         const result = subtleDigest(algorithm, Array.from(bytes));
                         return Promise.resolve(result.buffer);
                     } catch (e) {
@@ -399,19 +421,22 @@ pub fn setup_globals(ctx: &Ctx<'_>) -> QjsResult<()> {
             delete globalThis.__ha_randomUUID;
             delete globalThis.__ha_subtleDigest;
         })();
-    "#)?;
+    "#,
+    )?;
 
     // ── Math.random (PRNG-backed) ────────────────────────────────
     // Override QuickJS's built-in Math.random with our seeded PRNG
     // so awk rand() and other random functions produce varied output.
     let math_random_fn = Function::new(ctx.clone(), math_random)?;
     globals.set("__ha_mathRandom", math_random_fn)?;
-    ctx.eval::<(), _>(r#"
+    ctx.eval::<(), _>(
+        r#"
         (function() {
             Math.random = globalThis.__ha_mathRandom;
             delete globalThis.__ha_mathRandom;
         })();
-    "#)?;
+    "#,
+    )?;
 
     Ok(())
 }
