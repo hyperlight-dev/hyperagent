@@ -397,7 +397,12 @@ async function questionCapturingPaste(
   prompt: string,
   collectWindowMs = 100,
 ): Promise<string> {
-  process.stdout.write(prompt);
+  // Use rl.prompt() instead of raw process.stdout.write() so readline
+  // properly enters its terminal mode (raw mode, cursor tracking, etc.).
+  // Without this, arrow keys print raw escape codes (^[[A) after the
+  // first prompt because readline doesn't know it should be active.
+  rl.setPrompt(prompt);
+  rl.prompt();
 
   return new Promise((resolve) => {
     const lines: string[] = [];
@@ -2224,11 +2229,64 @@ const BASH_SUPPORTED_COMMANDS = [
 const BASH_RUNNER_HANDLER = `
 import { Bash, InMemoryFs } from "ha:bash";
 
+// Bridge host:fetch plugin into Web Fetch-compatible function for curl.
+// just-bash's curl calls env.fetch(url, opts) expecting a Response-like object.
+let fetchFn = null;
+try {
+  const mod = await import("host:fetch");
+  // Build a minimal Web Fetch adapter over the synchronous host:fetch plugin.
+  fetchFn = async function(url, opts) {
+    const method = (opts && opts.method || "GET").toUpperCase();
+    const headers = {};
+    if (opts && opts.headers) {
+      // Headers can be a Headers object, plain object, or entries array
+      if (typeof opts.headers.forEach === 'function') {
+        opts.headers.forEach((v, k) => { headers[k] = v; });
+      } else {
+        Object.assign(headers, opts.headers);
+      }
+    }
+    const fetchOpts = { method, headers };
+    if (opts && opts.body) fetchOpts.body = opts.body;
+    if (method === "GET" || method === "HEAD") {
+      const result = mod.fetchText(url, { ...fetchOpts, includeMeta: true });
+      const enc = new TextEncoder();
+      const body = typeof result === 'string'
+        ? enc.encode(result)
+        : enc.encode(result.data || '');
+      const status = typeof result === 'object' ? (result.status || 200) : 200;
+      const ct = typeof result === 'object' ? (result.contentType || '') : '';
+      return {
+        status,
+        statusText: status === 200 ? 'OK' : String(status),
+        headers: new Map([['content-type', ct]]),
+        body,
+        url,
+      };
+    } else {
+      const result = mod.post(url, opts.body, fetchOpts);
+      const enc = new TextEncoder();
+      return {
+        status: result.status || 200,
+        statusText: result.statusText || 'OK',
+        headers: new Map(Object.entries(result.headers || {})),
+        body: enc.encode(typeof result.body === 'string' ? result.body : JSON.stringify(result.body || '')),
+        url,
+      };
+    }
+  };
+} catch {
+  // fetch plugin not enabled — curl will report "command not found"
+}
+
 export async function handler(event) {
   const e = typeof event === 'string' ? JSON.parse(event) : event;
-  const bash = new Bash({
+  const bashOpts = {
     commands: ${JSON.stringify([...BASH_SUPPORTED_COMMANDS])},
-  });
+  };
+  // Wire fetch plugin into just-bash so curl works
+  if (fetchFn) bashOpts.fetch = fetchFn;
+  const bash = new Bash(bashOpts);
   const result = await bash.exec(e.command || "echo 'No command provided'");
   return {
     stdout: result.stdout,
