@@ -544,7 +544,10 @@ export async function handleSlashCommand(
         console.log();
         return true;
       }
-      const showAll = parts.includes("--all") || parts.includes("-a");
+      const showAll =
+        parts.includes("--all") ||
+        parts.includes("-a") ||
+        parts.includes("-all");
       try {
         const allSessions = await state.copilotClient.listSessions();
         // Filter to only hyperagent-prefixed sessions
@@ -585,12 +588,10 @@ export async function handleSlashCommand(
             const summary = s.summary
               ? ` — ${s.summary.slice(0, 60)}${s.summary.length > 60 ? "…" : ""}`
               : "";
-            // Show the UUID part after the prefix for readability
-            const shortId = s.sessionId.slice(
-              SESSION_ID_PREFIX.length,
-              SESSION_ID_PREFIX.length + 12,
-            );
-            console.log(`     ${C.val(shortId + "…")}${current}`);
+            // Show the full UUID part after the prefix so users can
+            // paste it into /resume (partial matching works too).
+            const uuidPart = s.sessionId.slice(SESSION_ID_PREFIX.length);
+            console.log(`     ${C.val(uuidPart)}${current}`);
             console.log(`       ${C.dim("Modified:")} ${modified}${summary}`);
           }
           if (hidden > 0) {
@@ -617,7 +618,7 @@ export async function handleSlashCommand(
       try {
         let targetId = parts[1];
         if (!targetId) {
-          // No ID given — resume most recent hyperagent session
+          // No ID given — show interactive session picker (like az account list).
           const allSessions = await state.copilotClient.listSessions();
           const ours = allSessions
             .filter((s) => s.sessionId.startsWith(SESSION_ID_PREFIX))
@@ -637,7 +638,64 @@ export async function handleSlashCommand(
             console.log();
             return true;
           }
-          targetId = ours[0].sessionId;
+
+          // Show numbered list (max 20 most recent)
+          const pickCount = Math.min(ours.length, 20);
+          console.log(
+            `  ${C.label("📋 Pick a session to resume")} (${ours.length} total):`,
+          );
+          for (let i = 0; i < pickCount; i++) {
+            const s = ours[i];
+            const current =
+              state.activeSession &&
+              s.sessionId === state.activeSession.sessionId
+                ? ` ${C.ok("← current")}`
+                : "";
+            const modified = s.modifiedTime
+              ? new Date(s.modifiedTime).toLocaleString()
+              : "unknown";
+            const summary = s.summary
+              ? ` — ${s.summary.slice(0, 50)}${s.summary.length > 50 ? "…" : ""}`
+              : "";
+            const num = String(i + 1).padStart(2);
+            console.log(
+              `     ${C.warn(num)}) ${C.dim(modified)}${summary}${current}`,
+            );
+          }
+          if (ours.length > pickCount) {
+            console.log(
+              `     ${C.dim(`… ${ours.length - pickCount} older sessions not shown`)}`,
+            );
+          }
+          console.log();
+
+          // Prompt for selection
+          const answer = await rl.question(
+            `  ${C.label("Enter number (1-" + pickCount + ") or session ID:")} `,
+          );
+          const trimmed = answer.trim();
+          if (!trimmed) {
+            console.log(`  ${C.dim("Cancelled.")}`);
+            console.log();
+            return true;
+          }
+
+          // Check if it's a number
+          const num = parseInt(trimmed, 10);
+          if (!isNaN(num) && num >= 1 && num <= pickCount) {
+            targetId = ours[num - 1].sessionId;
+          } else {
+            // Treat as session ID (partial match)
+            const prefixed = SESSION_ID_PREFIX + trimmed;
+            const match =
+              ours.find((s) => s.sessionId.startsWith(prefixed)) ??
+              ours.find((s) => s.sessionId.startsWith(trimmed));
+            if (match) {
+              targetId = match.sessionId;
+            } else {
+              targetId = trimmed; // pass through — SDK will error if invalid
+            }
+          }
         } else {
           // Allow partial session ID matching (with or without prefix)
           const allSessions = await state.copilotClient.listSessions();

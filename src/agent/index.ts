@@ -2206,6 +2206,7 @@ const BASH_SUPPORTED_COMMANDS = [
   "stat",
   "du",
   "file",
+  "curl",
   "rev",
   "nl",
   "fold",
