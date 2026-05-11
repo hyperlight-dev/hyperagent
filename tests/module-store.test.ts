@@ -219,6 +219,26 @@ describe("metadata cache", () => {
 // listModules() and loadModule() must find them.
 
 describe("native module discovery", () => {
+  // Ensure native module metadata files (.json, .d.ts) are in the modules dir.
+  // In CI, loadAllModules() hasn't run yet, so we copy them from builtin-modules/.
+  beforeAll(() => {
+    const modsDir = getModulesDir();
+    if (!existsSync(modsDir)) {
+      mkdirSync(modsDir, { recursive: true });
+    }
+    for (const ext of [".json", ".d.ts"]) {
+      const files = readdirSync(BUILTIN_DIR).filter(
+        (f) => f.endsWith(ext) && f !== "tsconfig.json",
+      );
+      for (const file of files) {
+        const dest = join(modsDir, file);
+        if (!existsSync(dest)) {
+          copyFileSync(join(BUILTIN_DIR, file), dest);
+        }
+      }
+    }
+  });
+
   it("listModules includes native Rust modules", () => {
     const modules = listModules();
     const names = modules.map((m) => m.name);
