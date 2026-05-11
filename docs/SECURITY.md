@@ -12,13 +12,15 @@ Hyperagent implements defense-in-depth security through multiple layers. No sing
 
 The Copilot SDK provides built-in tools (bash, edit, grep, read, write) that would allow arbitrary code execution. Hyperagent blocks most of them, allowing only safe tools like `ask_user` (for user interaction) and `report_intent` (protocol).
 
+Hyperagent provides its own `execute_bash` tool — a pure-JS bash interpreter (just-bash) running **inside** the Hyperlight sandbox. This is NOT the SDK's bash tool and does NOT have host shell access. It supports ~50 common commands (ls, grep, jq, curl, sed, awk, etc.) with the same isolation guarantees as `execute_javascript`.
+
 **Implementation** (`src/agent/tool-gating.ts`):
 - Intercepts all tool calls from the LLM
 - Maintains an allowlist of custom tools plus safe SDK tools
 - Rejects any tool not on the allowlist
 - Logs blocked attempts for debugging
 
-**Effect**: The LLM cannot escape the sandbox by calling SDK tools. Even if prompted to "run bash", the tool call is rejected.
+**Effect**: The LLM cannot escape the sandbox by calling SDK tools. Even if prompted to "run bash", the SDK's bash tool is rejected. The sandboxed `execute_bash` runs inside a micro-VM with no host shell access.
 
 ### Layer 2: Hyperlight Micro-VMs
 

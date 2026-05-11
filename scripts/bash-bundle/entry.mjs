@@ -2,3 +2,4 @@
 // Re-exports only what we need, stubs out node:zlib
 export { Bash } from "just-bash";
 export { InMemoryFs } from "just-bash";
+export { defineCommand } from "just-bash";

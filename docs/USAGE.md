@@ -108,13 +108,15 @@ Toggle options at runtime without restarting. Type `/` and press Tab for complet
 
 ## LLM Tools
 
-The agent registers custom tools that the LLM can call. All SDK built-in tools
-(bash, grep, edit, etc.) are **blocked** by the tool gating layer.
+The agent registers custom tools that the LLM can call. Most SDK built-in tools
+(grep, edit, etc.) are **blocked** by the tool gating layer. The SDK's bash tool
+is also blocked — `execute_bash` is Hyperagent's own sandboxed bash interpreter.
 
 | Tool                 | Purpose                                                              |
 | -------------------- | -------------------------------------------------------------------- |
 | `register_handler`   | Register named JavaScript handler code in the sandbox                |
 | `execute_javascript` | Execute a registered handler with optional event data                |
+| `execute_bash`       | Run bash commands in a sandboxed pure-JS interpreter (just-bash)     |
 | `delete_handler`     | Remove a handler from the sandbox                                    |
 | `get_handler_source` | Retrieve handler source for inspection or editing                    |
 | `edit_handler`       | Surgically edit an existing handler                                  |

@@ -9,7 +9,7 @@
 // Prerequisites: npm install (just-bash and esbuild must be in node_modules)
 
 import { execSync } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -90,8 +90,10 @@ writeFileSync(outFile, output);
 
 // Clean up temp file
 try {
-  require("node:fs").unlinkSync(tmpBundle);
-} catch {}
+  unlinkSync(tmpBundle);
+} catch {
+  // Best-effort cleanup — .gitignore covers it anyway
+}
 
 const sizeKb = (output.length / 1024).toFixed(0);
 console.log(`\\n✅ Built builtin-modules/bash.js (${sizeKb} KB)`);

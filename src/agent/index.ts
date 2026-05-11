@@ -397,12 +397,13 @@ async function questionCapturingPaste(
   prompt: string,
   collectWindowMs = 100,
 ): Promise<string> {
-  // Use rl.prompt() instead of raw process.stdout.write() so readline
-  // properly enters its terminal mode (raw mode, cursor tracking, etc.).
-  // Without this, arrow keys print raw escape codes (^[[A) after the
-  // first prompt because readline doesn't know it should be active.
-  rl.setPrompt(prompt);
-  rl.prompt();
+  // Write the prompt and ensure readline is actively listening for
+  // input. After rl.question() (used in /resume picker etc.), readline
+  // pauses stdin — we must resume it so our line handler fires.
+  process.stdout.write(prompt);
+  if (process.stdin.isPaused()) {
+    process.stdin.resume();
+  }
 
   return new Promise((resolve) => {
     const lines: string[] = [];
@@ -1000,6 +1001,13 @@ async function syncPluginsToSandbox(): Promise<void> {
   // Without this, execute_bash can't use curl (fetch plugin) or filesystem.
   if (bashSandbox) {
     await bashSandbox.setPlugins(registrations);
+    // Re-register the handler with the correct template — the fetch
+    // plugin may have been enabled or disabled since last registration,
+    // which changes whether curl works (static import vs no import).
+    await bashSandbox.registerHandler(
+      "sys-bash-runner",
+      getBashRunnerHandler(),
+    );
   }
 }
 
@@ -2165,6 +2173,7 @@ const executeJavascriptTool = defineTool("execute_javascript", {
 
 /** Bash commands available in the sandbox. */
 const BASH_SUPPORTED_COMMANDS = [
+  // Text processing
   "echo",
   "cat",
   "grep",
@@ -2176,9 +2185,6 @@ const BASH_SUPPORTED_COMMANDS = [
   "wc",
   "sort",
   "uniq",
-  "find",
-  "tree",
-  "diff",
   "sed",
   "awk",
   "tr",
@@ -2189,29 +2195,6 @@ const BASH_SUPPORTED_COMMANDS = [
   "tee",
   "printf",
   "seq",
-  "env",
-  "printenv",
-  "date",
-  "basename",
-  "dirname",
-  "readlink",
-  "which",
-  "whoami",
-  "hostname",
-  "jq",
-  "yq",
-  "base64",
-  "md5sum",
-  "sha256sum",
-  "cp",
-  "mkdir",
-  "touch",
-  "chmod",
-  "ls",
-  "stat",
-  "du",
-  "file",
-  "curl",
   "rev",
   "nl",
   "fold",
@@ -2219,81 +2202,288 @@ const BASH_SUPPORTED_COMMANDS = [
   "column",
   "comm",
   "tac",
+  "diff",
+  "strings",
+  "split",
+  // File operations (read-only + create — NO delete/rename)
+  "ls",
+  "find",
+  "tree",
+  "cp",
+  "mkdir",
+  "touch",
+  "chmod",
+  "stat",
+  "du",
+  "file",
+  // Data processing
+  "jq",
+  "yq",
+  "xan",
+  // Encoding / hashing
+  "base64",
+  "md5sum",
+  "sha1sum",
+  "sha256sum",
   "od",
+  // HTML / Markdown — NOT available in bash. Use ha:html in a JavaScript handler.
+  // Archives
+  "gzip",
+  "gunzip",
+  "zcat",
+  // Net (curl handled separately via defineCommand)
+  // Meta
+  "date",
+  "env",
+  "printenv",
+  "basename",
+  "dirname",
+  "readlink",
+  "which",
+  "whoami",
+  "hostname",
+  "pwd",
   "expr",
   "true",
+  "false",
   "time",
 ] as const;
 
-/** Handler code for the internal bash runner. */
-const BASH_RUNNER_HANDLER = `
-import { Bash, InMemoryFs } from "ha:bash";
+/** Handler code for the internal bash runner (without fetch). */
+/**
+ * Generate bash runner handler code based on enabled plugins.
+ * Builds the handler with the right static imports and wiring:
+ * - fs-read enabled → bash can read files from the plugin baseDir
+ * - fs-write enabled → bash redirects (>) write through the plugin
+ * - fetch enabled → curl command works via custom defineCommand
+ */
+function getBashRunnerHandler(): string {
+  const enabled = pluginManager.getEnabledPlugins().map((p) => p.manifest.name);
+  const hasFsRead = enabled.includes("fs-read");
+  const hasFsWrite = enabled.includes("fs-write");
+  const hasFetch = enabled.includes("fetch");
 
-// Bridge host:fetch plugin into Web Fetch-compatible function for curl.
-// just-bash's curl calls env.fetch(url, opts) expecting a Response-like object.
-let fetchFn = null;
-try {
-  const mod = await import("host:fetch");
-  // Build a minimal Web Fetch adapter over the synchronous host:fetch plugin.
-  fetchFn = async function(url, opts) {
-    const method = (opts && opts.method || "GET").toUpperCase();
-    const headers = {};
-    if (opts && opts.headers) {
-      // Headers can be a Headers object, plain object, or entries array
-      if (typeof opts.headers.forEach === 'function') {
-        opts.headers.forEach((v, k) => { headers[k] = v; });
-      } else {
-        Object.assign(headers, opts.headers);
-      }
+  // Build imports
+  const imports = [
+    `import { Bash, InMemoryFs, defineCommand } from "ha:bash";`,
+  ];
+  if (hasFsRead) imports.push(`import * as fsRead from "host:fs-read";`);
+  if (hasFsWrite) imports.push(`import * as fsWrite from "host:fs-write";`);
+  if (hasFetch) imports.push(`import * as fetchMod from "host:fetch";`);
+
+  // Build the IFileSystem adapter that delegates to host plugins.
+  // Falls back to InMemoryFs for paths/operations the plugins can't handle.
+  const fsAdapter = `
+// ── Hybrid filesystem: InMemoryFs + host plugins ──────────────────
+const memFs = new InMemoryFs();
+
+const hostFs = {
+  async readFile(path, opts) {
+    ${
+      hasFsRead
+        ? `try {
+      const r = fsRead.readFile(path, typeof opts === 'string' ? opts : opts?.encoding || 'utf-8');
+      if (r.error) throw new Error(r.error);
+      return r.content;
+    } catch (e) {
+      // Fall back to in-memory
+      return memFs.readFile(path, opts);
+    }`
+        : `return memFs.readFile(path, opts);`
     }
-    const fetchOpts = { method, headers };
-    if (opts && opts.body) fetchOpts.body = opts.body;
+  },
+  async readFileBuffer(path) {
+    ${
+      hasFsRead
+        ? `try {
+      const r = fsRead.readFileBinary(path);
+      return r;
+    } catch {
+      return memFs.readFileBuffer(path);
+    }`
+        : `return memFs.readFileBuffer(path);`
+    }
+  },
+  async writeFile(path, content, opts) {
+    ${
+      hasFsWrite
+        ? `try {
+      const text = typeof content === 'string' ? content : new TextDecoder().decode(content);
+      const r = fsWrite.writeFile(path, text);
+      if (r.error) throw new Error(r.error);
+    } catch (e) {
+      // Fall back to in-memory if plugin rejects (path jail etc.)
+      await memFs.writeFile(path, content, opts);
+    }`
+        : `await memFs.writeFile(path, content, opts);`
+    }
+  },
+  async appendFile(path, content, opts) {
+    ${
+      hasFsWrite
+        ? `try {
+      const text = typeof content === 'string' ? content : new TextDecoder().decode(content);
+      const r = fsWrite.appendFile(path, text);
+      if (r.error) throw new Error(r.error);
+    } catch {
+      await memFs.appendFile(path, content, opts);
+    }`
+        : `await memFs.appendFile(path, content, opts);`
+    }
+  },
+  async exists(path) {
+    ${
+      hasFsRead
+        ? `try {
+      const r = fsRead.stat(path);
+      return !r.error;
+    } catch {
+      return memFs.exists(path);
+    }`
+        : `return memFs.exists(path);`
+    }
+  },
+  async stat(path) {
+    ${
+      hasFsRead
+        ? `try {
+      const r = fsRead.stat(path);
+      if (r.error) throw new Error(r.error);
+      return {
+        isFile: r.type === 'file',
+        isDirectory: r.type === 'directory',
+        isSymbolicLink: false,
+        mode: 0o644,
+        size: r.size || 0,
+        mtime: r.modified ? new Date(r.modified) : new Date(),
+      };
+    } catch {
+      return memFs.stat(path);
+    }`
+        : `return memFs.stat(path);`
+    }
+  },
+  async mkdir(path, opts) {
+    ${
+      hasFsWrite
+        ? `try {
+      fsWrite.mkdir(path);
+    } catch {
+      await memFs.mkdir(path, opts);
+    }`
+        : `await memFs.mkdir(path, opts);`
+    }
+  },
+  async readdir(path) {
+    ${
+      hasFsRead
+        ? `try {
+      const r = fsRead.listDir(path);
+      if (r.error) throw new Error(r.error);
+      return r.entries.map(e => e.name);
+    } catch {
+      return memFs.readdir(path);
+    }`
+        : `return memFs.readdir(path);`
+    }
+  },
+  // Delegate remaining operations to in-memory FS
+  async rm(p, o) { return memFs.rm(p, o); },
+  async cp(s, d, o) { return memFs.cp(s, d, o); },
+  async mv(s, d) { return memFs.mv(s, d); },
+  resolvePath(b, p) { return memFs.resolvePath(b, p); },
+  getAllPaths() { return memFs.getAllPaths(); },
+  async chmod(p, m) { return memFs.chmod(p, m); },
+  async symlink(t, l) { return memFs.symlink(t, l); },
+  async link(e, n) { return memFs.link(e, n); },
+  async readlink(p) { return memFs.readlink(p); },
+  async lstat(p) { return memFs.lstat(p); },
+  async realpath(p) { return memFs.realpath(p); },
+  async utimes(p, a, m) { return memFs.utimes(p, a, m); },
+};`;
+
+  // Build custom curl command if fetch is available
+  const curlCommand = hasFetch
+    ? `
+// Custom curl command — just-bash's built-in curl lazy-loads via
+// dynamic import which breaks in QuickJS. This eager version works.
+const curlCmd = defineCommand("curl", async (args) => {
+  let url = "", method = "GET", headersMap = {}, body = null;
+  let i = 0;
+  while (i < args.length) {
+    const a = args[i];
+    if (a === "-s" || a === "--silent") { /* silent */ }
+    else if (a === "-X" || a === "--request") { method = (args[++i] || "GET").toUpperCase(); }
+    else if (a === "-H" || a === "--header") {
+      const h = args[++i] || "";
+      const colon = h.indexOf(":");
+      if (colon > 0) headersMap[h.slice(0, colon).trim()] = h.slice(colon + 1).trim();
+    }
+    else if (a === "-d" || a === "--data" || a === "--data-raw") { body = args[++i] || ""; method = method === "GET" ? "POST" : method; }
+    else if (!a.startsWith("-")) { url = a; }
+    i++;
+  }
+  if (!url) return { stdout: "", stderr: "curl: no URL specified\\n", exitCode: 2 };
+  if (!url.match(/^https?:\\/\\//)) url = "https://" + url;
+  try {
     if (method === "GET" || method === "HEAD") {
-      const result = mod.fetchText(url, { ...fetchOpts, includeMeta: true });
-      const enc = new TextEncoder();
-      const body = typeof result === 'string'
-        ? enc.encode(result)
-        : enc.encode(result.data || '');
-      const status = typeof result === 'object' ? (result.status || 200) : 200;
-      const ct = typeof result === 'object' ? (result.contentType || '') : '';
-      return {
-        status,
-        statusText: status === 200 ? 'OK' : String(status),
-        headers: new Map([['content-type', ct]]),
-        body,
-        url,
-      };
+      const result = fetchMod.fetchText(url, { method, headers: headersMap, includeMeta: true });
+      const text = typeof result === "string" ? result : (result.data || "");
+      return { stdout: text, stderr: "", exitCode: 0 };
     } else {
-      const result = mod.post(url, opts.body, fetchOpts);
-      const enc = new TextEncoder();
-      return {
-        status: result.status || 200,
-        statusText: result.statusText || 'OK',
-        headers: new Map(Object.entries(result.headers || {})),
-        body: enc.encode(typeof result.body === 'string' ? result.body : JSON.stringify(result.body || '')),
-        url,
-      };
+      const result = fetchMod.post(url, body, { method, headers: headersMap });
+      const text = typeof result.body === "string" ? result.body : JSON.stringify(result.body || "");
+      return { stdout: text, stderr: "", exitCode: 0 };
     }
-  };
-} catch {
-  // fetch plugin not enabled — curl will report "command not found"
-}
+  } catch (e) {
+    return { stdout: "", stderr: "curl: " + (e.message || String(e)) + "\\n", exitCode: 1 };
+  }
+});`
+    : "";
+
+  // Build the handler body
+  const cmdsJson = JSON.stringify(
+    ([...BASH_SUPPORTED_COMMANDS] as string[]).filter((c) => c !== "curl"),
+  );
+
+  // Custom 'commands' command — lists available commands accurately.
+  // Can't override builtin 'help' so we provide 'commands' instead.
+  const allCmds: string[] = [...BASH_SUPPORTED_COMMANDS];
+  if (hasFetch) allCmds.push("curl");
+  const helpCmdList = allCmds.sort().join(", ");
+  const helpCommand = `
+// 'commands' — lists what's actually available (builtin 'help' is misleading)
+const commandsCmd = defineCommand("commands", async () => ({
+  stdout: "Available commands in this sandbox:\\n\\n${helpCmdList}\\n\\nUse <command> --help for usage details.\\nFor HTML processing, use ha:html in a JavaScript handler (register_handler).\\n",
+  stderr: "",
+  exitCode: 0,
+}));`;
+
+  const customCmds = ["commandsCmd"];
+  if (hasFetch) customCmds.push("curlCmd");
+
+  const bashOpts = [
+    `commands: ${cmdsJson}`,
+    `fs: hostFs`,
+    `customCommands: [${customCmds.join(", ")}]`,
+  ].join(",\n    ");
+
+  return `
+${imports.join("\n")}
+
+${fsAdapter}
+${curlCommand}
+${helpCommand}
 
 export async function handler(event) {
   const e = typeof event === 'string' ? JSON.parse(event) : event;
-  const bashOpts = {
-    commands: ${JSON.stringify([...BASH_SUPPORTED_COMMANDS])},
-  };
-  // Wire fetch plugin into just-bash so curl works
-  if (fetchFn) bashOpts.fetch = fetchFn;
-  const bash = new Bash(bashOpts);
+  const bash = new Bash({
+    ${bashOpts}
+  });
   const result = await bash.exec(e.command || "echo 'No command provided'");
-  return {
-    stdout: result.stdout,
-    stderr: result.stderr,
-    exitCode: result.exitCode,
-  };
+  return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode };
 }`;
+}
 
 /** Whether the bash runner handler has been registered this session. */
 let bashRunnerRegistered = false;
@@ -2337,11 +2527,14 @@ async function getBashSandbox() {
   await syncPluginsToSandbox();
 
   // Register the bash runner handler
-  console.error(`  ${C.dim("🐚 Initialising bash sandbox...")}`);
-  const reg = await bashSandbox.registerHandler(
-    "sys-bash-runner",
-    BASH_RUNNER_HANDLER,
+  const fetchEnabled = pluginManager
+    .getEnabledPlugins()
+    .some((p) => p.manifest.name === "fetch");
+  console.error(
+    `  ${C.dim(`🐚 Initialising bash sandbox (fetch plugin: ${fetchEnabled ? "enabled → curl available" : "disabled → no curl"})...`)}`,
   );
+  const handlerCode = getBashRunnerHandler();
+  const reg = await bashSandbox.registerHandler("sys-bash-runner", handlerCode);
   if (!reg.success) {
     bashSandbox = null;
     return null;
@@ -2356,23 +2549,29 @@ const executeBashTool = defineTool("execute_bash", {
     "The command runs inside a dedicated Hyperlight micro-VM (separate from JavaScript handlers).",
     "",
     "STATELESS: each call is a fresh shell. Use && or ; to chain commands.",
-    "The filesystem is shared with JavaScript handlers (same baseDir, same plugins).",
+    "File I/O: when fs-read/fs-write plugins are enabled, cat/ls/redirects work on",
+    "  the plugin baseDir (same files as JavaScript handlers). Without plugins,",
+    "  files are in-memory only and lost between calls.",
+    "CROSS-TOOL: files written by bash (curl > file.txt, echo > data.csv) are",
+    "  readable by JavaScript handlers via host:fs-read, and vice versa.",
+    "  Use bash for quick downloads/transforms, JS handlers for processing.",
     "",
-    "SUPPORTED COMMANDS:",
+    "SUPPORTED COMMANDS (run 'help' to see the full list):",
     "  Text: echo, cat, grep, rg, head, tail, wc, sort, uniq, sed, awk, tr,",
     "        cut, paste, join, xargs, tee, rev, nl, fold, tac, column, comm,",
-    "        diff, printf, seq, expr, base64, md5sum, sha256sum, od",
+    "        diff, printf, seq, expr, strings, split, od",
     "  Files: ls, find, tree, cp, mkdir, touch, chmod, stat, du, file",
-    "  Data: jq, yq (JSON/YAML processing)",
-    "  Net:  curl (requires fetch plugin enabled — use apply_profile('web-research') first)",
-    "  Meta: date, env, whoami, hostname, basename, dirname, which, readlink",
+    "  Data: jq, yq, xan (JSON/YAML/CSV processing)",
+    "  Encoding: base64, md5sum, sha1sum, sha256sum, gzip, gunzip, zcat",
+    "  Net:  curl (requires fetch plugin — use apply_profile('web-research') first)",
+    "  Meta: date, env, pwd, whoami, hostname, basename, dirname, which, readlink",
     "",
     "POSIX FLAGS ONLY: This is a pure-JS bash interpreter, not GNU coreutils.",
     "  GNU-only flags will fail (e.g. sort -R, grep -P, sed -i).",
     "  Stick to POSIX-standard flags for all commands.",
     "",
     "NOT AVAILABLE: rm, mv, ln, wget, python, node, sleep, ssh, git, apt",
-    "  - For file deletion, there is no command available",
+    "  - No file deletion or rename (security: fs-write is create/append only)",
     "  - For complex logic, use register_handler with JavaScript instead",
     "",
     "EXAMPLES:",
@@ -6106,7 +6305,8 @@ async function main(): Promise<void> {
       const lower = trimmed.toLowerCase();
       if (lower === "exit" || lower === "/exit") {
         printExitTokenSummary();
-        console.log(`\n👋 Goodbye! (session: ${formatSessionDuration()})\n`);
+        console.log(`\n👋 Goodbye! (session: ${formatSessionDuration()})`);
+        console.log(`  ${C.dim("Shutting down — please wait…")}\n`);
         break;
       }
 
@@ -6297,6 +6497,11 @@ async function main(): Promise<void> {
     // Rust TLS destructors racing with Node's exit handlers.
     await shutdownAnalysisGuest();
 
+    // Release the bash sandbox before exit — its Hyperlight VM
+    // destructor can SIGILL if it races with Node's exit handlers.
+    bashSandbox = null;
+    bashRunnerRegistered = false;
+
     // Exit cleanly so the process doesn't linger after /exit.
     // Without this the event loop stays alive (readline, timers)
     // and the user has to CTRL-C — which triggers the SIGINT
@@ -6313,7 +6518,8 @@ const SHUTDOWN_TIMEOUT_MS = 5_000;
 // Graceful shutdown — clean up on SIGINT (Ctrl+C)
 process.on("SIGINT", async () => {
   printExitTokenSummary();
-  console.log(`\n\n👋 Goodbye! (session: ${formatSessionDuration()})\n`);
+  console.log(`\n\n👋 Goodbye! (session: ${formatSessionDuration()})`);
+  console.log(`  ${C.dim("Shutting down — please wait…")}\n`);
 
   // Stop transcript synchronously — async won't complete before exit
   if (transcript.active) {
@@ -6359,6 +6565,11 @@ process.on("SIGINT", async () => {
   // Shutdown native addons before exit to prevent SIGSEGV from
   // Rust TLS destructors racing with Node's exit handlers.
   await shutdownAnalysisGuest();
+
+  // Release the bash sandbox before exit — its Hyperlight VM
+  // destructor can SIGILL if it races with Node's exit handlers.
+  bashSandbox = null;
+  bashRunnerRegistered = false;
 
   process.exit(0);
 });

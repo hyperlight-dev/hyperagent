@@ -26,6 +26,7 @@ import {
   loadModuleAsync,
   saveModule,
   getModulesDir,
+  listModules,
 } from "../src/agent/module-store.js";
 
 // Get paths for builtin module syncing
@@ -209,5 +210,49 @@ describe("metadata cache", () => {
 
     mod = loadModule(testModuleName);
     expect(mod!.exports[0].name).toBe("v2");
+  });
+});
+
+// ── Native Rust Module Discovery ─────────────────────────────────────
+// Native modules (html, markdown, image, ziplib) are compiled into the
+// runtime. They have .json + .d.ts metadata but no .js file. Both
+// listModules() and loadModule() must find them.
+
+describe("native module discovery", () => {
+  it("listModules includes native Rust modules", () => {
+    const modules = listModules();
+    const names = modules.map((m) => m.name);
+    expect(names, "ha:html missing from listModules()").toContain("html");
+    expect(names, "ha:markdown missing from listModules()").toContain(
+      "markdown",
+    );
+    expect(names, "ha:image missing from listModules()").toContain("image");
+    expect(names, "ha:ziplib missing from listModules()").toContain("ziplib");
+  });
+
+  it("native modules have correct metadata", () => {
+    const html = listModules().find((m) => m.name === "html");
+    expect(html).toBeDefined();
+    expect(html!.author).toBe("system");
+    expect(html!.mutable).toBe(false);
+    expect(html!.description).toBeTruthy();
+    expect(html!.exports.length).toBeGreaterThan(0);
+  });
+
+  it("loadModule returns native module info", () => {
+    const html = loadModule("html");
+    expect(html).not.toBeNull();
+    expect(html!.name).toBe("html");
+    expect(html!.author).toBe("system");
+    expect(html!.exports.length).toBeGreaterThan(0);
+    // Native modules have function exports parsed from .d.ts
+    const exportNames = html!.exports.map((e) => e.name);
+    expect(exportNames).toContain("parse_html");
+    expect(exportNames).toContain("html_to_text");
+    expect(exportNames).toContain("extract_links");
+  });
+
+  it("loadModule returns null for nonexistent module", () => {
+    expect(loadModule("nonexistent_module_xyz")).toBeNull();
   });
 });

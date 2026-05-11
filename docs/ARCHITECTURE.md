@@ -12,7 +12,7 @@ This document describes Hyperagent's system architecture.
 │    streaming | infinite sessions | multi-model        │
 ├───────────────────────────────────────────────────────┤
 │                  Tool Gating Layer                    │
-│    (blocks all SDK built-in tools like bash/edit)     │
+│    (blocks SDK built-in tools like edit/grep/write)    │
 ├───────────────────────────────────────────────────────┤
 │                   Custom Tools                        │
 │    register_handler, execute_javascript, ask_user     │
@@ -51,8 +51,9 @@ The main agent file handles:
 ### Tool Gating (`src/agent/tool-gating.ts`)
 
 Intercepts all tool calls from the LLM and:
-- Blocks most GitHub Copilot SDK built-in tools (bash, edit, grep, read, write)
-- Allows only registered custom tools
+- Blocks most GitHub Copilot SDK built-in tools (edit, grep, read, write)
+- Allows only registered custom tools (including `execute_bash` which runs
+  a sandboxed pure-JS bash interpreter, not a host shell)
 - Logs blocked attempts for debugging
 
 ### Sandbox Tool (`src/sandbox/tool.js`)

@@ -75,7 +75,23 @@ execSync(`prettier --write "${BUILTIN_DIR}/*.js"`, {
 
 console.log("\nUpdating module hashes...");
 
-// Step 5: Auto-update hashes in .json metadata files
+// Step 5a: Rebuild ha:bash bundle from just-bash (if installed).
+// Must run BEFORE update-module-hashes so bash.json gets a correct sourceHash.
+try {
+  const justBashPath = join(ROOT, "node_modules", "just-bash");
+  if (existsSync(justBashPath)) {
+    console.log("\nRebuilding ha:bash bundle from just-bash...");
+    execSync("node scripts/bash-bundle/build.mjs", {
+      cwd: ROOT,
+      stdio: "inherit",
+    });
+  }
+} catch (e) {
+  console.error("  \u26a0\ufe0f  bash bundle build failed:", e.message);
+  // Non-fatal — bash is optional, core agent works without it
+}
+
+// Step 5b: Auto-update hashes in .json metadata files
 execSync("npx tsx scripts/update-module-hashes.ts", {
   cwd: ROOT,
   stdio: "inherit",
@@ -140,19 +156,5 @@ execSync("npx tsx scripts/generate-host-modules-dts.ts", {
   stdio: "inherit",
 });
 
-// Step 9: Rebuild ha:bash bundle from just-bash (if just-bash is installed)
-try {
-  const justBashPath = join(ROOT, "node_modules", "just-bash");
-  if (existsSync(justBashPath)) {
-    console.log("\nRebuilding ha:bash bundle from just-bash...");
-    execSync("node scripts/bash-bundle/build.mjs", {
-      cwd: ROOT,
-      stdio: "inherit",
-    });
-  }
-} catch (e) {
-  console.error("  ⚠️  bash bundle build failed:", e.message);
-  // Non-fatal — bash is optional, core agent works without it
-}
 
 console.log("✓ Build complete");
