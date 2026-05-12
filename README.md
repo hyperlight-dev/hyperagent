@@ -125,6 +125,7 @@ The sandbox has no direct filesystem, network, shell, or process access. Capabil
 | ---------------- | ---------------------------------------------------------------- |
 | Files            | `fs-read` and `fs-write` plugins with path jails                 |
 | HTTP             | `fetch` plugin with domain allowlists and SSRF checks            |
+| Bash commands    | `execute_bash` — sandboxed pure-JS interpreter (ls, grep, jq, curl, etc.) |
 | Reusable code    | `ha:*` system and user modules                                   |
 | External systems | MCP servers exposed as typed `host:mcp-*` modules                |
 | Bigger jobs      | Profiles that raise limits; profile tools can enable plugin sets |
@@ -235,7 +236,7 @@ MCP servers are not Hyperlight-sandboxed; they run as normal host processes. Rev
 HyperAgent is designed to make generated-code execution less terrifying, not magically safe.
 
 - **Hardware isolation:** JavaScript runs in Hyperlight micro-VMs.
-- **Tool gating:** SDK built-ins like shell, edit, and grep are blocked; the model gets HyperAgent-specific tools.
+- **Tool gating:** SDK built-ins like shell, edit, and grep are blocked; the model gets HyperAgent-specific tools including a sandboxed bash interpreter (`execute_bash`).
 - **Code validation:** Generated JavaScript is checked before execution.
 - **No ambient host access:** Files, network, and external systems require explicit plugins or MCP connections.
 - **Plugin auditing:** Plugin code is audited before use.

@@ -458,3 +458,60 @@ describe("console.warn/error/info/debug", () => {
     expect(result.consoleOutput!.join("")).toContain("warning message");
   });
 });
+
+// ── Native Rust Module Availability ──────────────────────────────────
+// Native modules (html, markdown, image, ziplib) are compiled into the
+// Hyperlight runtime. They must appear in getAvailableModules() so the
+// validator accepts imports, and must actually work when imported.
+
+describe("native module visibility", () => {
+  const NATIVE_MODULES = ["ha:html", "ha:markdown", "ha:image", "ha:ziplib"];
+
+  it("getAvailableModules includes all native modules", () => {
+    const available = sandbox.getAvailableModules();
+    for (const mod of NATIVE_MODULES) {
+      expect(available, `${mod} missing from getAvailableModules()`).toContain(
+        mod,
+      );
+    }
+  });
+
+  it("ha:html handler registers successfully", async () => {
+    const code = `
+      import { parse_html, html_to_text, extract_links } from "ha:html";
+      function handler() {
+        const html = '<h1>Test</h1><p>Hello <a href="https://example.com">link</a></p>';
+        const parsed = parse_html(html);
+        const text = html_to_text(html);
+        return { textLength: text.length, linkCount: parsed.links.length };
+      }
+    `;
+    const reg = await sandbox.registerHandler("test_html_native", code);
+    expect(reg.success, `ha:html register failed: ${reg.error}`).toBe(true);
+  });
+
+  it("ha:markdown handler registers successfully", async () => {
+    const code = `
+      import { markdown_to_html, markdown_to_text } from "ha:markdown";
+      function handler() {
+        const md = "# Hello\\n\\n**bold** text";
+        const html = markdown_to_html(md);
+        const text = markdown_to_text(md);
+        return { htmlLength: html.length, textLength: text.length };
+      }
+    `;
+    const reg = await sandbox.registerHandler("test_md_native", code);
+    expect(reg.success, `ha:markdown register failed: ${reg.error}`).toBe(true);
+  });
+
+  it("ha:image handler registers successfully", async () => {
+    const code = `
+      import { detect_image_dimensions } from "ha:image";
+      function handler() {
+        return { available: typeof detect_image_dimensions === "function" };
+      }
+    `;
+    const reg = await sandbox.registerHandler("test_img_native", code);
+    expect(reg.success, `ha:image register failed: ${reg.error}`).toBe(true);
+  });
+});

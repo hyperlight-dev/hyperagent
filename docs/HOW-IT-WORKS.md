@@ -105,9 +105,10 @@ All code runs in Hyperlight micro-VMs:
 
 The LLM cannot escape the sandbox:
 
-- Most GitHub Copilot SDK built-in tools (bash, edit, grep, read, write) are **blocked** the exceptions being `ask_user` (questions) and `report_intent` (protocol)
-- All functionality comes from custom Hyperagent tools (`execute_javascript`, `register_handler`, etc.)
-- Even if the LLM tries to use bash, it won't work
+- Most GitHub Copilot SDK built-in tools (edit, grep, read, write) are **blocked** the exceptions being `ask_user` (questions) and `report_intent` (protocol)
+- The SDK's built-in bash tool is also blocked — HyperAgent provides its own `execute_bash` which runs a pure-JS bash interpreter inside the sandbox
+- All functionality comes from custom Hyperagent tools (`execute_javascript`, `register_handler`, `execute_bash`, etc.)
+- Even if the LLM tries to use the SDK's bash, it won't work — but `execute_bash` is available for shell-style data processing
 
 ### Code Validation
 

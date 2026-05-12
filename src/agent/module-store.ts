@@ -400,7 +400,43 @@ export async function saveModule(
 export function loadModule(name: string): ModuleInfo | null {
   const dir = getModulesDir();
   const filePath = join(dir, `${name}.js`);
-  if (!existsSync(filePath)) return null;
+
+  // Native Rust modules have .json metadata but no .js file.
+  // They're compiled into the Hyperlight runtime (html, markdown, image, ziplib).
+  if (!existsSync(filePath)) {
+    const jsonMeta = loadJsonMetadata(dir, name);
+    if (jsonMeta && jsonMeta.type === "native") {
+      const dtsPath = join(dir, `${name}.d.ts`);
+      let exports: ExportInfo[] = [];
+      if (existsSync(dtsPath)) {
+        const dtsContent = readFileSync(dtsPath, "utf-8");
+        const fns = [
+          ...dtsContent.matchAll(/export\s+declare\s+function\s+(\w+)/g),
+        ];
+        exports = fns.map((m) => ({
+          name: m[1],
+          kind: "function" as const,
+        }));
+      }
+      return {
+        name,
+        description: jsonMeta.description,
+        created: "",
+        modified: "",
+        sizeBytes: 0,
+        source: "",
+        exports,
+        classes: [],
+        mutable: false,
+        author: "system" as const,
+        ...(jsonMeta.hints ? { structuredHints: jsonMeta.hints } : {}),
+        ...(jsonMeta.importStyle
+          ? { importStyle: jsonMeta.importStyle as "named" | "namespace" }
+          : {}),
+      };
+    }
+    return null;
+  }
 
   const raw = readFileSync(filePath, "utf-8");
   const stat = statSync(filePath);
@@ -584,7 +620,9 @@ export async function loadModuleAsync(
 
 /**
  * List all modules from disk.
- * Returns ModuleInfo for each .js file in the modules directory.
+ * Returns ModuleInfo for each .js file in the modules directory,
+ * plus native Rust modules that have .json metadata but no .js file
+ * (html, markdown, image, ziplib — compiled into the Hyperlight runtime).
  */
 export function listModules(): ModuleInfo[] {
   const dir = getModulesDir();
@@ -592,11 +630,56 @@ export function listModules(): ModuleInfo[] {
     .filter((f) => f.endsWith(".js"))
     .sort();
   const modules: ModuleInfo[] = [];
+  const seen = new Set<string>();
 
   for (const file of files) {
     const name = basename(file, ".js");
     const info = loadModule(name);
-    if (info) modules.push(info);
+    if (info) {
+      modules.push(info);
+      seen.add(name);
+    }
+  }
+
+  // Include native Rust modules that have .json metadata but no .js file.
+  // These are compiled into the Hyperlight runtime (html, markdown, image, ziplib).
+  const jsonFiles = readdirSync(dir).filter((f) => f.endsWith(".json"));
+  for (const jsonFile of jsonFiles) {
+    const name = basename(jsonFile, ".json");
+    if (seen.has(name)) continue; // already loaded from .js
+    const jsonMeta = loadJsonMetadata(dir, name);
+    if (jsonMeta && jsonMeta.type === "native") {
+      // Load .d.ts for exports if available
+      const dtsPath = join(dir, `${name}.d.ts`);
+      let exports: ExportInfo[] = [];
+      if (existsSync(dtsPath)) {
+        const dtsContent = readFileSync(dtsPath, "utf-8");
+        // Parse function names from .d.ts: export declare function foo(...)
+        const fns = [
+          ...dtsContent.matchAll(/export\s+declare\s+function\s+(\w+)/g),
+        ];
+        exports = fns.map((m) => ({
+          name: m[1],
+          kind: "function" as const,
+        }));
+      }
+      modules.push({
+        name,
+        description: jsonMeta.description,
+        created: "",
+        modified: "",
+        sizeBytes: 0,
+        source: "", // native — no JS source
+        exports,
+        classes: [],
+        mutable: false,
+        author: "system" as const,
+        ...(jsonMeta.hints ? { structuredHints: jsonMeta.hints } : {}),
+        ...(jsonMeta.importStyle
+          ? { importStyle: jsonMeta.importStyle as "named" | "namespace" }
+          : {}),
+      });
+    }
   }
 
   return modules;

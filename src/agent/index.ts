@@ -397,7 +397,13 @@ async function questionCapturingPaste(
   prompt: string,
   collectWindowMs = 100,
 ): Promise<string> {
+  // Write the prompt and ensure readline is actively listening for
+  // input. After rl.question() (used in /resume picker etc.), readline
+  // pauses stdin — we must resume it so our line handler fires.
   process.stdout.write(prompt);
+  if (process.stdin.isPaused()) {
+    process.stdin.resume();
+  }
 
   return new Promise((resolve) => {
     const lines: string[] = [];
@@ -990,6 +996,19 @@ async function syncPluginsToSandbox(): Promise<void> {
   // Hand the registrations to the sandbox — it will rebuild on next call
   // Await is important: saves shared-state before invalidating the sandbox
   await sandbox.setPlugins(registrations);
+
+  // Keep bash sandbox in sync — same plugins, same host modules.
+  // Without this, execute_bash can't use curl (fetch plugin) or filesystem.
+  if (bashSandbox) {
+    await bashSandbox.setPlugins(registrations);
+    // Re-register the handler with the correct template — the fetch
+    // plugin may have been enabled or disabled since last registration,
+    // which changes whether curl works (static import vs no import).
+    await bashSandbox.registerHandler(
+      "sys-bash-runner",
+      getBashRunnerHandler(),
+    );
+  }
 }
 
 // ── Mutable Agent State ──────────────────────────────────────────────
@@ -2049,8 +2068,9 @@ const executeJavascriptTool = defineTool("execute_javascript", {
             result:
               `Result saved to ${relativePath} (${(fullResultBytes / 1024).toFixed(1)} KB).\n` +
               `Preview (first 500 chars):\n${preview}\n\n` +
-              `IMPORTANT: Read the full output by writing a handler that reads "${relativePath}" via host:fs-read.\n` +
-              `Process the data in handler code — do NOT summarize or propose changes based only on the preview.\n` +
+              `IMPORTANT: Read the full output by writing a handler that reads "${relativePath}" via host:fs-read,\n` +
+              `or use execute_bash to process it (e.g. cat, grep, jq, head, wc).\n` +
+              `Process the data in handler code or bash — do NOT summarize or propose changes based only on the preview.\n` +
               `Only use read_output("${relativePath}") directly if you need a quick look at a specific section;\n` +
               `read_output("${relativePath}", startLine, endLine) supports line ranges.`,
             ...(consoleOutput?.length ? { consoleOutput } : {}),
@@ -2140,6 +2160,501 @@ const executeJavascriptTool = defineTool("execute_javascript", {
   },
 });
 
+// ── Tool: execute_bash ───────────────────────────────────────────────
+//
+// Runs bash commands inside the Hyperlight sandbox using just-bash
+// (a pure-JS bash interpreter). Commands execute in the same sandbox
+// as JavaScript handlers — same plugins, same baseDir, same isolation.
+//
+// Stateless: each call creates a fresh Bash instance. Use && or ;
+// to chain commands that share state within a single call.
+//
+// The internal _bash_runner handler is auto-registered on first use.
+
+/** Bash commands available in the sandbox. */
+const BASH_SUPPORTED_COMMANDS = [
+  // Text processing
+  "echo",
+  "cat",
+  "grep",
+  "fgrep",
+  "egrep",
+  "rg",
+  "head",
+  "tail",
+  "wc",
+  "sort",
+  "uniq",
+  "sed",
+  "awk",
+  "tr",
+  "cut",
+  "paste",
+  "join",
+  "xargs",
+  "tee",
+  "printf",
+  "seq",
+  "rev",
+  "nl",
+  "fold",
+  "expand",
+  "column",
+  "comm",
+  "tac",
+  "diff",
+  "strings",
+  "split",
+  // File operations (read-only + create — NO delete/rename)
+  "ls",
+  "find",
+  "tree",
+  "cp",
+  "mkdir",
+  "touch",
+  "chmod",
+  "stat",
+  "du",
+  "file",
+  // Data processing
+  "jq",
+  "yq",
+  "xan",
+  // Encoding / hashing
+  "base64",
+  "md5sum",
+  "sha1sum",
+  "sha256sum",
+  "od",
+  // HTML / Markdown — NOT available in bash. Use ha:html in a JavaScript handler.
+  // Archives
+  "gzip",
+  "gunzip",
+  "zcat",
+  // Net (curl handled separately via defineCommand)
+  // Meta
+  "date",
+  "env",
+  "printenv",
+  "basename",
+  "dirname",
+  "readlink",
+  "which",
+  "whoami",
+  "hostname",
+  "pwd",
+  "expr",
+  "true",
+  "false",
+  "time",
+] as const;
+
+/** Handler code for the internal bash runner (without fetch). */
+/**
+ * Generate bash runner handler code based on enabled plugins.
+ * Builds the handler with the right static imports and wiring:
+ * - fs-read enabled → bash can read files from the plugin baseDir
+ * - fs-write enabled → bash redirects (>) write through the plugin
+ * - fetch enabled → curl command works via custom defineCommand
+ */
+function getBashRunnerHandler(): string {
+  const enabled = pluginManager.getEnabledPlugins().map((p) => p.manifest.name);
+  const hasFsRead = enabled.includes("fs-read");
+  const hasFsWrite = enabled.includes("fs-write");
+  const hasFetch = enabled.includes("fetch");
+
+  // Build imports
+  const imports = [
+    `import { Bash, InMemoryFs, defineCommand } from "ha:bash";`,
+  ];
+  if (hasFsRead) imports.push(`import * as fsRead from "host:fs-read";`);
+  if (hasFsWrite) imports.push(`import * as fsWrite from "host:fs-write";`);
+  if (hasFetch) imports.push(`import * as fetchMod from "host:fetch";`);
+
+  // Build the IFileSystem adapter that delegates to host plugins.
+  // Falls back to InMemoryFs for paths/operations the plugins can't handle.
+  const fsAdapter = `
+// ── Hybrid filesystem: InMemoryFs + host plugins ──────────────────
+const memFs = new InMemoryFs();
+
+const hostFs = {
+  async readFile(path, opts) {
+    ${
+      hasFsRead
+        ? `try {
+      const r = fsRead.readFile(path, typeof opts === 'string' ? opts : opts?.encoding || 'utf-8');
+      if (r.error) throw new Error(r.error);
+      return r.content;
+    } catch (e) {
+      // Fall back to in-memory
+      return memFs.readFile(path, opts);
+    }`
+        : `return memFs.readFile(path, opts);`
+    }
+  },
+  async readFileBuffer(path) {
+    ${
+      hasFsRead
+        ? `try {
+      const r = fsRead.readFileBinary(path);
+      return r;
+    } catch {
+      return memFs.readFileBuffer(path);
+    }`
+        : `return memFs.readFileBuffer(path);`
+    }
+  },
+  async writeFile(path, content, opts) {
+    ${
+      hasFsWrite
+        ? `try {
+      const text = typeof content === 'string' ? content : new TextDecoder().decode(content);
+      const r = fsWrite.writeFile(path, text);
+      if (r.error) throw new Error(r.error);
+    } catch (e) {
+      // Fall back to in-memory if plugin rejects (path jail etc.)
+      await memFs.writeFile(path, content, opts);
+    }`
+        : `await memFs.writeFile(path, content, opts);`
+    }
+  },
+  async appendFile(path, content, opts) {
+    ${
+      hasFsWrite
+        ? `try {
+      const text = typeof content === 'string' ? content : new TextDecoder().decode(content);
+      const r = fsWrite.appendFile(path, text);
+      if (r.error) throw new Error(r.error);
+    } catch {
+      await memFs.appendFile(path, content, opts);
+    }`
+        : `await memFs.appendFile(path, content, opts);`
+    }
+  },
+  async exists(path) {
+    ${
+      hasFsRead
+        ? `try {
+      const r = fsRead.stat(path);
+      return !r.error;
+    } catch {
+      return memFs.exists(path);
+    }`
+        : `return memFs.exists(path);`
+    }
+  },
+  async stat(path) {
+    ${
+      hasFsRead
+        ? `try {
+      const r = fsRead.stat(path);
+      if (r.error) throw new Error(r.error);
+      return {
+        isFile: r.type === 'file',
+        isDirectory: r.type === 'directory',
+        isSymbolicLink: false,
+        mode: 0o644,
+        size: r.size || 0,
+        mtime: r.modified ? new Date(r.modified) : new Date(),
+      };
+    } catch {
+      return memFs.stat(path);
+    }`
+        : `return memFs.stat(path);`
+    }
+  },
+  async mkdir(path, opts) {
+    ${
+      hasFsWrite
+        ? `try {
+      fsWrite.mkdir(path);
+    } catch {
+      await memFs.mkdir(path, opts);
+    }`
+        : `await memFs.mkdir(path, opts);`
+    }
+  },
+  async readdir(path) {
+    ${
+      hasFsRead
+        ? `try {
+      const r = fsRead.listDir(path);
+      if (r.error) throw new Error(r.error);
+      return r.entries.map(e => e.name);
+    } catch {
+      return memFs.readdir(path);
+    }`
+        : `return memFs.readdir(path);`
+    }
+  },
+  // Delegate remaining operations to in-memory FS
+  async rm(p, o) { return memFs.rm(p, o); },
+  async cp(s, d, o) { return memFs.cp(s, d, o); },
+  async mv(s, d) { return memFs.mv(s, d); },
+  resolvePath(b, p) { return memFs.resolvePath(b, p); },
+  getAllPaths() { return memFs.getAllPaths(); },
+  async chmod(p, m) { return memFs.chmod(p, m); },
+  async symlink(t, l) { return memFs.symlink(t, l); },
+  async link(e, n) { return memFs.link(e, n); },
+  async readlink(p) { return memFs.readlink(p); },
+  async lstat(p) { return memFs.lstat(p); },
+  async realpath(p) { return memFs.realpath(p); },
+  async utimes(p, a, m) { return memFs.utimes(p, a, m); },
+};`;
+
+  // Build custom curl command if fetch is available
+  const curlCommand = hasFetch
+    ? `
+// Custom curl command — just-bash's built-in curl lazy-loads via
+// dynamic import which breaks in QuickJS. This eager version works.
+const curlCmd = defineCommand("curl", async (args) => {
+  let url = "", method = "GET", headersMap = {}, body = null;
+  let i = 0;
+  while (i < args.length) {
+    const a = args[i];
+    if (a === "-s" || a === "--silent") { /* silent */ }
+    else if (a === "-X" || a === "--request") { method = (args[++i] || "GET").toUpperCase(); }
+    else if (a === "-H" || a === "--header") {
+      const h = args[++i] || "";
+      const colon = h.indexOf(":");
+      if (colon > 0) headersMap[h.slice(0, colon).trim()] = h.slice(colon + 1).trim();
+    }
+    else if (a === "-d" || a === "--data" || a === "--data-raw") { body = args[++i] || ""; method = method === "GET" ? "POST" : method; }
+    else if (!a.startsWith("-")) { url = a; }
+    i++;
+  }
+  if (!url) return { stdout: "", stderr: "curl: no URL specified\\n", exitCode: 2 };
+  if (!url.match(/^https?:\\/\\//)) url = "https://" + url;
+  try {
+    if (method === "GET" || method === "HEAD") {
+      const result = fetchMod.fetchText(url, { method, headers: headersMap, includeMeta: true });
+      const text = typeof result === "string" ? result : (result.data || "");
+      return { stdout: text, stderr: "", exitCode: 0 };
+    } else {
+      const result = fetchMod.post(url, body, { method, headers: headersMap });
+      const text = typeof result.body === "string" ? result.body : JSON.stringify(result.body || "");
+      return { stdout: text, stderr: "", exitCode: 0 };
+    }
+  } catch (e) {
+    return { stdout: "", stderr: "curl: " + (e.message || String(e)) + "\\n", exitCode: 1 };
+  }
+});`
+    : "";
+
+  // Build the handler body
+  const cmdsJson = JSON.stringify(
+    ([...BASH_SUPPORTED_COMMANDS] as string[]).filter((c) => c !== "curl"),
+  );
+
+  // Custom 'commands' command — lists available commands accurately.
+  // Can't override builtin 'help' so we provide 'commands' instead.
+  const allCmds: string[] = [...BASH_SUPPORTED_COMMANDS];
+  if (hasFetch) allCmds.push("curl");
+  const helpCmdList = allCmds.sort().join(", ");
+  const helpCommand = `
+// 'commands' — lists what's actually available (builtin 'help' is misleading)
+const commandsCmd = defineCommand("commands", async () => ({
+  stdout: "Available commands in this sandbox:\\n\\n${helpCmdList}\\n\\nUse <command> --help for usage details.\\nFor HTML processing, use ha:html in a JavaScript handler (register_handler).\\n",
+  stderr: "",
+  exitCode: 0,
+}));`;
+
+  const customCmds = ["commandsCmd"];
+  if (hasFetch) customCmds.push("curlCmd");
+
+  const bashOpts = [
+    `commands: ${cmdsJson}`,
+    `fs: hostFs`,
+    `customCommands: [${customCmds.join(", ")}]`,
+  ].join(",\n    ");
+
+  return `
+${imports.join("\n")}
+
+${fsAdapter}
+${curlCommand}
+${helpCommand}
+
+export async function handler(event) {
+  const e = typeof event === 'string' ? JSON.parse(event) : event;
+  const bash = new Bash({
+    ${bashOpts}
+  });
+  const result = await bash.exec(e.command || "echo 'No command provided'");
+  return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode };
+}`;
+}
+
+/** Whether the bash runner handler has been registered this session. */
+let bashRunnerRegistered = false;
+
+/**
+ * Dedicated sandbox for bash execution. Separate from the main JS sandbox
+ * so the 1.4 MB bash module doesn't compete with pptx/pdf/xlsx modules
+ * for memory during compilation. Created lazily on first execute_bash call.
+ */
+let bashSandbox: ReturnType<typeof createSandboxTool> | null = null;
+
+/**
+ * Create (or return existing) dedicated bash sandbox.
+ * Only loads ha:bash module — no pptx, pdf, xlsx overhead.
+ */
+async function getBashSandbox() {
+  if (bashSandbox && bashRunnerRegistered) return bashSandbox;
+
+  // Load the bash module source from disk
+  const bashModulePath = join(getModulesDir(), "bash.js");
+  if (!existsSync(bashModulePath)) {
+    return null;
+  }
+  const bashSource = readFileSync(bashModulePath, "utf-8");
+
+  // Create a lightweight sandbox with only ha:bash loaded
+  bashSandbox = createSandboxTool({
+    heapSizeMb: 64,
+    scratchSizeMb: 32,
+    inputBufferKb: 2048,
+    outputBufferKb: 2048,
+    cpuTimeoutMs: 10000,
+    wallClockTimeoutMs: 15000,
+  });
+
+  // Load ONLY the bash module — no pptx/pdf/xlsx
+  bashSandbox.setModules([{ name: "bash", source: bashSource }]);
+
+  // Sync enabled plugins so bash has the same host modules as the
+  // main JS sandbox (fs-read, fs-write, fetch, MCP adapters, etc.).
+  await syncPluginsToSandbox();
+
+  // Register the bash runner handler
+  const fetchEnabled = pluginManager
+    .getEnabledPlugins()
+    .some((p) => p.manifest.name === "fetch");
+  console.error(
+    `  ${C.dim(`🐚 Initialising bash sandbox (fetch plugin: ${fetchEnabled ? "enabled → curl available" : "disabled → no curl"})...`)}`,
+  );
+  const handlerCode = getBashRunnerHandler();
+  const reg = await bashSandbox.registerHandler("sys-bash-runner", handlerCode);
+  if (!reg.success) {
+    bashSandbox = null;
+    return null;
+  }
+  bashRunnerRegistered = true;
+  return bashSandbox;
+}
+
+const executeBashTool = defineTool("execute_bash", {
+  description: [
+    "Execute a bash command in the sandbox using a pure-JS bash interpreter.",
+    "The command runs inside a dedicated Hyperlight micro-VM (separate from JavaScript handlers).",
+    "",
+    "STATELESS: each call is a fresh shell. Use && or ; to chain commands.",
+    "File I/O: when fs-read/fs-write plugins are enabled, cat/ls/redirects work on",
+    "  the plugin baseDir (same files as JavaScript handlers). Without plugins,",
+    "  files are in-memory only and lost between calls.",
+    "CROSS-TOOL: files written by bash (curl > file.txt, echo > data.csv) are",
+    "  readable by JavaScript handlers via host:fs-read, and vice versa.",
+    "  Use bash for quick downloads/transforms, JS handlers for processing.",
+    "",
+    "SUPPORTED COMMANDS (run 'help' to see the full list):",
+    "  Text: echo, cat, grep, rg, head, tail, wc, sort, uniq, sed, awk, tr,",
+    "        cut, paste, join, xargs, tee, rev, nl, fold, tac, column, comm,",
+    "        diff, printf, seq, expr, strings, split, od",
+    "  Files: ls, find, tree, cp, mkdir, touch, chmod, stat, du, file",
+    "  Data: jq, yq, xan (JSON/YAML/CSV processing)",
+    "  Encoding: base64, md5sum, sha1sum, sha256sum, gzip, gunzip, zcat",
+    "  Net:  curl (requires fetch plugin — use apply_profile('web-research') first)",
+    "  Meta: date, env, pwd, whoami, hostname, basename, dirname, which, readlink",
+    "",
+    "POSIX FLAGS ONLY: This is a pure-JS bash interpreter, not GNU coreutils.",
+    "  GNU-only flags will fail (e.g. sort -R, grep -P, sed -i).",
+    "  Stick to POSIX-standard flags for all commands.",
+    "",
+    "NOT AVAILABLE: rm, mv, ln, wget, python, node, sleep, ssh, git, apt",
+    "  - No file deletion or rename (security: fs-write is create/append only)",
+    "  - For complex logic, use register_handler with JavaScript instead",
+    "",
+    "EXAMPLES:",
+    '  execute_bash({ command: "ls -la" })',
+    "  execute_bash({ command: \"cat data.json | jq '.results[] | .name' | sort | uniq -c | sort -rn | head -10\" })",
+    '  execute_bash({ command: "grep -r TODO . | wc -l" })',
+    "  execute_bash({ command: \"find . -name '*.json' | head -5\" })",
+  ].join("\n"),
+  parameters: {
+    type: "object",
+    properties: {
+      command: {
+        type: "string",
+        description:
+          "The bash command to execute. Supports pipes (|), " +
+          "redirects (>, >>), command chaining (&&, ;), " +
+          "variables (FOO=bar; echo $FOO), and subshells ($(...)).",
+      },
+    },
+    required: ["command"],
+  },
+  handler: async ({ command }: { command: string }) => {
+    if (
+      !command ||
+      typeof command !== "string" ||
+      command.trim().length === 0
+    ) {
+      return { error: "command is required and must be a non-empty string." };
+    }
+
+    // Get the dedicated bash sandbox (created lazily, separate from main JS sandbox)
+    const bs = await getBashSandbox();
+    if (!bs) {
+      return {
+        error:
+          "Bash module not available. Ensure builtin-modules/bash.js exists (run: just build-bash).",
+      };
+    }
+
+    // Log bash command to code log (same as show-code for JS handlers)
+    if (state.showCodeEnabled) {
+      console.log(`  ${C.dim("$ " + command)}`);
+    }
+    sandbox.writeCode(`// ── bash ──\n$ ${command}\n`);
+
+    const { success, result, error, consoleOutput, stats, timing } =
+      await bs.executeJavaScript("sys-bash-runner", { command });
+
+    if (state.showTimingEnabled && timing) {
+      console.error(
+        `  ${C.dim(`⏱️  ${timing.totalMs}ms (exec: ${timing.executeMs}ms)`)}`,
+      );
+    }
+
+    if (success && result) {
+      const stdout = String(result.stdout ?? "");
+      const stderr = String(result.stderr ?? "");
+      const exitCode = Number(result.exitCode ?? 0);
+
+      // Show output to user
+      if (stdout) {
+        console.log(stdout.endsWith("\n") ? stdout.slice(0, -1) : stdout);
+      }
+      if (stderr) {
+        console.error(`  ${C.dim(stderr.trimEnd())}`);
+      }
+
+      return {
+        stdout,
+        stderr,
+        exitCode,
+        ...(consoleOutput?.length ? { consoleOutput } : {}),
+      };
+    } else {
+      console.error(`  ${C.err("❌ " + (error ?? "Unknown bash error"))}`);
+      return {
+        error: error ?? "Bash execution failed",
+        ...(consoleOutput?.length ? { consoleOutput } : {}),
+      };
+    }
+  },
+});
+
 // ── Tool: reset_sandbox ──────────────────────────────────────────────
 
 const sandboxResetTool = defineTool("reset_sandbox", {
@@ -2159,6 +2674,10 @@ const sandboxResetTool = defineTool("reset_sandbox", {
   },
   handler: async () => {
     const result = await sandbox.resetSandbox();
+    // Also reset the bash sandbox — it's a separate instance.
+    // Setting it to null forces re-creation on next execute_bash call.
+    bashSandbox = null;
+    bashRunnerRegistered = false;
     if (result.success) {
       console.error(
         `  ${C.ok("🔄 Sandbox state reset")} (${result.handlers?.length ?? 0} handlers preserved, ha:shared-state preserved)`,
@@ -2213,6 +2732,11 @@ const configureSandboxTool = defineTool("configure_sandbox", {
     "Call proactively if you can predict a task needs more resources",
     "(e.g. ZIP/PPTX building, multiple network calls, large data processing).",
     "Also call reactively when a limit error tells you which limit was hit.",
+    "",
+    "COMMON MEMORY ERRORS:",
+    "  'Out of physical memory' / 'Guest aborted: 13' → increase SCRATCH (not heap)",
+    "  'malloc failed' / 'out of memory' → increase HEAP",
+    "  'buffer to push data' → increase inputBuffer or outputBuffer",
   ].join("\n"),
   parameters: {
     type: "object",
@@ -4245,8 +4769,11 @@ const listModulesTool = defineTool("list_modules", {
     state.hasCalledListModules = true;
 
     try {
-      // Filter out internal modules (names starting with _)
-      const modules = listModules().filter((m) => !m.name.startsWith("_"));
+      // Filter out internal modules (names starting with _) and bash
+      // (bash runs in its own sandbox, not importable by JS handlers)
+      const modules = listModules().filter(
+        (m) => !m.name.startsWith("_") && m.name !== "bash",
+      );
       const result = modules.map((m) => ({
         name: m.name,
         description: m.description,
@@ -4380,11 +4907,16 @@ const moduleInfoTool = defineTool("module_info", {
     state.hasCalledListModules = true;
 
     try {
-      // Block access to internal modules (names starting with _)
-      if (name.startsWith("_")) {
+      // Block access to internal modules and bash (bash runs in its own sandbox)
+      if (name.startsWith("_") || name === "bash") {
         const available = listModules()
-          .filter((m) => !m.name.startsWith("_"))
+          .filter((m) => !m.name.startsWith("_") && m.name !== "bash")
           .map((m) => m.name);
+        if (name === "bash") {
+          return {
+            error: `ha:bash is not importable in JavaScript handlers. Use the execute_bash tool instead.`,
+          };
+        }
         return {
           error: `Module "${name}" not found. Available: ${available.join(", ") || "(none)"}`,
         };
@@ -4700,8 +5232,10 @@ function loadAllModules(): void {
     }
   }
 
-  // Load all modules into the sandbox cache
-  const allModules = listModules();
+  // Load all modules into the sandbox cache.
+  // Exclude ha:bash — it runs in its own dedicated sandbox (getBashSandbox())
+  // to avoid competing with pptx/pdf/xlsx for memory during compilation.
+  const allModules = listModules().filter((m) => m.name !== "bash");
   if (allModules.length > 0) {
     sandbox.setModules(
       allModules.map((m) => ({ name: m.name, source: m.source })),
@@ -4775,6 +5309,7 @@ function buildSessionConfig() {
     tools: [
       registerHandlerTool,
       executeJavascriptTool,
+      executeBashTool,
       deleteHandlerTool,
       deleteHandlersTool,
       getHandlerSourceTool,
@@ -4810,6 +5345,7 @@ function buildSessionConfig() {
     availableTools: [
       "register_handler",
       "execute_javascript",
+      "execute_bash",
       "delete_handler",
       "get_handler_source",
       "edit_handler",
@@ -5085,10 +5621,27 @@ function buildSessionConfig() {
           return {
             additionalContext:
               `Current heap: ${heapMb}MB, scratch: ${scratchMb}MB. ` +
-              `If the error says "Out of physical memory" or "Guest aborted: 13", ` +
-              `the scratch setting is too low — suggest /set scratch <MB> (e.g. double it). ` +
-              `For general OOM, suggest /set heap <MB>. ` +
-              `Or try breaking the computation into smaller pieces.`,
+              `IMPORTANT: "Out of physical memory" or "Guest aborted: 13" means SCRATCH is too low, NOT heap. ` +
+              `Call configure_sandbox({ scratch: ${scratchMb * 2} }) to double scratch memory. ` +
+              `For "malloc failed" or general OOM, call configure_sandbox({ heap: ${heapMb * 2} }). ` +
+              `For "buffer" errors, increase inputBuffer or outputBuffer.`,
+          };
+        }
+
+        // For bash sandbox memory errors, guide with fixed limits (no configure_sandbox)
+        if (
+          toolName === "execute_bash" &&
+          toolResult.resultType === "failure" &&
+          /out of memory|out of physical memory|heap|stack overflow|guest aborted/i.test(
+            toolResult.error ?? "",
+          )
+        ) {
+          return {
+            additionalContext:
+              `The bash sandbox has fixed resource limits (64MB heap, 32MB scratch). ` +
+              `configure_sandbox does NOT affect execute_bash — it only controls the JavaScript sandbox. ` +
+              `To work around this, break the command into smaller pieces or use ` +
+              `register_handler with JavaScript for memory-intensive operations.`,
           };
         }
 
@@ -5752,7 +6305,8 @@ async function main(): Promise<void> {
       const lower = trimmed.toLowerCase();
       if (lower === "exit" || lower === "/exit") {
         printExitTokenSummary();
-        console.log(`\n👋 Goodbye! (session: ${formatSessionDuration()})\n`);
+        console.log(`\n👋 Goodbye! (session: ${formatSessionDuration()})`);
+        console.log(`  ${C.dim("Shutting down — please wait…")}\n`);
         break;
       }
 
@@ -5943,6 +6497,11 @@ async function main(): Promise<void> {
     // Rust TLS destructors racing with Node's exit handlers.
     await shutdownAnalysisGuest();
 
+    // Release the bash sandbox before exit — its Hyperlight VM
+    // destructor can SIGILL if it races with Node's exit handlers.
+    bashSandbox = null;
+    bashRunnerRegistered = false;
+
     // Exit cleanly so the process doesn't linger after /exit.
     // Without this the event loop stays alive (readline, timers)
     // and the user has to CTRL-C — which triggers the SIGINT
@@ -5959,7 +6518,8 @@ const SHUTDOWN_TIMEOUT_MS = 5_000;
 // Graceful shutdown — clean up on SIGINT (Ctrl+C)
 process.on("SIGINT", async () => {
   printExitTokenSummary();
-  console.log(`\n\n👋 Goodbye! (session: ${formatSessionDuration()})\n`);
+  console.log(`\n\n👋 Goodbye! (session: ${formatSessionDuration()})`);
+  console.log(`  ${C.dim("Shutting down — please wait…")}\n`);
 
   // Stop transcript synchronously — async won't complete before exit
   if (transcript.active) {
@@ -6005,6 +6565,11 @@ process.on("SIGINT", async () => {
   // Shutdown native addons before exit to prevent SIGSEGV from
   // Rust TLS destructors racing with Node's exit handlers.
   await shutdownAnalysisGuest();
+
+  // Release the bash sandbox before exit — its Hyperlight VM
+  // destructor can SIGILL if it races with Node's exit handlers.
+  bashSandbox = null;
+  bashRunnerRegistered = false;
 
   process.exit(0);
 });

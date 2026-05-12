@@ -1667,6 +1667,11 @@ export function createSandboxTool(options = {}) {
    *
    * @returns {string[]}
    */
+  // Native Rust modules compiled into the Hyperlight runtime.
+  // These don't have .js source — they're exposed by the QuickJS runtime
+  // binary and can be imported as ha:<name> in handler code.
+  const NATIVE_MODULES = ["html", "markdown", "image", "ziplib"];
+
   function getAvailableModules() {
     // All modules in moduleCache are compiled with MODULE_NAMESPACE ("ha:")
     // Filter out internal modules (starting with "_")
@@ -1674,13 +1679,18 @@ export function createSandboxTool(options = {}) {
       .filter((name) => !name.startsWith("_"))
       .map((name) => `${MODULE_NAMESPACE}:${name}`);
 
+    // Native Rust modules (html, markdown, image, ziplib)
+    const nativeModules = NATIVE_MODULES.map(
+      (name) => `${MODULE_NAMESPACE}:${name}`,
+    );
+
     // Host modules from plugins are prefixed with "host:"
     // Each plugin registers as host:<plugin.name>
     const hostModules = activePlugins
       .filter((p) => p.name)
       .map((p) => `host:${p.name}`);
 
-    return [...haModules, ...hostModules];
+    return [...haModules, ...nativeModules, ...hostModules];
   }
 
   // ── Execution ────────────────────────────────────────────────

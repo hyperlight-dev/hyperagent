@@ -134,4 +134,53 @@ describe("pattern-integrity", () => {
       });
     }
   });
+
+  describe("tool gating completeness", () => {
+    // Extract all tool names from defineTool() calls in index.ts
+    const indexSource = readFileSync(
+      join(ROOT, "src", "agent", "index.ts"),
+      "utf-8",
+    );
+    const toolNames = [...indexSource.matchAll(/defineTool\("([^"]+)"/g)].map(
+      (m) => m[1],
+    );
+
+    // Tools that are intentionally NOT gated (internal-only, not exposed to LLM)
+    const INTERNAL_TOOLS = new Set([
+      "llm_thought", // Internal reasoning — not user-facing
+      "delete_handlers", // Bulk delete — internal use
+    ]);
+
+    for (const toolName of toolNames) {
+      if (INTERNAL_TOOLS.has(toolName)) continue;
+
+      it(`tool "${toolName}" is in ALLOWED_TOOLS`, () => {
+        expect(
+          ALLOWED_TOOLS.has(toolName),
+          `Tool "${toolName}" is defined via defineTool() but NOT in ALLOWED_TOOLS. ` +
+            `The LLM cannot use tools that aren't in the gating list. ` +
+            `Add it to src/agent/tool-gating.ts.`,
+        ).toBe(true);
+      });
+
+      it(`tool "${toolName}" is in availableTools`, () => {
+        // availableTools is a separate SDK list that controls which tools
+        // the model can SEE. Without this, the tool exists but is invisible.
+        const availableToolsMatch = indexSource.match(
+          /availableTools:\s*\[([\s\S]*?)\]/,
+        );
+        expect(
+          availableToolsMatch,
+          "Could not find availableTools array in index.ts",
+        ).toBeTruthy();
+        const availableList = availableToolsMatch![1];
+        expect(
+          availableList.includes(`"${toolName}"`),
+          `Tool "${toolName}" is defined via defineTool() but NOT in availableTools. ` +
+            `The model cannot see tools that aren't in availableTools. ` +
+            `Add "${toolName}" to the availableTools array in buildSessionConfig().`,
+        ).toBe(true);
+      });
+    }
+  });
 });

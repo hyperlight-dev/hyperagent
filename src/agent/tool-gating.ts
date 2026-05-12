@@ -13,6 +13,7 @@
 export const ALLOWED_TOOLS = new Set<string>([
   "register_handler", // Register named JavaScript handler
   "execute_javascript", // Execute a registered handler
+  "execute_bash", // Execute bash commands in the sandbox
   "delete_handler", // Remove a handler
   "get_handler_source", // Retrieve handler source for editing
   "edit_handler", // Surgical edit to existing handler
