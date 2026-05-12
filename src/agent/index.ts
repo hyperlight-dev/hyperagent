@@ -529,14 +529,16 @@ async function drainAndWarn(rl: readline.Interface): Promise<void> {
   const discarded = await drainBufferedLines(rl);
   if (discarded.length > 0) {
     console.log(
-      C.warn(`⚠️  Discarded ${discarded.length} buffered line(s) from paste:`),
+      C.warn(
+        "⚠️  Discarded " + discarded.length + " buffered line(s) from paste:",
+      ),
     );
     for (const line of discarded.slice(0, 2)) {
       const truncated = line.length > 50 ? line.slice(0, 50) + "..." : line;
-      console.log(C.dim(`     "${truncated}"`));
+      console.log(C.dim('     "' + truncated + '"'));
     }
     if (discarded.length > 2) {
-      console.log(C.dim(`     ...and ${discarded.length - 2} more`));
+      console.log(C.dim("     ...and " + (discarded.length - 2) + " more"));
     }
   }
 }
@@ -2000,7 +2002,7 @@ const executeJavascriptTool = defineTool("execute_javascript", {
     if (consoleOutput?.length) {
       if (state.verboseOutput) {
         for (const line of consoleOutput) {
-          console.error(`  ${C.dim(`[console] ${line.trimEnd()}`)}`);
+          console.error(`  ${C.dim("[console] " + line.trimEnd())}`);
         }
       }
       debugLog(
@@ -2016,9 +2018,9 @@ const executeJavascriptTool = defineTool("execute_javascript", {
 
     if (state.showTimingEnabled && timing) {
       console.error(
-        `  ${C.dim(`⏱️  ${timing.totalMs}ms wall-clock`)} ` +
-          `${C.dim(`(init: ${timing.initMs}ms, compile: ${timing.compileMs}ms, exec: ${timing.executeMs}ms)`)} ` +
-          `${C.dim(`· limits: cpu ${effectiveCpuLimit}ms, wall ${effectiveWallLimit}ms`)}`,
+        `  ${C.dim("⏱️  " + timing.totalMs + "ms wall-clock")} ` +
+          `${C.dim("(init: " + timing.initMs + "ms, compile: " + timing.compileMs + "ms, exec: " + timing.executeMs + "ms)")} ` +
+          `${C.dim("· limits: cpu " + effectiveCpuLimit + "ms, wall " + effectiveWallLimit + "ms")}`,
       );
     }
 
@@ -2273,134 +2275,74 @@ function getBashRunnerHandler(): string {
 
   // Build the IFileSystem adapter that delegates to host plugins.
   // Falls back to InMemoryFs for paths/operations the plugins can't handle.
-  const fsAdapter = `
-// ── Hybrid filesystem: InMemoryFs + host plugins ──────────────────
-const memFs = new InMemoryFs();
+  // Built with string concatenation (not template literals) to avoid
+  // confusing Prettier's parser with nested backtick/class syntax.
+  const fsAdapterParts: string[] = [
+    "// ── Hybrid filesystem: extends InMemoryFs + delegates to host plugins ─",
+    "function normPath(p) {",
+    '  let n = p.replace(/^\\/home\\/user\\//, "").replace(/^\\/tmp\\//, "").replace(/^\\/+/, "");',
+    '  n = n.replace(/(\\.\\.\\/)+/g, "");',
+    '  return n || ".";',
+    "}",
+    "class HybridFs extends InMemoryFs {",
+  ];
 
-const hostFs = {
-  async readFile(path, opts) {
-    ${
-      hasFsRead
-        ? `try {
-      const r = fsRead.readFile(path, typeof opts === 'string' ? opts : opts?.encoding || 'utf-8');
-      if (r.error) throw new Error(r.error);
-      return r.content;
-    } catch (e) {
-      // Fall back to in-memory
-      return memFs.readFile(path, opts);
-    }`
-        : `return memFs.readFile(path, opts);`
-    }
-  },
-  async readFileBuffer(path) {
-    ${
-      hasFsRead
-        ? `try {
-      const r = fsRead.readFileBinary(path);
-      return r;
-    } catch {
-      return memFs.readFileBuffer(path);
-    }`
-        : `return memFs.readFileBuffer(path);`
-    }
-  },
-  async writeFile(path, content, opts) {
-    ${
-      hasFsWrite
-        ? `try {
-      const text = typeof content === 'string' ? content : new TextDecoder().decode(content);
-      const r = fsWrite.writeFile(path, text);
-      if (r.error) throw new Error(r.error);
-    } catch (e) {
-      // Fall back to in-memory if plugin rejects (path jail etc.)
-      await memFs.writeFile(path, content, opts);
-    }`
-        : `await memFs.writeFile(path, content, opts);`
-    }
-  },
-  async appendFile(path, content, opts) {
-    ${
-      hasFsWrite
-        ? `try {
-      const text = typeof content === 'string' ? content : new TextDecoder().decode(content);
-      const r = fsWrite.appendFile(path, text);
-      if (r.error) throw new Error(r.error);
-    } catch {
-      await memFs.appendFile(path, content, opts);
-    }`
-        : `await memFs.appendFile(path, content, opts);`
-    }
-  },
-  async exists(path) {
-    ${
-      hasFsRead
-        ? `try {
-      const r = fsRead.stat(path);
-      return !r.error;
-    } catch {
-      return memFs.exists(path);
-    }`
-        : `return memFs.exists(path);`
-    }
-  },
-  async stat(path) {
-    ${
-      hasFsRead
-        ? `try {
-      const r = fsRead.stat(path);
-      if (r.error) throw new Error(r.error);
-      return {
-        isFile: r.type === 'file',
-        isDirectory: r.type === 'directory',
-        isSymbolicLink: false,
-        mode: 0o644,
-        size: r.size || 0,
-        mtime: r.modified ? new Date(r.modified) : new Date(),
-      };
-    } catch {
-      return memFs.stat(path);
-    }`
-        : `return memFs.stat(path);`
-    }
-  },
-  async mkdir(path, opts) {
-    ${
-      hasFsWrite
-        ? `try {
-      fsWrite.mkdir(path);
-    } catch {
-      await memFs.mkdir(path, opts);
-    }`
-        : `await memFs.mkdir(path, opts);`
-    }
-  },
-  async readdir(path) {
-    ${
-      hasFsRead
-        ? `try {
-      const r = fsRead.listDir(path);
-      if (r.error) throw new Error(r.error);
-      return r.entries.map(e => e.name);
-    } catch {
-      return memFs.readdir(path);
-    }`
-        : `return memFs.readdir(path);`
-    }
-  },
-  // Delegate remaining operations to in-memory FS
-  async rm(p, o) { return memFs.rm(p, o); },
-  async cp(s, d, o) { return memFs.cp(s, d, o); },
-  async mv(s, d) { return memFs.mv(s, d); },
-  resolvePath(b, p) { return memFs.resolvePath(b, p); },
-  getAllPaths() { return memFs.getAllPaths(); },
-  async chmod(p, m) { return memFs.chmod(p, m); },
-  async symlink(t, l) { return memFs.symlink(t, l); },
-  async link(e, n) { return memFs.link(e, n); },
-  async readlink(p) { return memFs.readlink(p); },
-  async lstat(p) { return memFs.lstat(p); },
-  async realpath(p) { return memFs.realpath(p); },
-  async utimes(p, a, m) { return memFs.utimes(p, a, m); },
-};`;
+  if (hasFsRead) {
+    fsAdapterParts.push(
+      "  async readFile(path, opts) {",
+      "    try {",
+      '      const r = fsRead.readFile(normPath(path), typeof opts === "string" ? opts : opts?.encoding || "utf-8");',
+      "      if (r.error) throw new Error(r.error);",
+      "      return r.content;",
+      "    } catch { return super.readFile(path, opts); }",
+      "  }",
+      "  async readFileBuffer(path) {",
+      "    try { return fsRead.readFileBinary(normPath(path)); }",
+      "    catch { return super.readFileBuffer(path); }",
+      "  }",
+      "  async exists(path) {",
+      "    try { const r = fsRead.stat(normPath(path)); if (!r.error) return true; } catch {}",
+      "    return super.exists(path);",
+      "  }",
+      "  async stat(path) {",
+      "    try {",
+      "      const r = fsRead.stat(normPath(path));",
+      "      if (r.error) throw new Error(r.error);",
+      "      return { isFile: r.type === 'file', isDirectory: r.type === 'directory', isSymbolicLink: false, mode: 0o644, size: r.size || 0, mtime: r.modified ? new Date(r.modified) : new Date() };",
+      "    } catch { return super.stat(path); }",
+      "  }",
+      "  async readdir(path) {",
+      "    try { const r = fsRead.listDir(normPath(path)); if (r.error) throw new Error(r.error); return r.entries.map(e => e.name); }",
+      "    catch { return super.readdir(path); }",
+      "  }",
+    );
+  }
+
+  if (hasFsWrite) {
+    fsAdapterParts.push(
+      "  async writeFile(path, content, opts) {",
+      "    try {",
+      '      const text = typeof content === "string" ? content : new TextDecoder().decode(content);',
+      "      const r = fsWrite.writeFile(normPath(path), text);",
+      "      if (r.error) throw new Error(r.error);",
+      "    } catch { await super.writeFile(path, content, opts); }",
+      "  }",
+      "  async appendFile(path, content, opts) {",
+      "    try {",
+      '      const text = typeof content === "string" ? content : new TextDecoder().decode(content);',
+      "      const r = fsWrite.appendFile(normPath(path), text);",
+      "      if (r.error) throw new Error(r.error);",
+      "    } catch { await super.appendFile(path, content, opts); }",
+      "  }",
+      "  async mkdir(path, opts) {",
+      "    try { fsWrite.mkdir(normPath(path)); }",
+      "    catch { await super.mkdir(path, opts); }",
+      "  }",
+    );
+  }
+
+  fsAdapterParts.push("}", "const hostFs = new HybridFs();");
+  const fsAdapter = fsAdapterParts.join("\n");
 
   // Build custom curl command if fetch is available
   const curlCommand = hasFetch
@@ -2424,7 +2366,7 @@ const curlCmd = defineCommand("curl", async (args) => {
     i++;
   }
   if (!url) return { stdout: "", stderr: "curl: no URL specified\\n", exitCode: 2 };
-  if (!url.match(/^https?:\\/\\//)) url = "https://" + url;
+  if (url.indexOf("://") === -1) url = "https://" + url;
   try {
     if (method === "GET" || method === "HEAD") {
       const result = fetchMod.fetchText(url, { method, headers: headersMap, includeMeta: true });
@@ -2451,6 +2393,7 @@ const curlCmd = defineCommand("curl", async (args) => {
   const allCmds: string[] = [...BASH_SUPPORTED_COMMANDS];
   if (hasFetch) allCmds.push("curl");
   const helpCmdList = allCmds.sort().join(", ");
+  // prettier-ignore
   const helpCommand = `
 // 'commands' — lists what's actually available (builtin 'help' is misleading)
 const commandsCmd = defineCommand("commands", async () => ({
@@ -2462,27 +2405,32 @@ const commandsCmd = defineCommand("commands", async () => ({
   const customCmds = ["commandsCmd"];
   if (hasFetch) customCmds.push("curlCmd");
 
-  const bashOpts = [
-    `commands: ${cmdsJson}`,
-    `fs: hostFs`,
-    `customCommands: [${customCmds.join(", ")}]`,
-  ].join(",\n    ");
+  const bashOptParts = [
+    "commands: " + cmdsJson,
+    "fs: hostFs",
+    "customCommands: [" + customCmds.join(", ") + "]",
+  ];
+  const bashOpts = bashOptParts.join(",\n    ");
 
-  return `
-${imports.join("\n")}
-
-${fsAdapter}
-${curlCommand}
-${helpCommand}
-
-export async function handler(event) {
-  const e = typeof event === 'string' ? JSON.parse(event) : event;
-  const bash = new Bash({
-    ${bashOpts}
-  });
-  const result = await bash.exec(e.command || "echo 'No command provided'");
-  return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode };
-}`;
+  // Build final handler code via string concatenation to avoid
+  // confusing Prettier with nested template literals containing code.
+  const handlerBody = [
+    imports.join("\n"),
+    "",
+    fsAdapter,
+    curlCommand,
+    helpCommand,
+    "",
+    "export async function handler(event) {",
+    "  const e = typeof event === 'string' ? JSON.parse(event) : event;",
+    "  const bash = new Bash({",
+    "    " + bashOpts,
+    "  });",
+    "  const result = await bash.exec(e.command || \"echo 'No command provided'\");",
+    "  return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode };",
+    "}",
+  ].join("\n");
+  return handlerBody;
 }
 
 /** Whether the bash runner handler has been registered this session. */
@@ -2530,8 +2478,14 @@ async function getBashSandbox() {
   const fetchEnabled = pluginManager
     .getEnabledPlugins()
     .some((p) => p.manifest.name === "fetch");
+  const fetchLabel = fetchEnabled
+    ? "enabled → curl available"
+    : "disabled → no curl";
   console.error(
-    `  ${C.dim(`🐚 Initialising bash sandbox (fetch plugin: ${fetchEnabled ? "enabled → curl available" : "disabled → no curl"})...`)}`,
+    "  " +
+      C.dim(
+        "🐚 Initialising bash sandbox (fetch plugin: " + fetchLabel + ")...",
+      ),
   );
   const handlerCode = getBashRunnerHandler();
   const reg = await bashSandbox.registerHandler("sys-bash-runner", handlerCode);
@@ -2613,16 +2567,19 @@ const executeBashTool = defineTool("execute_bash", {
 
     // Log bash command to code log (same as show-code for JS handlers)
     if (state.showCodeEnabled) {
-      console.log(`  ${C.dim("$ " + command)}`);
+      console.log("  " + C.dim("$ " + command));
     }
-    sandbox.writeCode(`// ── bash ──\n$ ${command}\n`);
+    sandbox.writeCode("// ── bash ──\n$ " + command + "\n");
 
     const { success, result, error, consoleOutput, stats, timing } =
       await bs.executeJavaScript("sys-bash-runner", { command });
 
     if (state.showTimingEnabled && timing) {
       console.error(
-        `  ${C.dim(`⏱️  ${timing.totalMs}ms (exec: ${timing.executeMs}ms)`)}`,
+        "  " +
+          C.dim(
+            "⏱️  " + timing.totalMs + "ms (exec: " + timing.executeMs + "ms)",
+          ),
       );
     }
 
@@ -2636,7 +2593,7 @@ const executeBashTool = defineTool("execute_bash", {
         console.log(stdout.endsWith("\n") ? stdout.slice(0, -1) : stdout);
       }
       if (stderr) {
-        console.error(`  ${C.dim(stderr.trimEnd())}`);
+        console.error("  " + C.dim(stderr.trimEnd()));
       }
 
       return {
@@ -2646,7 +2603,7 @@ const executeBashTool = defineTool("execute_bash", {
         ...(consoleOutput?.length ? { consoleOutput } : {}),
       };
     } else {
-      console.error(`  ${C.err("❌ " + (error ?? "Unknown bash error"))}`);
+      console.error("  " + C.err("❌ " + (error ?? "Unknown bash error")));
       return {
         error: error ?? "Bash execution failed",
         ...(consoleOutput?.length ? { consoleOutput } : {}),
@@ -2680,10 +2637,14 @@ const sandboxResetTool = defineTool("reset_sandbox", {
     bashRunnerRegistered = false;
     if (result.success) {
       console.error(
-        `  ${C.ok("🔄 Sandbox state reset")} (${result.handlers?.length ?? 0} handlers preserved, ha:shared-state preserved)`,
+        "  " +
+          C.ok("🔄 Sandbox state reset") +
+          " (" +
+          (result.handlers?.length ?? 0) +
+          " handlers preserved, ha:shared-state preserved)",
       );
     } else {
-      console.error(`  ${C.err("❌ " + result.error)}`);
+      console.error("  " + C.err("❌ " + (result.error ?? "Unknown error")));
     }
     return result;
   },
@@ -2778,17 +2739,17 @@ async function configureSandboxImpl(params: {
 }) {
   // Build a human-readable summary of what's being changed.
   const changes: string[] = [];
-  if (params.heap !== undefined) changes.push(`heap → ${params.heap}MB`);
+  if (params.heap !== undefined) changes.push("heap → " + params.heap + "MB");
   if (params.scratch !== undefined)
-    changes.push(`scratch → ${params.scratch}MB`);
+    changes.push("scratch → " + params.scratch + "MB");
   if (params.cpuTimeout !== undefined)
-    changes.push(`CPU timeout → ${params.cpuTimeout}ms`);
+    changes.push("CPU timeout → " + params.cpuTimeout + "ms");
   if (params.wallTimeout !== undefined)
-    changes.push(`wall timeout → ${params.wallTimeout}ms`);
+    changes.push("wall timeout → " + params.wallTimeout + "ms");
   if (params.inputBuffer !== undefined)
-    changes.push(`input buffer → ${params.inputBuffer}KB`);
+    changes.push("input buffer → " + params.inputBuffer + "KB");
   if (params.outputBuffer !== undefined)
-    changes.push(`output buffer → ${params.outputBuffer}KB`);
+    changes.push("output buffer → " + params.outputBuffer + "KB");
 
   if (changes.length === 0) {
     return { success: false, error: "No changes specified" };
@@ -4492,7 +4453,7 @@ const manageMCPTool = defineTool("manage_mcp", {
         await syncPluginsToSandbox();
 
         console.log(
-          `  ${C.ok(`✓ "${params.name}" connected`)} — ${connected.tools.length} tool(s) available as ${C.dim(`host:mcp-${params.name}`)}`,
+          `  ${C.ok('✓ "' + params.name + '" connected')} — ${connected.tools.length} tool(s) available as ${C.dim("host:mcp-" + params.name)}`,
         );
 
         return {
@@ -6238,7 +6199,7 @@ async function main(): Promise<void> {
         const skillNames = cli.skill.split(/\s+/).filter(Boolean);
         for (const skillName of skillNames) {
           console.log(
-            `${ANSI.bold}${ANSI.cyan}You: ${ANSI.reset}${C.dim(`(invoking skill: ${skillName})`)}`,
+            `${ANSI.bold}${ANSI.cyan}You: ${ANSI.reset}${C.dim("(invoking skill: " + skillName + ")")}`,
           );
           const handled = await handleSlashCommand(`/${skillName}`, rl);
           if (!handled) {
@@ -6254,7 +6215,7 @@ async function main(): Promise<void> {
         const suggestions = extractSuggestedCommands(response);
         for (const cmd of suggestions) {
           console.log(
-            `${ANSI.bold}${ANSI.cyan}You: ${ANSI.reset}${C.dim(`(auto-applying: ${cmd})`)}`,
+            `${ANSI.bold}${ANSI.cyan}You: ${ANSI.reset}${C.dim("(auto-applying: " + cmd + ")")}`,
           );
           await handleSlashCommand(cmd, rl);
           if (pluginManager.consumeSandboxDirty()) {
@@ -6423,12 +6384,12 @@ async function main(): Promise<void> {
           console.log(`  ${C.warn("💡 Suggested commands:")}`);
           for (let i = 0; i < suggestions.length; i++) {
             console.log(
-              `     ${C.info(`[${i + 1}]`)} ${C.val(suggestions[i])}`,
+              `     ${C.info("[" + (i + 1) + "]")} ${C.val(suggestions[i])}`,
             );
           }
           await drainAndWarn(rl);
           const answer = await rl.question(
-            `     ${C.dim(`Pick [1-${suggestions.length}], [a]ll, or [n]one: `)}`,
+            `     ${C.dim("Pick [1-" + suggestions.length + "], [a]ll, or [n]one: ")}`,
           );
           const normalised = answer.trim().toLowerCase();
           if (

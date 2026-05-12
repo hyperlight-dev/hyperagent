@@ -231,7 +231,8 @@ function main() {
     const functions = parseRustModule(source);
 
     if (functions.length === 0) {
-      console.warn(`  ⚠️  No #[rquickjs::function] found in ${moduleDir}`);
+      // native-globals registers globals (TextEncoder, crypto, etc.) on
+      // globalThis — it doesn't export module functions. Skip silently.
       continue;
     }
 
