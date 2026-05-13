@@ -406,7 +406,7 @@ export function registerEventHandler(
             if (errCode === "denied") {
               console.log(`  ${C.warn("🚫 Tool denied by policy")}`);
             } else {
-              console.log(`  ${C.err("❌ Error:")} ${errMsg}`);
+              console.log(`  ${C.err("❌ Error: " + errMsg)}`);
               suggestBufferIncreaseIfNeeded(errMsg);
             }
           }
