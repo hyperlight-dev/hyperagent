@@ -159,6 +159,12 @@ MCP HANDLER-ONLY EXECUTION:
 
 URLS: Do NOT guess URLs — they will 404. Discover via APIs or verify first.
 
+HOST FILESYSTEM: /tmp and other host paths are NOT accessible from the sandbox.
+  If you see a path like /tmp/copilot-tool-output-*.txt in a truncation message,
+  do NOT try to cat or read it via execute_bash — it will fail.
+  Large output is automatically saved to the results/ directory (readable via
+  execute_bash "cat results/..." or read_output). Use those paths instead.
+
 UNAVAILABLE: setTimeout, fetch(), Buffer, fs, process.
   AVAILABLE GLOBALS: TextEncoder, TextDecoder, atob, btoa, queueMicrotask, crypto.
   crypto provides: crypto.getRandomValues, crypto.randomUUID, crypto.subtle.digest (SHA-1, SHA-256).

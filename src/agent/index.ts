@@ -2279,8 +2279,12 @@ function getBashRunnerHandler(): string {
   // confusing Prettier's parser with nested backtick/class syntax.
   const fsAdapterParts: string[] = [
     "// ── Hybrid filesystem: extends InMemoryFs + delegates to host plugins ─",
+    "// normPath: maps sandbox paths to plugin baseDir-relative paths.",
+    "// /home/user/foo.txt → foo.txt (sandbox home prefix stripped)",
+    "// /tmp/foo.txt → tmp/foo.txt (preserved under tmp/ subdir to avoid collisions)",
+    "// /absolute/path → absolute/path (leading slashes stripped)",
     "function normPath(p) {",
-    '  let n = p.replace(/^\\/home\\/user\\//, "").replace(/^\\/tmp\\//, "").replace(/^\\/+/, "");',
+    '  let n = p.replace(/^\\/home\\/user\\//, "").replace(/^\\/tmp\\//, "tmp/").replace(/^\\/+/, "");',
     '  n = n.replace(/(\\.\\.\\/)+/g, "");',
     '  return n || ".";',
     "}",
@@ -2527,6 +2531,7 @@ const executeBashTool = defineTool("execute_bash", {
     "NOT AVAILABLE: rm, mv, ln, wget, python, node, sleep, ssh, git, apt",
     "  - No file deletion or rename (security: fs-write is create/append only)",
     "  - For complex logic, use register_handler with JavaScript instead",
+    "  - Host paths like /tmp are NOT accessible — only plugin baseDir files",
     "",
     "EXAMPLES:",
     '  execute_bash({ command: "ls -la" })',
@@ -2594,6 +2599,60 @@ const executeBashTool = defineTool("execute_bash", {
       }
       if (stderr) {
         console.error("  " + C.dim(stderr.trimEnd()));
+      }
+
+      // ── Large output interception ──────────────────────────────
+      // Same pattern as execute_javascript: if stdout exceeds the
+      // threshold, save to disk and return a small summary. This
+      // fires BEFORE the SDK's VB() truncation (which writes to
+      // /tmp — inaccessible from the sandbox).
+      const outputThreshold = parseInt(
+        process.env.HYPERAGENT_OUTPUT_THRESHOLD_BYTES || "20480",
+        10,
+      );
+      const fullResultBytes = Buffer.byteLength(stdout, "utf-8");
+      if (fullResultBytes > outputThreshold) {
+        const fsWriteBaseDir = getPluginBaseDir("fs-write");
+        if (fsWriteBaseDir) {
+          const resultsDir = resolve(fsWriteBaseDir, "results");
+          if (!existsSync(resultsDir)) {
+            mkdirSync(resultsDir, { recursive: true });
+          }
+          const filename = `bash-${Date.now()}.txt`;
+          const outputPath = join(resultsDir, filename);
+          writeFileSync(outputPath, stdout, "utf-8");
+          const relativePath = `results/${filename}`;
+
+          console.error(
+            `  ${C.ok("📦")} stdout too large (${(fullResultBytes / 1024).toFixed(1)} KB) → saved to ${relativePath}`,
+          );
+
+          const preview = stdout.slice(0, 500);
+          return {
+            stdout:
+              `Output saved to ${relativePath} (${(fullResultBytes / 1024).toFixed(1)} KB).\n` +
+              `Preview (first 500 chars):\n${preview}\n\n` +
+              `Read the full output with: execute_bash({ command: "cat ${relativePath}" })\n` +
+              `Or process it: execute_bash({ command: "cat ${relativePath} | grep ... | wc -l" })`,
+            stderr,
+            exitCode,
+            ...(consoleOutput?.length ? { consoleOutput } : {}),
+          };
+        }
+        // fs-write not enabled — truncate in-place with guidance
+        console.error(
+          `  ${C.warn("⚠️")} stdout too large (${(fullResultBytes / 1024).toFixed(1)} KB) and fs-write not enabled`,
+        );
+        const preview = stdout.slice(0, 2048);
+        return {
+          stdout:
+            `Output truncated (${(fullResultBytes / 1024).toFixed(1)} KB). ` +
+            `Enable fs-write to save large output: manage_plugin("fs-write", "enable")\n\n` +
+            `Preview (first 2KB):\n${preview}`,
+          stderr,
+          exitCode,
+          ...(consoleOutput?.length ? { consoleOutput } : {}),
+        };
       }
 
       return {
