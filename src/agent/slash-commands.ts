@@ -460,7 +460,7 @@ export async function handleSlashCommand(
         console.log(formatModelList(models, state.currentModel));
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.log(`  ${C.err("❌ Failed to list models:")} ${msg}`);
+        console.log(`  ${C.err("❌ Failed to list models: " + msg)}`);
       }
       console.log();
       return true;
@@ -516,7 +516,7 @@ export async function handleSlashCommand(
         console.log("     Conversation history preserved.");
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.log(`  ${C.err("❌ Failed to switch model:")} ${msg}`);
+        console.log(`  ${C.err("❌ Failed to switch model: " + msg)}`);
       }
       console.log();
       return true;
@@ -543,7 +543,7 @@ export async function handleSlashCommand(
         console.log(`     Model: ${C.val(state.currentModel)}`);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.log(`  ${C.err("❌ Failed to create new session:")} ${msg}`);
+        console.log(`  ${C.err("❌ Failed to create new session: " + msg)}`);
       }
       console.log();
       return true;
@@ -613,7 +613,7 @@ export async function handleSlashCommand(
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.log(`  ${C.err("❌ Failed to list sessions:")} ${msg}`);
+        console.log(`  ${C.err("❌ Failed to list sessions: " + msg)}`);
       }
       console.log();
       return true;
@@ -683,7 +683,7 @@ export async function handleSlashCommand(
         console.log(`     Model: ${C.val(state.currentModel)}`);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.log(`  ${C.err("❌ Failed to resume session:")} ${msg}`);
+        console.log(`  ${C.err("❌ Failed to resume session: " + msg)}`);
       }
       console.log();
       return true;
@@ -815,7 +815,7 @@ export async function handleSlashCommand(
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.log(`  ${C.err("❌ Failed to retrieve history:")} ${msg}`);
+        console.log(`  ${C.err("❌ Failed to retrieve history: " + msg)}`);
       }
       console.log();
       return true;
@@ -1826,7 +1826,7 @@ export async function handleSlashCommand(
                 auditAbortCleanup();
                 spinner.stop();
                 const errObj = err as Error;
-                console.log(`  ${C.err("❌ Audit failed:")} ${errObj.message}`);
+                console.log(`  ${C.err("❌ Audit failed: " + errObj.message)}`);
                 // Always log the full stack to stderr for tracing.
                 console.error("[audit-trace] Full error:");
                 console.error(errObj.stack ?? errObj);
@@ -2179,7 +2179,7 @@ export async function handleSlashCommand(
         const { formatExports } = await import("./format-exports.js");
         const info = loadModule(moduleArg);
         if (!info) {
-          console.log(`  ${C.err("❌ Module not found:")} ${moduleArg}`);
+          console.log(`  ${C.err("❌ Module not found: " + moduleArg)}`);
           console.log();
           return true;
         }
@@ -2217,13 +2217,13 @@ export async function handleSlashCommand(
           await import("./module-store.js");
         const info = loadModule(moduleArg);
         if (!info) {
-          console.log(`  ${C.err("❌ Module not found:")} ${moduleArg}`);
+          console.log(`  ${C.err("❌ Module not found: " + moduleArg)}`);
           console.log();
           return true;
         }
         if (info.author === "system") {
           console.log(
-            `  ${C.err("❌ Cannot delete system module:")} ${moduleArg}`,
+            `  ${C.err("❌ Cannot delete system module: " + moduleArg)}`,
           );
           console.log();
           return true;
@@ -2432,7 +2432,7 @@ export async function handleSlashCommand(
                 console.log();
                 console.log(`  ${C.err("⚠️  Audit Warnings:")}`);
                 for (const w of warnings) {
-                  console.log(`    ${C.err("•")} ${w}`);
+                  console.log(`    ${C.err("• " + w)}`);
                 }
               }
 
