@@ -175,6 +175,7 @@ Useful skills include:
 | `pptx-expert`    | Professional PowerPoint decks                 |
 | `pdf-expert`     | Structured PDF reports                        |
 | `xlsx-expert`    | Excel workbook generation                     |
+| `kql-expert`     | Kusto queries via Fabric RTI MCP tools        |
 | `report-builder` | Multi-format reports and document output      |
 | `data-processor` | Data cleaning, joins, aggregation, and export |
 | `api-explorer`   | Understanding and calling APIs                |
