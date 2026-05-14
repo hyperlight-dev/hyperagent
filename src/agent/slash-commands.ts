@@ -879,8 +879,9 @@ export async function handleSlashCommand(
 
     case "/open": {
       // Open a produced file by its reference number
-      const fileNum = parseInt(parts[1] ?? "", 10);
-      if (!parts[1] || !Number.isFinite(fileNum) || fileNum < 1) {
+      const rawNum = parts[1] ?? "";
+      const fileNum = /^\d+$/.test(rawNum) ? parseInt(rawNum, 10) : NaN;
+      if (!rawNum || !Number.isFinite(fileNum) || fileNum < 1) {
         console.log(
           `  ${C.err("Usage: /open <n>")} — open a produced file by number.`,
         );
@@ -896,8 +897,9 @@ export async function handleSlashCommand(
         console.log();
         return true;
       }
-      // Use xdg-open on Linux, open on macOS, cmd.exe /c start on WSL
-      const { execSync } = await import("child_process");
+      // Open file using platform-appropriate command.
+      // Use spawnSync with argv arrays to avoid shell injection.
+      const { spawnSync, execSync } = await import("child_process");
       try {
         // Detect WSL — convert to Windows path and use cmd.exe /c start
         const isWSL = existsSync("/proc/sys/fs/binfmt_misc/WSLInterop");
@@ -905,11 +907,13 @@ export async function handleSlashCommand(
           const winPath = execSync(`wslpath -w "${file.absPath}"`, {
             encoding: "utf-8",
           }).trim();
-          execSync(`cmd.exe /c start '' '${winPath}'`, { stdio: "ignore" });
+          spawnSync("cmd.exe", ["/c", "start", "", winPath], {
+            stdio: "ignore",
+          });
         } else if (process.platform === "darwin") {
-          execSync(`open "${file.absPath}"`, { stdio: "ignore" });
+          spawnSync("open", [file.absPath], { stdio: "ignore" });
         } else {
-          execSync(`xdg-open "${file.absPath}"`, { stdio: "ignore" });
+          spawnSync("xdg-open", [file.absPath], { stdio: "ignore" });
         }
         console.log(`  ${C.ok("✅")} Opened [${fileNum}] ${file.label}`);
       } catch (err) {

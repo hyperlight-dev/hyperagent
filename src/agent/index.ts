@@ -3097,6 +3097,15 @@ async function managePluginImpl(params: {
     console.log(
       `\n  ${C.warn("🔌 Assistant requests plugin:")} ${C.tool(params.name)}`,
     );
+    if (params.config && Object.keys(params.config).length > 0) {
+      console.log(`  ${C.dim("Requested configuration:")}`);
+      for (const [key, value] of Object.entries(params.config)) {
+        const formattedValue = Array.isArray(value)
+          ? `[${(value as string[]).join(", ")}]`
+          : String(value);
+        console.log(`     ${key}: ${formattedValue}`);
+      }
+    }
     console.log(
       `  ${C.dim("This will run a security audit and prompt for configuration.")}`,
     );

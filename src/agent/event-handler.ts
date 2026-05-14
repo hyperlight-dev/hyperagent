@@ -297,6 +297,8 @@ export function registerEventHandler(
 
         spinner.stop();
         console.log(`\n  ${C.tool(`🔧 ${toolName}`)}`);
+        // Restart spinner so the user sees activity while the tool runs
+        spinner.start(" ");
         break;
       }
 
@@ -320,11 +322,23 @@ export function registerEventHandler(
 
         // Show result summary for our sandbox tools
         if (event.data?.success) {
-          // In non-verbose mode, skip the result display —
-          // the LLM will summarise results for the user anyway.
+          // In non-verbose mode, still show errors — but skip verbose
+          // result display since the LLM will summarise for the user.
           if (!state.verboseOutput) {
-            // Brief confirmation so the user knows something happened
-            console.log(`  ${C.ok("✅ Done")}`);
+            const content = event.data?.result?.content ?? "";
+            let parsed;
+            try {
+              parsed = JSON.parse(content);
+            } catch {
+              // Not JSON — that's fine
+            }
+            if (parsed?.error && !parsed._userDisplayed) {
+              // Always show errors, even in non-verbose mode
+              console.log(`  ${C.err("❌ " + parsed.error)}`);
+              suggestBufferIncreaseIfNeeded(parsed.error);
+            } else {
+              console.log(`  ${C.ok("✅ Done")}`);
+            }
           } else {
             const content = event.data?.result?.content ?? "";
             let parsed;
@@ -401,13 +415,9 @@ export function registerEventHandler(
               } else if (content) {
                 const preview =
                   content.length > 300 ? content.slice(0, 300) + "…" : content;
-                // Render raw content preview through markdown if enabled
-                if (state.markdownEnabled && looksLikeMarkdown(preview)) {
-                  console.log(`  ${C.ok("✅ Result:")}`);
-                  console.log(renderMarkdown(preview));
-                } else {
-                  console.log(`  ${C.ok("✅ Result:")} ${C.dim(preview)}`);
-                }
+                // Don't render truncated content as markdown — truncation
+                // may break mid-token (code fence, table) producing garbled output.
+                console.log(`  ${C.ok("✅ Result:")} ${C.dim(preview)}`);
               } else {
                 console.log(`  ${C.ok("✅ Tool complete")}`);
               }

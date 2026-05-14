@@ -116,12 +116,12 @@ const COMMANDS: readonly CommandEntry[] = Object.freeze([
     detail:
       "Toggles terminal markdown rendering on/off.\n" +
       "\n" +
-      "When ON:\n" +
+      "When ON (default):\n" +
       "  • LLM output is buffered (not streamed character-by-character)\n" +
       "  • Rendered with ANSI colours: headings, bold, code blocks, lists, tables\n" +
       "  • Much more readable for structured responses\n" +
       "\n" +
-      "When OFF (default):\n" +
+      "When OFF:\n" +
       "  • Raw text streamed in real-time (faster perceived response)\n" +
       "  • Markdown syntax shown as-is (# headings, **bold**, ```code```)\n" +
       "\n" +
