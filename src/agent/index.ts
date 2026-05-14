@@ -2323,8 +2323,12 @@ function getBashRunnerHandler(): string {
       "    } catch { return super.stat(path); }",
       "  }",
       "  async readdir(path) {",
-      "    try { const r = fsRead.listDir(normPath(path)); if (r.error) throw new Error(r.error); return r.entries.map(e => e.name); }",
-      "    catch { return super.readdir(path); }",
+      "    try {",
+      "      const r = fsRead.listDir(normPath(path));",
+      "      if (Array.isArray(r)) return r.map(e => e.name);",
+      "      if (r.error) throw new Error(r.error);",
+      "      throw new Error('unexpected listDir result');",
+      "    } catch { return super.readdir(path); }",
       "  }",
     );
   }
@@ -2346,8 +2350,10 @@ function getBashRunnerHandler(): string {
       "    } catch { await super.appendFile(path, content, opts); }",
       "  }",
       "  async mkdir(path, opts) {",
-      "    try { fsWrite.mkdir(normPath(path)); }",
-      "    catch { await super.mkdir(path, opts); }",
+      "    try {",
+      "      const r = fsWrite.mkdir(normPath(path));",
+      "      if (r.error) throw new Error(r.error);",
+      "    } catch { await super.mkdir(path, opts); }",
       "  }",
     );
   }
@@ -2600,25 +2606,34 @@ const executeBashTool = defineTool("execute_bash", {
       const stderr = String(result.stderr ?? "");
       const exitCode = Number(result.exitCode ?? 0);
 
-      // Show output to user
-      if (stdout) {
-        console.log(stdout.endsWith("\n") ? stdout.slice(0, -1) : stdout);
-      }
-      if (stderr) {
-        console.error("  " + C.dim(stderr.trimEnd()));
-      }
-
       // ── Large output interception ──────────────────────────────
-      // Same pattern as execute_javascript: if stdout exceeds the
-      // threshold, save to disk and return a small summary. This
-      // fires BEFORE the SDK's VB() truncation (which writes to
-      // /tmp — inaccessible from the sandbox).
+      // Check threshold BEFORE printing to avoid flooding the
+      // console with huge output. Same pattern as execute_javascript:
+      // save to disk and return a small summary before the SDK's
+      // VB() truncation (which writes to /tmp — inaccessible from
+      // the sandbox).
       const outputThreshold = parseInt(
         process.env.HYPERAGENT_OUTPUT_THRESHOLD_BYTES || "20480",
         10,
       );
       const fullResultBytes = Buffer.byteLength(stdout, "utf-8");
-      if (fullResultBytes > outputThreshold) {
+      const isLargeOutput = fullResultBytes > outputThreshold;
+
+      // Show output to user (preview only if large)
+      if (stdout) {
+        if (isLargeOutput) {
+          // Print just a short preview so the terminal isn't flooded
+          const previewLines = stdout.slice(0, 1024);
+          console.log(previewLines + (stdout.length > 1024 ? "\n..." : ""));
+        } else {
+          console.log(stdout.endsWith("\n") ? stdout.slice(0, -1) : stdout);
+        }
+      }
+      if (stderr) {
+        console.error("  " + C.dim(stderr.trimEnd()));
+      }
+
+      if (isLargeOutput) {
         const fsWriteBaseDir = getPluginBaseDir("fs-write");
         if (fsWriteBaseDir) {
           const resultsDir = resolve(fsWriteBaseDir, "results");
