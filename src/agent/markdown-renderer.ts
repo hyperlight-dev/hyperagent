@@ -8,8 +8,8 @@
 //   import { renderMarkdown } from "./markdown-renderer.js";
 //   console.log(renderMarkdown("# Hello\n**bold** and `code`"));
 
-import { Marked, type MarkedOptions } from "marked";
-import TerminalRenderer from "marked-terminal";
+import { Marked, type MarkedExtension } from "marked";
+import { markedTerminal } from "marked-terminal";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import kqlLanguage from "./hljs-kql.js";
@@ -28,20 +28,27 @@ hljsInstance.registerLanguage("kql", kqlLanguage);
 // Use a local Marked instance so we don't mutate the global marked
 // singleton — other code importing marked won't accidentally get
 // terminal-rendered output instead of HTML.
-const terminalRenderer = new TerminalRenderer({
-  // Indent code blocks for visual separation
-  tab: 2,
-  // Show URLs inline rather than as footnotes
-  showSectionPrefix: true,
-  // Convert HTML entities back to characters
-  unescape: true,
-});
-
-// marked-terminal's renderer type doesn't match marked v15's _Renderer
-// exactly, but it works at runtime. Cast to satisfy the type checker.
-const localMarked = new Marked({
-  renderer: terminalRenderer as unknown as MarkedOptions["renderer"],
-});
+//
+// `markedTerminal()` returns a MarkedExtension (`{ renderer, useNewRenderer }`)
+// suitable for marked v15's strict `use()` validation.  Constructing a
+// `TerminalRenderer` instance directly and passing it as `{ renderer }` no
+// longer works in marked >=15 because TerminalRenderer's constructor sets
+// own enumerable properties (`this.o`, `this.tab`, …) and marked iterates
+// every enumerable key of the renderer object, rejecting anything that
+// isn't a known renderer method.
+//
+// The @types/marked-terminal declaration mis-types the return as
+// `TerminalRenderer`; cast through `unknown` to the correct shape.
+const localMarked = new Marked(
+  markedTerminal({
+    // Indent code blocks for visual separation
+    tab: 2,
+    // Show URLs inline rather than as footnotes
+    showSectionPrefix: true,
+    // Convert HTML entities back to characters
+    unescape: true,
+  }) as unknown as MarkedExtension,
+);
 
 /**
  * Render a markdown string as ANSI-formatted terminal output.
