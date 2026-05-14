@@ -104,7 +104,8 @@ Options:
   --show-timing          Log timing breakdown to ~/.hyperagent/logs/
   --show-reasoning [level] Set reasoning effort (low|medium|high|xhigh, default: high)
   --verbose              Verbose output mode (scrolling reasoning, turn details)
-  --no-markdown          Disable markdown rendering (use raw streaming instead)
+  --[no-]markdown        Toggle markdown rendering (default: on, env: HYPERAGENT_MARKDOWN)
+                         Aliases: --md, --no-md
   --transcript           Record session transcript to ~/.hyperagent/logs/
   --list-models          List available models and exit
   --resume [id]          Resume previous session (last if no ID given)

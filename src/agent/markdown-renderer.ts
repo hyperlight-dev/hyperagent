@@ -8,25 +8,26 @@
 //   import { renderMarkdown } from "./markdown-renderer.js";
 //   console.log(renderMarkdown("# Hello\n**bold** and `code`"));
 
-import { marked, type MarkedOptions } from "marked";
+import { Marked, type MarkedOptions } from "marked";
 import TerminalRenderer from "marked-terminal";
 import { resolve } from "node:path";
 
-// Configure marked with the terminal renderer once at import time.
-// marked-terminal handles: headings, bold/italic, code blocks with
-// syntax highlighting, lists, tables, links, blockquotes, and hr.
-const renderer = new TerminalRenderer({
+// Use a local Marked instance so we don't mutate the global marked
+// singleton — other code importing marked won't accidentally get
+// terminal-rendered output instead of HTML.
+const terminalRenderer = new TerminalRenderer({
   // Indent code blocks for visual separation
   tab: 2,
   // Show URLs inline rather than as footnotes
   showSectionPrefix: true,
-  // Use unicode bullets
+  // Convert HTML entities back to characters
   unescape: true,
 });
+
 // marked-terminal's renderer type doesn't match marked v15's _Renderer
 // exactly, but it works at runtime. Cast to satisfy the type checker.
-marked.setOptions({
-  renderer: renderer as unknown as MarkedOptions["renderer"],
+const localMarked = new Marked({
+  renderer: terminalRenderer as unknown as MarkedOptions["renderer"],
 });
 
 /**
@@ -41,9 +42,9 @@ marked.setOptions({
  * @returns ANSI-formatted string ready for console output
  */
 export function renderMarkdown(text: string): string {
-  // marked.parse() can return string | Promise<string> depending on
+  // localMarked.parse() can return string | Promise<string> depending on
   // config. With our sync renderer it always returns string.
-  const rendered = marked.parse(text) as string;
+  const rendered = localMarked.parse(text) as string;
   // Trim trailing newlines that marked adds (avoids double-spacing)
   return rendered.replace(/\n+$/, "");
 }
@@ -54,14 +55,14 @@ export function renderMarkdown(text: string): string {
  * doesn't benefit from being passed through the renderer.
  */
 export function looksLikeMarkdown(text: string): boolean {
-  // Quick heuristics — check for common markdown patterns
+  // Require a strong signal that this is markdown rather than plain text.
+  // Weak patterns like bold (**word**) or list bullets (- item) match
+  // too many false positives (git branch output, log lines, etc.).
   return (
-    /^#{1,6}\s/m.test(text) || // headings
-    /\*\*[^*]+\*\*/m.test(text) || // bold
-    /```[\s\S]*?```/m.test(text) || // code blocks
-    /^\s*[-*+]\s/m.test(text) || // unordered lists
-    /^\s*\d+\.\s/m.test(text) || // ordered lists
-    /\|.*\|.*\|/m.test(text) // tables
+    /^#{1,6}\s/m.test(text) || // headings (strong signal)
+    /```[\s\S]*?```/m.test(text) || // code fences (strong signal)
+    /^\|\s*.+\s*\|\s*.+\s*\|/m.test(text) || // table rows (strong signal)
+    /^\s*\d+\.\s/m.test(text) // ordered lists (moderate signal)
   );
 }
 

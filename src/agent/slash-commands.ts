@@ -298,6 +298,9 @@ export async function handleSlashCommand(
       // Toggle markdown rendering — buffers output instead of streaming
       // and renders through marked-terminal for proper formatting.
       state.markdownEnabled = !state.markdownEnabled;
+      // System prompt includes markdown-specific instructions (OUTPUT mode,
+      // FILE REFERENCES). Rebuild the session so the LLM gets the update.
+      state.sessionNeedsRebuild = true;
       console.log(
         `  📝 Markdown rendering: ${state.markdownEnabled ? C.ok("ON") + C.dim(" (output buffered, not streamed)") : C.err("OFF") + C.dim(" (raw streaming)")}`,
       );
