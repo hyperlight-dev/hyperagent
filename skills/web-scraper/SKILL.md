@@ -3,14 +3,15 @@ name: web-scraper
 description: Extract data from web pages using fetch plugin and ha:html/ha:markdown
 triggers:
   - scrape
-  - extract
   - crawl
   - website
   - HTML
-  - parse
   - web page
   - webpage
   - URL
+  - scrape website
+  - web scraping
+  - crawl site
 patterns:
   - fetch-and-process
   - data-extraction

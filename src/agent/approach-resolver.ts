@@ -12,6 +12,13 @@ import { loadSkills } from "./skill-loader.js";
 import { loadPatterns } from "./pattern-loader.js";
 import { loadModule, type ModuleHints } from "./module-store.js";
 
+// ── MCP server name → CLI setup command mapping ──────────────────────
+// Maps an MCP server name (as declared in skills) to the CLI flag that
+// configures it.  Used by formatGuidance() to show actionable hints.
+const MCP_SETUP_COMMANDS: Record<string, string> = {
+  "fabric-rti-mcp": "--mcp-setup-fabric-rti",
+};
+
 // ── Types ────────────────────────────────────────────────────────────
 
 /** Materialised guidance returned by suggest_approach. */
@@ -26,12 +33,30 @@ export interface MaterialisedGuidance {
   modules: string[];
   /** host:* plugins to enable (union). */
   plugins: string[];
+  /** MCP server names required by matched skills (union). */
+  requiredMcp: string[];
+  /** MCP server availability status (populated by caller with runtime state). */
+  mcpStatus: MCPServerStatus[];
   /** Ordered implementation steps (concatenated from patterns). */
   steps: string[];
   /** Domain rules from skill guidance. */
   rules: string[];
   /** Things the LLM must NOT do (concatenated + deduped). */
   antiPatterns: string[];
+}
+
+/** Runtime availability status for a required MCP server. */
+export interface MCPServerStatus {
+  /** Server name (e.g. "fabric-rti-mcp"). */
+  name: string;
+  /** Whether the server is configured in MCP config. */
+  configured: boolean;
+  /** Connection state if configured. */
+  state?: "idle" | "connecting" | "connected" | "error" | "closed";
+  /** Number of discovered tools (if connected). */
+  toolCount?: number;
+  /** Error message (if state is "error"). */
+  lastError?: string;
 }
 
 // ── Implementation ──────────────────────────────────────────────────
@@ -79,6 +104,7 @@ export function resolveApproach(
   const profileSet = new Set<string>();
   const moduleSet = new Set<string>();
   const pluginSet = new Set<string>();
+  const mcpSet = new Set<string>();
   const config: Record<string, number> = {};
   const allSteps: string[] = [];
   const allRules: string[] = [];
@@ -91,6 +117,11 @@ export function resolveApproach(
     // Collect antiPatterns from skill
     for (const ap of skill.antiPatterns) {
       antiPatternSet.add(ap);
+    }
+
+    // Collect required MCP servers
+    for (const mcp of skill.requiresMcp) {
+      mcpSet.add(mcp);
     }
 
     // Extract rules from skill guidance
@@ -137,6 +168,8 @@ export function resolveApproach(
     config,
     modules: [...moduleSet],
     plugins: [...pluginSet],
+    requiredMcp: [...mcpSet],
+    mcpStatus: [],
     steps: allSteps,
     rules: uniqueRules,
     antiPatterns: [...antiPatternSet],
@@ -202,6 +235,8 @@ const GENERIC_GUIDANCE: MaterialisedGuidance = {
   config: {},
   modules: [],
   plugins: [],
+  requiredMcp: [],
+  mcpStatus: [],
   steps: [
     "1. Call list_modules to discover available modules",
     "2. Call module_info(name) for any relevant modules",
@@ -242,6 +277,29 @@ export function formatGuidance(guidance: MaterialisedGuidance): string {
     parts.push(
       `Plugins: ${guidance.plugins.join(", ")} — enable via manage_plugin or apply_profile`,
     );
+  }
+  if (guidance.mcpStatus.length > 0) {
+    parts.push("MCP Servers:");
+    for (const s of guidance.mcpStatus) {
+      if (!s.configured) {
+        const setupFlag = MCP_SETUP_COMMANDS[s.name] ?? `--mcp-setup-${s.name}`;
+        parts.push(
+          `  ❌ ${s.name} — not configured. Run: hyperagent ${setupFlag}`,
+        );
+      } else if (s.state === "connected") {
+        parts.push(
+          `  ✅ ${s.name} — connected (${s.toolCount ?? 0} tools). Import from host:mcp-${s.name}`,
+        );
+      } else if (s.state === "error") {
+        parts.push(
+          `  ⚠️ ${s.name} — configured but errored: ${s.lastError ?? "unknown"}`,
+        );
+      } else {
+        parts.push(
+          `  ⚡ ${s.name} — configured (${s.state ?? "idle"}). Call manage_mcp({action:"connect", name:"${s.name}"}) to connect`,
+        );
+      }
+    }
   }
   if (guidance.profiles.length > 0) {
     parts.push(`Profiles: ${guidance.profiles.join(", ")}`);

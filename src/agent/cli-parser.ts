@@ -129,6 +129,7 @@ Standalone MCP setup commands (run and exit):
   --mcp-setup-filesystem [dir] Configure the filesystem MCP server (default: /tmp/mcp-fs)
   --mcp-show-config            Show configured MCP servers
   --mcp-setup-workiq           Configure Microsoft Work IQ stdio MCP server
+  --mcp-setup-fabric-rti [args...]  Configure Fabric RTI (Kusto/KQL) MCP server
   --mcp-add-http <name> <url> [clientId] [tenantId] [scopes] [flow]
                                Add a generic HTTP MCP server
   --mcp-m365-create-app [args...]  Create/reuse Entra app for M365 HTTP MCP
@@ -368,6 +369,13 @@ export function parseCliArgs(
         break;
       case "--mcp-setup-workiq":
         setMCPSetupCommand(config, { kind: "setup-workiq" });
+        break;
+      case "--mcp-setup-fabric-rti":
+        setMCPSetupCommand(config, {
+          kind: "setup-fabric-rti",
+          args: argv.slice(i + 1),
+        });
+        i = argv.length;
         break;
       case "--mcp-add-http":
         setMCPSetupCommand(config, {

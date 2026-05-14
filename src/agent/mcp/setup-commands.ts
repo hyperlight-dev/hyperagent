@@ -22,6 +22,7 @@ export type MCPSetupCommand =
   | { kind: "setup-filesystem"; dir: string }
   | { kind: "show-config" }
   | { kind: "setup-workiq" }
+  | { kind: "setup-fabric-rti"; args: string[] }
   | { kind: "add-http"; args: string[] }
   | { kind: "m365-create-app"; args: string[] }
   | { kind: "m365-setup"; args: string[] }
@@ -242,6 +243,9 @@ export function runMCPSetupCommand(
     case "setup-workiq":
       setupWorkIQ();
       return;
+    case "setup-fabric-rti":
+      setupFabricRTI(command.args);
+      return;
     case "add-http":
       addHttp(command.args);
       return;
@@ -276,6 +280,79 @@ function setupEverything(): void {
 
   logSuccess(`MCP 'everything' server configured in ${CONFIG_FILE}`);
   console.log("   Start HyperAgent and ask for the everything test tools.");
+}
+
+// ── Fabric RTI (Kusto/KQL) MCP server ────────────────────────────────
+
+const FABRIC_RTI_DEFAULT_URI = "https://help.kusto.windows.net/";
+const FABRIC_RTI_DEFAULT_DB = "Samples";
+
+function setupFabricRTI(args: string[]): void {
+  console.log("Configuring MCP 'fabric-rti-mcp' server (Kusto/KQL)...");
+  console.log(
+    "Requires Python 3.10+ and uvx (or uv). Uses Azure Identity for auth.",
+  );
+
+  // Check uvx availability
+  const uvxPath = spawnCapture("which", ["uvx"]);
+  if (!uvxPath) {
+    logWarning(
+      "uvx not found. Install: curl -LsSf https://astral.sh/uv/install.sh | sh",
+    );
+    console.log("   Or: pip install uv");
+    console.log("   Then re-run this command.");
+    process.exit(1);
+  }
+
+  // Parse optional args: --cluster-uri <uri> --database <db>
+  let clusterUri = FABRIC_RTI_DEFAULT_URI;
+  let defaultDb = FABRIC_RTI_DEFAULT_DB;
+  for (let i = 0; i < args.length; i++) {
+    switch (args[i]) {
+      case "--cluster-uri":
+        if (i + 1 >= args.length || args[i + 1].startsWith("--")) {
+          console.error("Error: --cluster-uri requires a value.");
+          process.exit(1);
+        }
+        clusterUri = args[++i];
+        break;
+      case "--database":
+        if (i + 1 >= args.length || args[i + 1].startsWith("--")) {
+          console.error("Error: --database requires a value.");
+          process.exit(1);
+        }
+        defaultDb = args[++i];
+        break;
+      default:
+        console.error(`Error: unknown option '${args[i]}'.`);
+        console.error(
+          "Usage: hyperagent --mcp-setup-fabric-rti [--cluster-uri <uri>] [--database <db>]",
+        );
+        process.exit(1);
+    }
+  }
+
+  const cfg = readConfig();
+  cfg.mcpServers = cfg.mcpServers ?? {};
+  cfg.mcpServers["fabric-rti-mcp"] = {
+    command: "uvx",
+    args: ["microsoft-fabric-rti-mcp"],
+    env: {
+      KUSTO_SERVICE_URI: clusterUri,
+      KUSTO_SERVICE_DEFAULT_DB: defaultDb,
+    },
+  };
+  writeConfig(cfg);
+
+  logSuccess(`MCP 'fabric-rti-mcp' server configured in ${CONFIG_FILE}`);
+  console.log(`   Cluster URI: ${clusterUri}`);
+  console.log(`   Default DB:  ${defaultDb}`);
+  console.log("");
+  console.log("   Auth: Uses Azure Identity (az login, VS Code, etc.)");
+  console.log("   Override defaults with: --cluster-uri <uri> --database <db>");
+  console.log(
+    "   Start HyperAgent and ask a KQL question to trigger the kql-expert skill.",
+  );
 }
 
 function setupGithub(): void {

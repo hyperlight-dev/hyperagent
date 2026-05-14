@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   resolveApproach,
+  formatGuidance,
   type MaterialisedGuidance,
+  type MCPServerStatus,
 } from "../src/agent/approach-resolver.js";
 import type { Skill } from "../src/agent/skill-loader.js";
 import type { Pattern } from "../src/agent/pattern-loader.js";
@@ -18,6 +20,7 @@ function makeSkill(
     triggers: [],
     patterns,
     antiPatterns,
+    requiresMcp: [],
     guidance,
   };
 }
@@ -172,5 +175,132 @@ describe("approach-resolver", () => {
 
     const result = resolveApproach(["s1"], skills, patterns);
     expect(result.steps[0]).toBe("[p1] Do thing");
+  });
+
+  it("should collect requiredMcp from skills", () => {
+    const skill: Skill = {
+      name: "kql",
+      description: "",
+      triggers: [],
+      patterns: [],
+      antiPatterns: [],
+      requiresMcp: ["fabric-rti-mcp"],
+      guidance: "",
+    };
+    const skills = new Map([["kql", skill]]);
+    const patterns = new Map<string, Pattern>();
+
+    const result = resolveApproach(["kql"], skills, patterns);
+    expect(result.requiredMcp).toEqual(["fabric-rti-mcp"]);
+    // mcpStatus starts empty (populated by caller)
+    expect(result.mcpStatus).toEqual([]);
+  });
+
+  it("should union requiredMcp across multiple skills", () => {
+    const s1: Skill = {
+      name: "s1",
+      description: "",
+      triggers: [],
+      patterns: [],
+      antiPatterns: [],
+      requiresMcp: ["fabric-rti-mcp"],
+      guidance: "",
+    };
+    const s2: Skill = {
+      name: "s2",
+      description: "",
+      triggers: [],
+      patterns: [],
+      antiPatterns: [],
+      requiresMcp: ["fabric-rti-mcp", "other-mcp"],
+      guidance: "",
+    };
+    const skills = new Map([
+      ["s1", s1],
+      ["s2", s2],
+    ]);
+    const patterns = new Map<string, Pattern>();
+
+    const result = resolveApproach(["s1", "s2"], skills, patterns);
+    expect(result.requiredMcp.sort()).toEqual(["fabric-rti-mcp", "other-mcp"]);
+  });
+
+  it("should return empty requiredMcp when skills have none", () => {
+    const skills = new Map([["s1", makeSkill("s1", ["p1"])]]);
+    const patterns = new Map([["p1", makePattern("p1")]]);
+
+    const result = resolveApproach(["s1"], skills, patterns);
+    expect(result.requiredMcp).toEqual([]);
+  });
+});
+
+describe("formatGuidance — MCP Servers section", () => {
+  function makeGuidance(
+    overrides: Partial<MaterialisedGuidance> = {},
+  ): MaterialisedGuidance {
+    return {
+      matchedSkills: [],
+      modules: [],
+      plugins: [],
+      profiles: [],
+      config: {},
+      steps: [],
+      rules: [],
+      antiPatterns: [],
+      requiredMcp: [],
+      mcpStatus: [],
+      ...overrides,
+    };
+  }
+
+  it("should show ❌ for unconfigured MCP server", () => {
+    const status: MCPServerStatus = {
+      name: "fabric-rti-mcp",
+      configured: false,
+    };
+    const output = formatGuidance(makeGuidance({ mcpStatus: [status] }));
+    expect(output).toContain("MCP Servers:");
+    expect(output).toContain("❌ fabric-rti-mcp — not configured");
+    expect(output).toContain("hyperagent --mcp-setup-fabric-rti");
+  });
+
+  it("should show ✅ for connected MCP server", () => {
+    const status: MCPServerStatus = {
+      name: "fabric-rti-mcp",
+      configured: true,
+      state: "connected",
+      toolCount: 13,
+    };
+    const output = formatGuidance(makeGuidance({ mcpStatus: [status] }));
+    expect(output).toContain("✅ fabric-rti-mcp — connected (13 tools)");
+    expect(output).toContain("host:mcp-fabric-rti-mcp");
+  });
+
+  it("should show ⚠️ for errored MCP server", () => {
+    const status: MCPServerStatus = {
+      name: "fabric-rti-mcp",
+      configured: true,
+      state: "error",
+      lastError: "auth failed",
+    };
+    const output = formatGuidance(makeGuidance({ mcpStatus: [status] }));
+    expect(output).toContain("⚠️ fabric-rti-mcp — configured but errored");
+    expect(output).toContain("auth failed");
+  });
+
+  it("should show ⚡ for idle/configured MCP server", () => {
+    const status: MCPServerStatus = {
+      name: "fabric-rti-mcp",
+      configured: true,
+      state: "idle",
+    };
+    const output = formatGuidance(makeGuidance({ mcpStatus: [status] }));
+    expect(output).toContain("⚡ fabric-rti-mcp — configured (idle)");
+    expect(output).toContain('manage_mcp({action:"connect"');
+  });
+
+  it("should omit MCP section when mcpStatus is empty", () => {
+    const output = formatGuidance(makeGuidance());
+    expect(output).not.toContain("MCP Servers:");
   });
 });

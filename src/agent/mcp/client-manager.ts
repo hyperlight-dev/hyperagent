@@ -178,7 +178,9 @@ export function createMCPClientManager() {
     } else {
       // Interactive: acquire token eagerly (silent → browser/device-code).
       await acquireMsalToken(name, authConfig);
-      console.error(`[mcp] ✅ Authentication successful.`);
+      if (isVerbose()) {
+        console.error(`[mcp] ✅ Authentication successful.`);
+      }
     }
 
     // Build a provider that serves cached tokens to the MCP transport.
@@ -282,9 +284,11 @@ export function createMCPClientManager() {
       saveCachedSession(name, sessionId);
     }
 
-    console.error(
-      `[mcp] Connected to "${name}" — ${sanitised.length} tool(s) available`,
-    );
+    if (isVerbose()) {
+      console.error(
+        `[mcp] Connected to "${name}" — ${sanitised.length} tool(s) available`,
+      );
+    }
 
     return conn;
   }
@@ -463,10 +467,17 @@ function createTransport(config: MCPServerConfig, serverName?: string): any {
     ...(config.env ?? {}),
   };
 
+  // When not in verbose/debug mode, discard subprocess stderr so MCP server
+  // log output (e.g. Python INFO lines) doesn't leak to the terminal.
+  // Using "ignore" avoids back-pressure from an un-drained pipe buffer.
+  // In verbose mode, inherit so the user sees everything.
+  const stderr = isVerbose() ? "inherit" : "ignore";
+
   return new StdioClientTransport({
     command: config.command,
     args: config.args,
     env,
+    stderr,
   });
 }
 
@@ -677,4 +688,15 @@ export function extractEmbeddedJson(text: string): unknown {
   }
 
   return text;
+}
+
+/**
+ * Check whether verbose/debug output is enabled.
+ * Returns true when HYPERAGENT_VERBOSE=1 or HYPERAGENT_DEBUG=1.
+ */
+function isVerbose(): boolean {
+  return (
+    process.env.HYPERAGENT_VERBOSE === "1" ||
+    process.env.HYPERAGENT_DEBUG === "1"
+  );
 }

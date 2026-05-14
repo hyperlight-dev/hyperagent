@@ -4,16 +4,16 @@ description: Transform, filter, and analyse data using sandbox handlers
 triggers:
   - CSV
   - JSON
-  - transform
-  - convert
-  - process
-  - analyse
-  - analyze
-  - data
-  - filter
-  - aggregate
-  - sort
-  - parse
+  - TSV
+  - CSV to JSON
+  - JSON to CSV
+  - data pipeline
+  - ETL
+  - tabular data
+  - parse CSV
+  - parse JSON
+  - transform CSV
+  - transform JSON
 patterns:
   - data-transformation
   - two-handler-pipeline

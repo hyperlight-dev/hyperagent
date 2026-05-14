@@ -10,12 +10,12 @@ triggers:
   - SharePoint
   - OneDrive
   - Copilot
-  - email
-  - meetings
-  - tasks
   - external service
   - mcp server
   - work-iq
+  - Microsoft 365
+  - M365
+  - Outlook
 antiPatterns:
   - Don't try to manage_plugin("mcp:<name>") — MCP servers are NOT regular plugins
   - Don't import from "host:mcp-gateway" — that's the gateway sentinel, not a server

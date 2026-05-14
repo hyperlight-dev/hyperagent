@@ -38,12 +38,16 @@ You: /skill pptx-expert
 
 | Skill | Description |
 |-------|-------------|
-| `pptx-expert` | Building professional PowerPoint presentations |
-| `web-scraper` | Extracting data from web pages |
-| `research-synthesiser` | Combining multiple sources into reports |
-| `data-processor` | Transforming and analyzing data |
-| `report-builder` | Creating structured reports |
-| `api-explorer` | Discovering and using APIs |
+| `api-explorer` | Discover, test, and document REST/GraphQL/JSON APIs |
+| `data-processor` | Transform, filter, and analyse data using sandbox handlers |
+| `kql-expert` | KQL expertise for Kusto queries via Fabric RTI MCP tools |
+| `mcp-services` | Connect and use external MCP servers (M365, GitHub, custom) |
+| `pdf-expert` | Professional PDF documents using sandbox modules |
+| `pptx-expert` | Professional PowerPoint presentations using sandbox modules |
+| `report-builder` | Generate documents, reports, and formatted output |
+| `research-synthesiser` | Multi-source research synthesised into structured reports |
+| `web-scraper` | Extract data from web pages using fetch plugin |
+| `xlsx-expert` | Excel XLSX workbooks using sandbox modules |
 
 ## Skill File Format
 
@@ -66,6 +70,8 @@ antiPatterns:
 allowed-tools:
   - register_handler
   - execute_javascript
+requires-mcp:
+  - mcp-server-name
 ---
 ```
 
@@ -104,6 +110,18 @@ and always produce high-quality Z.
 | `patterns` | No | Code patterns relevant to this skill |
 | `antiPatterns` | No | Common mistakes to avoid |
 | `allowed-tools` | No | Tools the LLM can use with this skill |
+| `requires-mcp` | No | MCP server names that must be connected for this skill |
+
+### MCP Server Dependencies
+
+If `requires-mcp` is specified, the skill declares which MCP servers it needs. The approach resolver checks whether required servers are connected and shows their status:
+
+```yaml
+requires-mcp:
+  - fabric-rti-mcp
+```
+
+When the skill is matched, the agent enriches the guidance with MCP connection status so the LLM knows whether to prompt the user to connect the server first.
 
 ### Tool Restrictions
 
@@ -218,9 +236,10 @@ Skills are discovered automatically from:
 List available skills:
 ```
 You: /skill list
-  📚 Available skills (6):
-     pptx-expert - Expert at building professional PowerPoint presentations
-     web-scraper - Extracting data from web pages
+  📚 Available skills (10):
+     api-explorer - Discover, test, and document REST/GraphQL/JSON APIs
+     data-processor - Transform, filter, and analyse data
+     kql-expert - KQL expertise for Kusto queries via Fabric RTI MCP
      ...
 ```
 
