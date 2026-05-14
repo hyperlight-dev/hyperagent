@@ -17,6 +17,8 @@ function makeSkill(
     antiPatterns: [],
     requiresMcp: [],
     guidance: "",
+    source: "system",
+    filePath: `/tmp/test/${name}/SKILL.md`,
   };
 }
 

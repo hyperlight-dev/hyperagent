@@ -32,6 +32,10 @@ export interface Skill {
   requiresMcp: string[];
   /** The markdown body — domain-specific guidance text. */
   guidance: string;
+  /** Origin of this skill ("system" = bundled, "user" = ~/.hyperagent/skills/). */
+  source: "system" | "user";
+  /** Absolute path to the SKILL.md file (for /skill edit, /skill delete). */
+  filePath: string;
 }
 
 // ── YAML Frontmatter Parser ──────────────────────────────────────────
@@ -128,9 +132,13 @@ function parseFrontmatter(content: string): {
  * Each subdirectory should contain a SKILL.md file.
  *
  * @param dir - Path to skills directory (e.g. "./skills")
+ * @param source - Origin of these skills ("system" or "user"); defaults to "system"
  * @returns Map of skill name → Skill
  */
-export function loadSkills(dir: string): Map<string, Skill> {
+export function loadSkills(
+  dir: string,
+  source: "system" | "user" = "system",
+): Map<string, Skill> {
   const skills = new Map<string, Skill>();
 
   if (!existsSync(dir)) return skills;
@@ -169,8 +177,35 @@ export function loadSkills(dir: string): Map<string, Skill> {
       antiPatterns,
       requiresMcp,
       guidance: body,
+      source,
+      filePath: skillFile,
     });
   }
 
   return skills;
+}
+
+/**
+ * Load skills from multiple directories and merge them.
+ *
+ * The first entry in `dirs` is the lowest precedence (typically the system
+ * skills directory); later entries override earlier ones when names collide.
+ * The last directory in the list is conventionally the user skills directory
+ * (`~/.hyperagent/skills/`), which allows users to override or extend the
+ * built-in skill catalogue.
+ *
+ * @param dirs - Ordered list of `{ dir, source }` pairs, lowest precedence first.
+ * @returns Merged map of skill name → Skill (user entries win on collision).
+ */
+export function loadSkillsFromDirs(
+  dirs: Array<{ dir: string; source: "system" | "user" }>,
+): Map<string, Skill> {
+  const merged = new Map<string, Skill>();
+  for (const { dir, source } of dirs) {
+    const loaded = loadSkills(dir, source);
+    for (const [name, skill] of loaded) {
+      merged.set(name, skill);
+    }
+  }
+  return merged;
 }

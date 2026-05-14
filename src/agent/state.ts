@@ -255,6 +255,44 @@ export interface AgentState {
    */
   lastGuidance: string | null;
 
+  // ── Session Learning Context (feeds /save-skill) ────────────────
+
+  /**
+   * Recent tool invocations in this session. Used by /save-skill to
+   * extract patterns about what the agent actually did so the LLM
+   * can author an accurate SKILL.md.
+   *
+   * Capped at MAX_TOOL_HISTORY entries (oldest evicted FIFO) to keep
+   * memory bounded for long-running sessions. Reset on /new session.
+   */
+  toolCallHistory: Array<{
+    tool: string;
+    success: boolean;
+    errorSummary?: string;
+    timestamp: number;
+  }>;
+
+  /**
+   * Names of MCP servers whose tools the LLM actually invoked during
+   * this session. Surfaces real dependencies for `requires-mcp:` in
+   * skills authored via /save-skill.
+   */
+  mcpServersUsed: Set<string>;
+
+  /**
+   * Names of modules the LLM registered (via register_module) during
+   * this session. Candidates for `companionModule` in saved skills.
+   */
+  modulesRegistered: string[];
+
+  /**
+   * A prompt queued by a slash command (e.g. /save-skill) to be sent
+   * as the NEXT user turn.  The main REPL loop drains this before
+   * waiting on stdin so the synthetic prompt reaches the LLM exactly
+   * once.  Null when nothing is queued.
+   */
+  pendingPrompt: string | null;
+
   // ── Token Tracking ───────────────────────────────────────────────
 
   /** Cumulative input tokens across all LLM requests this session. */
@@ -353,6 +391,12 @@ export function createAgentState(
     hasCalledListModules: false,
     modulesInspected: new Set<string>(),
     lastGuidance: null,
+
+    // Session learning context
+    toolCallHistory: [],
+    mcpServersUsed: new Set<string>(),
+    modulesRegistered: [],
+    pendingPrompt: null,
 
     // Token tracking
     totalInputTokens: 0,

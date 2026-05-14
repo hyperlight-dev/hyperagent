@@ -22,6 +22,8 @@ function makeSkill(
     antiPatterns,
     requiresMcp: [],
     guidance,
+    source: "system",
+    filePath: `/tmp/test/${name}/SKILL.md`,
   };
 }
 
@@ -186,6 +188,8 @@ describe("approach-resolver", () => {
       antiPatterns: [],
       requiresMcp: ["fabric-rti-mcp"],
       guidance: "",
+      source: "system",
+      filePath: "/tmp/test/kql/SKILL.md",
     };
     const skills = new Map([["kql", skill]]);
     const patterns = new Map<string, Pattern>();
@@ -205,6 +209,8 @@ describe("approach-resolver", () => {
       antiPatterns: [],
       requiresMcp: ["fabric-rti-mcp"],
       guidance: "",
+      source: "system",
+      filePath: "/tmp/test/s1/SKILL.md",
     };
     const s2: Skill = {
       name: "s2",
@@ -214,6 +220,8 @@ describe("approach-resolver", () => {
       antiPatterns: [],
       requiresMcp: ["fabric-rti-mcp", "other-mcp"],
       guidance: "",
+      source: "system",
+      filePath: "/tmp/test/s2/SKILL.md",
     };
     const skills = new Map([
       ["s1", s1],

@@ -304,6 +304,65 @@ They work well together:
 hyperagent --skill web-scraper --profile web-research
 ```
 
+## User Skills (Persist What You Learn)
+
+Hyperagent ships with a curated set of *system skills* (the table above) — and
+also lets you grow your own library of *user skills* during real work. When you
+and the agent have just spent ten minutes figuring out how to do something
+non-obvious, save the lesson so the next session starts where you left off.
+
+### Saving a Skill
+
+In any REPL session, run:
+
+```
+/save-skill                       # let the LLM pick a name
+/save-skill teams-transcript-finder
+```
+
+What happens:
+
+1. Hyperagent collects a structured summary of the session — tool calls,
+   MCP servers used, modules registered, recent errors.
+2. That summary plus instructions is sent to the LLM as a synthetic user
+   turn.
+3. The LLM calls the `generate_skill` tool with a proposed SKILL.md (and
+   optionally a companion module). You approve before anything is written.
+4. The skill is persisted to `~/.hyperagent/skills/<name>/SKILL.md`.
+
+User skills are loaded automatically on every startup. If a user skill has
+the same name as a system skill, the user version wins (overrides are
+flagged with `👤 (overrides built-in)` in `/skills`).
+
+### Managing User Skills
+
+```
+/skills                       # list system + user skills (👤 = user)
+/skills info <name>           # show the SKILL.md contents
+/skills edit <name>           # print the path for your $EDITOR
+/skills delete <name>         # remove a user skill (system ones are immutable)
+```
+
+User skills live in `~/.hyperagent/skills/<name>/SKILL.md` and follow the
+same format as system skills documented above. Edit them in your editor of
+choice — changes apply on the next `/suggest_approach` invocation.
+
+### When to Save vs Not Save
+
+Save a skill when:
+
+- The workflow took non-trivial effort to figure out and is likely to recur.
+- The lesson would be lost between sessions (modules + skill capture it
+  together).
+- A few well-chosen triggers will reliably match future prompts on the same
+  topic.
+
+Don't save a skill when:
+
+- The task was one-off (no expected recurrence).
+- The lesson is generic ("use the right tool"). Skills are for *specific*
+  domain knowledge.
+
 ## See Also
 
 - [PATTERNS.md](PATTERNS.md) - Code generation patterns

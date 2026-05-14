@@ -142,6 +142,14 @@ BUILDING REUSABLE MODULES:
   it. Modules persist across sessions and compound in value over time.
   Import your module with: import { fn } from "ha:<name>"
 
+SAVING WHAT YOU LEARN:
+  When the user asks to "save what we learned", "remember this for next time",
+  or runs /save-skill, call generate_skill to persist a SKILL.md to
+  ~/.hyperagent/skills/. Triggers in the SKILL.md let /suggest_approach
+  auto-surface the lesson in future related sessions.  If the workflow needs
+  reusable JavaScript helpers, include a companionModule so future sessions
+  pick up the code too.
+
 PLUGINS: Require explicit enable via manage_plugin.
   Host plugin functions return values directly (not Promises).
   You CAN use async/await — it works — but await on a plugin call
