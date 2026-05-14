@@ -5,14 +5,11 @@ feature lets a user persist what HyperAgent learned in a session as a
 reusable skill at `~/.hyperagent/skills/<name>/SKILL.md`, surviving
 upgrades and overriding system skills with the same name.
 
-Implemented on branch `feat-user-skills` (atop fix
-`fix-marked-v15-renderer` for the markdown renderer crash).
-
 ---
 
 ## Prerequisites
 
-- A working HyperAgent checkout on the `feat-user-skills` branch
+- A working HyperAgent checkout
 - `just setup` already run (Rust addons built, deps installed) — see the
   project [README](../README.md) and [DEVELOPMENT.md](DEVELOPMENT.md)
 - A terminal where `just start` launches the agent successfully
@@ -59,8 +56,10 @@ Let it run to completion. Then ask the agent to save what it learned:
 1. The agent receives a synthetic prompt summarising the session
    context (tools used, MCP servers, modules registered, recent errors)
 2. The LLM calls the `generate_skill(...)` tool
-3. You see an interactive approval prompt with a preview of the
-   `SKILL.md` content
+3. You see an interactive approval prompt showing a **summary** — the
+   skill name, the one-line description, a preview of the first few
+   triggers, the allowed-tools list, and a byte count for the guidance
+   body. (The full content is *not* echoed to stdout.)
 4. Hit `y` to approve
 
 Verify the file landed on disk:
@@ -82,13 +81,18 @@ Exercise every command path. From a fresh `just start`:
 
 ```text
 > /skills                                 # list both system + user skills
-> /skills info code-review                # show full detail for a system skill
+> /skills info kql-expert                 # show full detail for a bundled system skill
 > /save-skill                             # no name → LLM picks one
 > /skills                                 # user skill now shows with 👤
 > /skills info fetch-page-title           # user skill detail
-> /skills edit fetch-page-title           # opens $EDITOR for hand-tuning
+> /skills edit fetch-page-title           # prints the user-skill path; open it in your editor
 > exit
 ```
+
+> `/skills edit <name>` does **not** spawn `$EDITOR`. It just prints
+> the absolute path to the user-skill `SKILL.md` so you can open it
+> in your own editor of choice. Save the file, then restart (or run
+> `/suggest_approach`) and the change takes effect.
 
 Then restart the agent and repeat the original task — the matching
 `/suggest_approach` should surface the saved skill via its triggers.
@@ -98,15 +102,17 @@ Then restart the agent and repeat the original task — the matching
 ## 3. Override Test
 
 User skills must override system skills with the same name. Drop a user
-skill that shadows an existing system one:
+skill that shadows an existing system one (pick any skill that `ls
+skills/` shows — here we use `kql-expert`):
 
 ```bash
-mkdir -p "$HYPERAGENT_USER_SKILLS_DIR/code-review"
-cat > "$HYPERAGENT_USER_SKILLS_DIR/code-review/SKILL.md" << 'EOF'
+mkdir -p "$HYPERAGENT_USER_SKILLS_DIR/kql-expert"
+cat > "$HYPERAGENT_USER_SKILLS_DIR/kql-expert/SKILL.md" << 'EOF'
 ---
-name: code-review
-description: My customised code review skill
-triggers: [review, audit]
+name: kql-expert
+description: My customised KQL skill
+triggers: [kql, kusto, query]
+allowed-tools: [execute_javascript]
 ---
 This overrides the system version.
 EOF
@@ -117,11 +123,12 @@ just start
 In the REPL:
 
 ```text
-> /skills info code-review
+> /skills
 ```
 
-**Expected:** the **user** description ("My customised code review
-skill") appears, and an **override** flag/note is present.
+**Expected:** the `kql-expert` row appears with the **`👤 (overrides
+built-in)`** badge in the list view. Running `/skills info kql-expert`
+then shows the **user** description ("My customised KQL skill").
 
 ---
 
@@ -134,7 +141,8 @@ Validation should reject bad input cleanly without crashing the agent:
 | `/save-skill BadName` | Rejected — not kebab-case |
 | `/save-skill ../escape` | Rejected — path traversal |
 | `/save-skill thisnameisreallylongandshouldfailitsbeyondsixtyfourcharactersnowforsure` | Rejected — exceeds 64 chars |
-| `/save-skill fetch-page-title` (second time) | Overwrite confirmation prompt |
+| `/save-skill info` | Rejected — reserved subcommand name |
+| `/save-skill fetch-page-title` (second time, fresh session) | `generate_skill` first errors with "already exists — set overwrite=true"; the LLM retries with `overwrite=true`, and you get an **"Overwrite existing user skill?"** confirmation before the file is replaced |
 
 ---
 
@@ -155,7 +163,7 @@ unset HYPERAGENT_USER_SKILLS_DIR
 | Approval prompt shows a skill preview | Tool handler validation working ✅ |
 | `.md` file lands on disk under `$HYPERAGENT_USER_SKILLS_DIR` | `writeUserSkill()` working ✅ |
 | `/skills` shows the 👤 badge for the new skill | Multi-dir loader + `source` field working ✅ |
-| `/skills info <name>` shows the override flag for shadowed system skills | Name-collision detection working ✅ |
+| `/skills` shows `👤 (overrides built-in)` for shadowed system skills | Name-collision detection working ✅ |
 | Restarting the agent matches the skill on similar prompts | `loadSkillsFromDirs` + boot wiring working ✅ |
 
 ---

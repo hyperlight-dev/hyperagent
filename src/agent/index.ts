@@ -1016,6 +1016,14 @@ async function syncPluginsToSandbox(): Promise<void> {
             conn,
             mcpManager,
             mcpWriteSafetyGate,
+            // Session-learning: record any MCP server the LLM
+            // actually exercised — including calls made from inside
+            // `execute_javascript` via `host:mcp-<name>` imports
+            // (which never surface as a top-level `mcp__*` tool name
+            // and so are invisible to onPostToolUse).
+            (serverName: string) => {
+              state.mcpServersUsed.add(serverName);
+            },
           );
           registrations.push(adapter);
         }
@@ -1131,8 +1139,11 @@ async function handleSlashCommand(
     drainAndWarn,
     mcpManager, // Real MCP manager (or null if no config)
     syncPlugins: syncPluginsToSandbox,
-    submitToLLM: (prompt: string) => {
+    submitToLLM: (prompt: string, options?: { skipAutoSuggest?: boolean }) => {
       state.pendingPrompt = prompt;
+      if (options?.skipAutoSuggest) {
+        state.skipNextAutoSuggest = true;
+      }
     },
   };
   return handleSlashCommandImpl(rawInput, rl, slashDeps);
@@ -5574,7 +5585,18 @@ const generateSkillTool = defineTool("generate_skill", {
         params.triggers.length > 5
           ? ` (+${params.triggers.length - 5} more)`
           : "";
-      console.log(`\n  ${C.warn("📚 Save skill:")} ${C.tool(params.name)}`);
+      // Surface the overwrite path explicitly — the LLM passing
+      // `overwrite=true` is necessary but not sufficient.  The user
+      // gets a chance to refuse before we replace existing content.
+      const isOverwrite =
+        params.overwrite === true && userSkillExists(params.name);
+      if (isOverwrite) {
+        console.log(
+          `\n  ${C.warn("⚠️  Overwrite existing user skill:")} ${C.tool(params.name)}`,
+        );
+      } else {
+        console.log(`\n  ${C.warn("📚 Save skill:")} ${C.tool(params.name)}`);
+      }
       console.log(`     ${params.description}`);
       console.log(`     Triggers: ${triggerPreview}${triggerSuffix}`);
       console.log(
@@ -5589,9 +5611,12 @@ const generateSkillTool = defineTool("generate_skill", {
       }
 
       await drainAndWarn(rl);
+      const promptLabel = isOverwrite
+        ? `  ${C.dim("Overwrite skill? [y/n] ")}`
+        : `  ${C.dim("Save skill? [y/n] ")}`;
       const approval = state.autoApprove
         ? "y"
-        : await promptUser(rl, `  ${C.dim("Save skill? [y/n] ")}`);
+        : await promptUser(rl, promptLabel);
       if (approval.trim().toLowerCase() !== "y") {
         console.log(`  ${C.dim("Denied by user.")}`);
         return { success: false, error: "Skill save denied by user" };
@@ -6013,9 +6038,16 @@ function buildSessionConfig() {
         state.currentUserPrompt = input.prompt;
         state.hasCalledListModules = false;
 
+        // Slash commands that queue a synthetic prompt (e.g. /save-skill)
+        // set state.skipNextAutoSuggest so the auto-suggest pass doesn't
+        // match unrelated skills on scaffolding terms like "MCP" or
+        // "SKILL.md".  Consume the flag before the suggest pass below.
+        const skipAutoSuggest = state.skipNextAutoSuggest;
+        state.skipNextAutoSuggest = false;
+
         // Auto-invoke suggest_approach for non-trivial prompts
         const isNonTrivial = input.prompt.length > 25;
-        if (isNonTrivial) {
+        if (isNonTrivial && !skipAutoSuggest) {
           const result = runSuggestApproach(
             input.prompt,
             state.preLoadedSkills,
@@ -6144,9 +6176,11 @@ function buildSessionConfig() {
             state.toolCallHistory.length - MAX_TOOL_HISTORY,
           );
         }
-        // Tools whose name looks like `mcp__<server>__<tool>` count
-        // their server as "used" — that's how the SDK exposes MCP
-        // tools to the LLM.  See manage_mcp + listMCPServersTool.
+        // Top-level MCP tool fallback: when an SDK ever surfaces a
+        // tool as `mcp__<server>__<tool>` we still count the server.
+        // The primary tracking path is the MCP plugin-adapter's onCall
+        // observer (wired in syncPluginsToSandbox above) which catches
+        // calls made via `host:mcp-<name>` imports too.
         if (success && toolName.startsWith("mcp__")) {
           const server = toolName.split("__")[1];
           if (server) state.mcpServersUsed.add(server);

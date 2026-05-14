@@ -293,6 +293,16 @@ export interface AgentState {
    */
   pendingPrompt: string | null;
 
+  /**
+   * When set, the next call to `onUserPromptSubmitted` skips the
+   * automatic `runSuggestApproach` pass.  Slash commands that queue a
+   * synthetic prompt (e.g. `/save-skill`) set this so the agent does
+   * not match a skill on terms that are part of the synthetic prompt's
+   * scaffolding rather than the user's real intent.  Cleared by the
+   * hook on consumption.
+   */
+  skipNextAutoSuggest: boolean;
+
   // ── Token Tracking ───────────────────────────────────────────────
 
   /** Cumulative input tokens across all LLM requests this session. */
@@ -397,6 +407,7 @@ export function createAgentState(
     mcpServersUsed: new Set<string>(),
     modulesRegistered: [],
     pendingPrompt: null,
+    skipNextAutoSuggest: false,
 
     // Token tracking
     totalInputTokens: 0,

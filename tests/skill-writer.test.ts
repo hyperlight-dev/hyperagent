@@ -84,6 +84,14 @@ describe("validateSkillName", () => {
   it("rejects names longer than 64 characters", () => {
     expect(writer.validateSkillName("a".repeat(65))).toMatch(/64/);
   });
+
+  it("rejects reserved /skills subcommand names", () => {
+    // These would shadow `/skills info|edit|delete|list` if accepted.
+    expect(writer.validateSkillName("info")).toMatch(/reserved/i);
+    expect(writer.validateSkillName("edit")).toMatch(/reserved/i);
+    expect(writer.validateSkillName("delete")).toMatch(/reserved/i);
+    expect(writer.validateSkillName("list")).toMatch(/reserved/i);
+  });
 });
 
 // ── validateSkillData ────────────────────────────────────────────────
@@ -304,5 +312,55 @@ describe("writeUserSkill / listUserSkills / readUserSkill / deleteUserSkill", ()
         tempPatternsDir,
       ),
     ).toThrow(/not-a-real-pattern/);
+  });
+
+  it("rejects descriptions containing newlines (would break YAML frontmatter)", () => {
+    expect(() =>
+      writer.writeUserSkill(
+        {
+          name: "bad-desc",
+          description: "first line\nrogue: injection",
+          triggers: ["x"],
+          guidance: "x",
+          allowedTools: ["execute_javascript"],
+        },
+        tempPatternsDir,
+      ),
+    ).toThrow(/single line|newlines/i);
+  });
+
+  it("rejects triggers containing newlines (would break YAML frontmatter)", () => {
+    expect(() =>
+      writer.writeUserSkill(
+        {
+          name: "bad-trigger",
+          description: "ok",
+          triggers: ["fine", "bad\nrogue: injection"],
+          guidance: "x",
+          allowedTools: ["execute_javascript"],
+        },
+        tempPatternsDir,
+      ),
+    ).toThrow(/single-line|newlines/i);
+  });
+
+  it("enforces size cap in UTF-8 bytes, not JS string units", () => {
+    // 32 KB of a 4-byte UTF-8 character ⇒ ~128 KB of bytes — well past
+    // MAX_SKILL_SIZE_BYTES (64 KB).  If the cap counted `String.length`
+    // (UTF-16 code units) instead of UTF-8 bytes this would slip
+    // through; the byte-length test makes sure it doesn't.
+    const fatGuidance = "𠮷".repeat(32 * 1024); // U+20BB7, 4 bytes in UTF-8
+    expect(() =>
+      writer.writeUserSkill(
+        {
+          name: "oversized",
+          description: "x",
+          triggers: ["x"],
+          guidance: fatGuidance,
+          allowedTools: ["execute_javascript"],
+        },
+        tempPatternsDir,
+      ),
+    ).toThrow(/exceeds maximum size/);
   });
 });

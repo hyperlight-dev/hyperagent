@@ -29,9 +29,11 @@ import { ALLOWED_TOOLS } from "./tool-gating.js";
 /**
  * Root directory for user-created skills.
  *
- * Defaults to `~/.hyperagent/skills/`.  The `HYPERAGENT_USER_SKILLS_DIR`
- * environment variable overrides the default — tests use this to point
- * at a temporary directory without polluting the real user library.
+ * Resolved at MODULE LOAD TIME.  Tests that need to redirect the path
+ * to a tmpdir must set `HYPERAGENT_USER_SKILLS_DIR` and then re-import
+ * this module via `vi.resetModules()` + dynamic `import()` — see
+ * `tests/skill-writer.test.ts` for the pattern.  Setting the env var
+ * AFTER the first import has no effect.
  */
 const DEFAULT_USER_SKILLS_DIR =
   process.env.HYPERAGENT_USER_SKILLS_DIR ??
@@ -48,6 +50,27 @@ const MAX_TRIGGERS = 50;
 
 /** Kebab-case name pattern (lowercase letters, digits, hyphens). */
 const VALID_NAME_RE = /^[a-z][a-z0-9-]*$/;
+
+/**
+ * Names that double as `/skills` subcommands — accepting them as skill
+ * names would let `/skills <name>` shadow `/skills info|edit|delete|list`
+ * and create confusing CLI behaviour.
+ */
+const RESERVED_SKILL_NAMES: ReadonlySet<string> = new Set([
+  "info",
+  "edit",
+  "delete",
+  "list",
+]);
+
+/**
+ * Pattern matching YAML-frontmatter characters that would break a
+ * single-line `key: value` representation — newlines split fields and
+ * a literal `---` terminates the frontmatter block.  Used by
+ * `validateSkillData` to reject payloads that would otherwise need
+ * heavy YAML escaping in `renderSkillMarkdown`.
+ */
+const YAML_UNSAFE_RE = /[\r\n]|^---$/;
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -101,7 +124,8 @@ export function getUserSkillsDir(): string {
  * Validate a skill name. Returns an error message string, or null if valid.
  *
  * Rules: kebab-case (lowercase letters, digits, hyphens; must start with a
- * letter), ≤64 characters, no path traversal characters.
+ * letter), ≤64 characters, no path traversal characters, and not one of
+ * the reserved `/skills` subcommand names.
  */
 export function validateSkillName(name: string): string | null {
   if (!name) return "Skill name must not be empty";
@@ -111,6 +135,9 @@ export function validateSkillName(name: string): string | null {
   }
   if (name.includes("..") || name.includes("/") || name.includes("\\")) {
     return "Skill name must not contain path traversal characters";
+  }
+  if (RESERVED_SKILL_NAMES.has(name)) {
+    return `Skill name '${name}' is reserved (collides with a /skills subcommand)`;
   }
   return null;
 }
@@ -141,6 +168,10 @@ export function validateSkillData(
     errors.push(
       `Skill description must be ≤${MAX_DESCRIPTION_LENGTH} characters`,
     );
+  } else if (YAML_UNSAFE_RE.test(data.description)) {
+    errors.push(
+      "Skill description must be a single line (no newlines or '---')",
+    );
   }
 
   if (!Array.isArray(data.triggers) || data.triggers.length === 0) {
@@ -151,6 +182,12 @@ export function validateSkillData(
     for (const t of data.triggers) {
       if (typeof t !== "string" || t.trim().length === 0) {
         errors.push("Triggers must be non-empty strings");
+        break;
+      }
+      if (YAML_UNSAFE_RE.test(t)) {
+        errors.push(
+          "Triggers must be single-line strings (no newlines or '---')",
+        );
         break;
       }
     }
@@ -252,9 +289,12 @@ export function writeUserSkill(data: SkillData, patternsDir: string): string {
   }
 
   const rendered = renderSkillMarkdown(data);
-  if (rendered.length > MAX_SKILL_SIZE_BYTES) {
+  // Size cap is on disk-bytes (UTF-8) — `.length` would under-count for
+  // multi-byte characters and let a payload sneak past the limit.
+  const renderedBytes = Buffer.byteLength(rendered, "utf-8");
+  if (renderedBytes > MAX_SKILL_SIZE_BYTES) {
     throw new Error(
-      `SKILL.md exceeds maximum size (${rendered.length} bytes > ${MAX_SKILL_SIZE_BYTES} bytes)`,
+      `SKILL.md exceeds maximum size (${renderedBytes} bytes > ${MAX_SKILL_SIZE_BYTES} bytes)`,
     );
   }
 

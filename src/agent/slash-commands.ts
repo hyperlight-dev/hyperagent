@@ -53,6 +53,7 @@ import {
   deleteUserSkill,
   userSkillExists,
   getUserSkillsDir,
+  validateSkillName,
 } from "./skill-writer.js";
 import {
   extractSessionContext,
@@ -111,8 +112,16 @@ export interface SlashCommandDeps {
    * Queue a synthetic prompt for the LLM (used by `/save-skill` and
    * similar commands that want to inject a user-turn-shaped message).
    * The prompt is drained at the top of the next REPL iteration.
+   *
+   * `options.skipAutoSuggest` suppresses the automatic
+   * `runSuggestApproach` pass on the next turn — synthetic prompts
+   * contain scaffolding text (e.g. "MCP", "SKILL.md") that would
+   * otherwise match unrelated skill triggers.
    */
-  submitToLLM: (prompt: string) => void;
+  submitToLLM: (
+    prompt: string,
+    options?: { skipAutoSuggest?: boolean },
+  ) => void;
 }
 
 // ── Handler ──────────────────────────────────────────────────────────
@@ -575,10 +584,14 @@ export async function handleSlashCommand(
         } as any);
         registerEventHandler(state.activeSession);
         // Reset session-learning fields — the new conversation starts
-        // with no history of what we did last time.
+        // with no history of what we did last time, and the previous
+        // user-prompt should not anchor /save-skill or auto-suggest on
+        // the next turn either.
         state.toolCallHistory = [];
         state.mcpServersUsed = new Set();
         state.modulesRegistered = [];
+        state.currentUserPrompt = "";
+        state.lastGuidance = null;
         console.log(
           `  ${C.ok("🆕 New session started.")} Conversation history cleared.`,
         );
@@ -777,6 +790,14 @@ export async function handleSlashCommand(
           } as any,
         );
         registerEventHandler(state.activeSession);
+        // Local session-learning state cannot be reconstructed from a
+        // resumed remote session — clear it so /save-skill doesn't
+        // mine stale history from the previously active conversation.
+        state.toolCallHistory = [];
+        state.mcpServersUsed = new Set();
+        state.modulesRegistered = [];
+        state.currentUserPrompt = "";
+        state.lastGuidance = null;
         console.log(
           `  ${C.ok("⏮️  Resumed session:")} ${C.val(targetId.slice(0, 12) + "…")}`,
         );
@@ -2130,6 +2151,13 @@ export async function handleSlashCommand(
           console.log(`  ${C.dim("Usage: /skills info <name>")}`);
           return true;
         }
+        // Validate the name BEFORE touching the filesystem so a value
+        // like "../etc" can never be `join`-ed into a path we read.
+        const nameError = validateSkillName(arg);
+        if (nameError) {
+          console.log(`  ${C.err("❌ Invalid skill name:")} ${nameError}`);
+          return true;
+        }
         const userContent = readUserSkill(arg);
         if (userContent) {
           console.log(
@@ -2155,6 +2183,11 @@ export async function handleSlashCommand(
           console.log(`  ${C.dim("Usage: /skills edit <name>")}`);
           return true;
         }
+        const nameError = validateSkillName(arg);
+        if (nameError) {
+          console.log(`  ${C.err("❌ Invalid skill name:")} ${nameError}`);
+          return true;
+        }
         if (!userSkillExists(arg)) {
           console.log(
             `  ${C.err("❌ User skill not found:")} ${arg} ` +
@@ -2174,6 +2207,11 @@ export async function handleSlashCommand(
       if (sub === "delete") {
         if (!arg) {
           console.log(`  ${C.dim("Usage: /skills delete <name>")}`);
+          return true;
+        }
+        const nameError = validateSkillName(arg);
+        if (nameError) {
+          console.log(`  ${C.err("❌ Invalid skill name:")} ${nameError}`);
           return true;
         }
         if (!userSkillExists(arg)) {
@@ -2338,11 +2376,20 @@ export async function handleSlashCommand(
         `  ${C.label("📝 Capturing session learnings…")}` +
           (desiredName ? ` ${C.dim("(name: " + desiredName + ")")}` : ""),
       );
+      // "distinct tools" = full-history cardinality, NOT the bounded
+      // topTools view (capped at MAX_TOP_TOOLS).  Computing it from
+      // toolCallHistory keeps the status line honest.
+      const distinctToolCount = new Set(
+        state.toolCallHistory.map((e) => e.tool),
+      ).size;
       console.log(
-        `  ${C.dim("Context: " + ctx.totalToolCalls + " tool calls, " + ctx.topTools.length + " distinct tools.")}`,
+        `  ${C.dim("Context: " + ctx.totalToolCalls + " tool calls, " + distinctToolCount + " distinct tools.")}`,
       );
 
-      deps.submitToLLM(synthetic);
+      // Bypass auto suggest_approach on the next turn — the synthetic
+      // prompt mentions "MCP", "SKILL.md", etc. as scaffolding and
+      // would otherwise match unrelated skill triggers.
+      deps.submitToLLM(synthetic, { skipAutoSuggest: true });
       return true;
     }
 

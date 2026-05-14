@@ -127,6 +127,21 @@ describe("extractSessionContext", () => {
     expect(ctx.userPrompt).toBe("Find the Teams transcript");
   });
 
+  it("truncates the user prompt when it exceeds the cap", () => {
+    // The cap is an internal constant (MAX_USER_PROMPT_CHARS = 2000),
+    // but the contract is: long prompts come back truncated with an
+    // ellipsis so a giant paste cannot dominate the saved context.
+    const giant = "x".repeat(5000);
+    const ctx = extractSessionContext(makeState({ currentUserPrompt: giant }));
+    expect(ctx.userPrompt.length).toBeLessThan(giant.length);
+    expect(ctx.userPrompt.endsWith("…")).toBe(true);
+    // Short prompts pass through untouched (regression guard).
+    const short = extractSessionContext(
+      makeState({ currentUserPrompt: "short prompt" }),
+    );
+    expect(short.userPrompt).toBe("short prompt");
+  });
+
   it("caps the topTools list at 10 entries", () => {
     // Build 15 distinct tools each called once, plus one called 20 times.
     const history: AgentState["toolCallHistory"] = [];

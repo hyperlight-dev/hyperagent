@@ -30,6 +30,15 @@ const MAX_ERRORS_REPORTED = 8;
  */
 const MAX_TOP_TOOLS = 10;
 
+/**
+ * Maximum characters of the user's most-recent prompt kept in the
+ * session-context summary.  Anything longer is truncated with an
+ * ellipsis — the LLM only needs the gist of the original task to
+ * anchor the SKILL.md it writes, and a 50-KB paste here would
+ * dominate the prompt and crowd out the actual session history.
+ */
+const MAX_USER_PROMPT_CHARS = 2000;
+
 // ── Types ────────────────────────────────────────────────────────────
 
 /**
@@ -95,8 +104,16 @@ export function extractSessionContext(state: AgentState): SessionContext {
     .sort((a, b) => b.count - a.count)
     .slice(0, MAX_TOP_TOOLS);
 
+  // Truncate the user prompt so a giant paste doesn't dominate the
+  // session-context summary.  We keep the head — the leading phrase
+  // is the strongest signal of intent.
+  const userPrompt =
+    state.currentUserPrompt.length > MAX_USER_PROMPT_CHARS
+      ? state.currentUserPrompt.slice(0, MAX_USER_PROMPT_CHARS) + "…"
+      : state.currentUserPrompt;
+
   return {
-    userPrompt: state.currentUserPrompt,
+    userPrompt,
     topTools,
     mcpServersUsed: Array.from(state.mcpServersUsed).sort(),
     modulesRegistered: [...state.modulesRegistered].sort(),

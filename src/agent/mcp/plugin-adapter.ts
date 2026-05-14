@@ -34,6 +34,22 @@ export type WriteSafetyGate = (
 ) => Promise<boolean>;
 
 /**
+ * Callback invoked at the start of every MCP tool call routed through
+ * the adapter.  Used by the agent to track which MCP servers were
+ * actually exercised in this session (independent of whether the LLM
+ * called the tool via a top-level `mcp__*` name or imported it as a
+ * `host:mcp-<name>` module from inside `execute_javascript`).
+ *
+ * Fires after the write-safety gate (if any) has approved, but before
+ * the call is dispatched to the manager.  Synchronous on purpose so
+ * tracking cannot delay the call.
+ *
+ * @param serverName - MCP server name (e.g. "work-iq-mail")
+ * @param toolName   - Tool name being invoked
+ */
+export type MCPCallObserver = (serverName: string, toolName: string) => void;
+
+/**
  * PluginRegistration-compatible interface.
  * Matches the shape expected by src/sandbox/tool.js setPlugins().
  */
@@ -55,12 +71,16 @@ export interface MCPPluginRegistration {
  * @param manager - The client manager for making tool calls.
  * @param gate - Optional write-safety gate. When provided, non-read-only
  *   tools are checked before execution.
+ * @param onCall - Optional observer fired on every successful gate-pass
+ *   immediately before the tool is dispatched.  Used by the agent for
+ *   session-learning tracking (see state.mcpServersUsed).
  * @returns A PluginRegistration that can be passed to setPlugins().
  */
 export function createMCPPluginAdapter(
   conn: MCPConnection,
   manager: MCPClientManager,
   gate?: WriteSafetyGate,
+  onCall?: MCPCallObserver,
 ): MCPPluginRegistration {
   const moduleName = `mcp-${conn.name}`;
 
@@ -92,6 +112,11 @@ export function createMCPPluginAdapter(
               };
             }
           }
+
+          // Notify any observer that we are about to dispatch.  The
+          // observer is intentionally invoked AFTER the gate so denied
+          // calls do not pollute session-learning state.
+          onCall?.(conn.name, tool.name);
 
           return manager.callTool(conn.name, tool.name, toolArgs);
         };
