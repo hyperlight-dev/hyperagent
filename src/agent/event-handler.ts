@@ -12,6 +12,7 @@ import type {
 import { C, ANSI } from "./ansi.js";
 import type { AgentState } from "./state.js";
 import type { Spinner } from "./spinner.js";
+import { renderMarkdown, looksLikeMarkdown } from "./markdown-renderer.js";
 import {
   formatUsageStats,
   printUsageStats,
@@ -360,7 +361,16 @@ export function registerEventHandler(
               if (typeof displayValue === "string") {
                 if (displayValue.includes("\n")) {
                   console.log(`  ${C.ok("✅ Result:")}`);
-                  console.log(C.dim(displayValue));
+                  // Render markdown if enabled and text has markdown patterns;
+                  // otherwise dim the raw text for visual separation.
+                  if (
+                    state.markdownEnabled &&
+                    looksLikeMarkdown(displayValue)
+                  ) {
+                    console.log(renderMarkdown(displayValue));
+                  } else {
+                    console.log(C.dim(displayValue));
+                  }
                 } else {
                   console.log(`  ${C.ok("✅ Result:")} ${displayValue}`);
                 }

@@ -1372,11 +1372,24 @@ const registerHandlerTool = defineTool("register_handler", {
   },
   handler: async ({ name, code }: { name: string; code: string }) => {
     if (state.showCodeEnabled) {
-      const indented = code
-        .split("\n")
-        .map((l: string) => `    ${l}`)
-        .join("\n");
-      console.error(`\n  📝 register_handler("${name}"):\n${indented}\n`);
+      // Syntax-highlight code via markdown renderer when enabled;
+      // otherwise fall back to plain indented display.
+      if (state.markdownEnabled) {
+        const mdBlock = "```javascript\n" + code + "\n```";
+        console.error(
+          '\n  📝 register_handler("' +
+            name +
+            '"):\n' +
+            renderMarkdown(mdBlock) +
+            "\n",
+        );
+      } else {
+        const indented = code
+          .split("\n")
+          .map((l: string) => `    ${l}`)
+          .join("\n");
+        console.error(`\n  📝 register_handler("${name}"):\n${indented}\n`);
+      }
     }
     sandbox.writeCode(`// ── handler: ${name} ──\n${code}\n`);
 
@@ -2586,7 +2599,13 @@ const executeBashTool = defineTool("execute_bash", {
 
     // Log bash command to code log (same as show-code for JS handlers)
     if (state.showCodeEnabled) {
-      console.log("  " + C.dim("$ " + command));
+      // Syntax-highlight bash commands via markdown renderer when enabled
+      if (state.markdownEnabled) {
+        const mdBlock = "```bash\n$ " + command + "\n```";
+        console.log(renderMarkdown(mdBlock));
+      } else {
+        console.log("  " + C.dim("$ " + command));
+      }
     }
     sandbox.writeCode("// ── bash ──\n$ " + command + "\n");
 
