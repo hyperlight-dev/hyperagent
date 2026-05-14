@@ -285,6 +285,7 @@ if (cli.profile) {
   // configure_sandbox at runtime for buffer changes.
 }
 
+if (cli.verbose) process.env.HYPERAGENT_VERBOSE = "1";
 if (cli.debug) process.env.HYPERAGENT_DEBUG = "1";
 
 // Conditionally allow the tuning tool through the gate
@@ -5751,21 +5752,28 @@ function buildSessionConfig() {
           );
 
           // Enrich with MCP server availability from the running manager
-          if (result.guidance.requiredMcp.length > 0 && mcpManager) {
-            const servers = mcpManager.listServers();
-            const serverMap = new Map(servers.map((s) => [s.name, s]));
-            for (const name of result.guidance.requiredMcp) {
-              const conn = serverMap.get(name);
-              const status: MCPServerStatus = conn
-                ? {
-                    name,
-                    configured: true,
-                    state: conn.state,
-                    toolCount: conn.tools.length,
-                    lastError: conn.lastError,
-                  }
-                : { name, configured: false };
-              result.guidance.mcpStatus.push(status);
+          if (result.guidance.requiredMcp.length > 0) {
+            if (mcpManager) {
+              const servers = mcpManager.listServers();
+              const serverMap = new Map(servers.map((s) => [s.name, s]));
+              for (const name of result.guidance.requiredMcp) {
+                const conn = serverMap.get(name);
+                const status: MCPServerStatus = conn
+                  ? {
+                      name,
+                      configured: true,
+                      state: conn.state,
+                      toolCount: conn.tools.length,
+                      lastError: conn.lastError,
+                    }
+                  : { name, configured: false };
+                result.guidance.mcpStatus.push(status);
+              }
+            } else {
+              // No MCP manager — mark all required servers as unconfigured
+              for (const name of result.guidance.requiredMcp) {
+                result.guidance.mcpStatus.push({ name, configured: false });
+              }
             }
             // Re-format guidance now that mcpStatus is populated
             result.formatted = formatGuidance(result.guidance);

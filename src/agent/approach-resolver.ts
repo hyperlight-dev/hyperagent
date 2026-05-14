@@ -12,6 +12,13 @@ import { loadSkills } from "./skill-loader.js";
 import { loadPatterns } from "./pattern-loader.js";
 import { loadModule, type ModuleHints } from "./module-store.js";
 
+// ── MCP server name → CLI setup command mapping ──────────────────────
+// Maps an MCP server name (as declared in skills) to the CLI flag that
+// configures it.  Used by formatGuidance() to show actionable hints.
+const MCP_SETUP_COMMANDS: Record<string, string> = {
+  "fabric-rti-mcp": "--mcp-setup-fabric-rti",
+};
+
 // ── Types ────────────────────────────────────────────────────────────
 
 /** Materialised guidance returned by suggest_approach. */
@@ -275,8 +282,9 @@ export function formatGuidance(guidance: MaterialisedGuidance): string {
     parts.push("MCP Servers:");
     for (const s of guidance.mcpStatus) {
       if (!s.configured) {
+        const setupFlag = MCP_SETUP_COMMANDS[s.name] ?? `--mcp-setup-${s.name}`;
         parts.push(
-          `  ❌ ${s.name} — not configured. Run: hyperagent --mcp setup-${s.name.replace(/^fabric-/, "")}`,
+          `  ❌ ${s.name} — not configured. Run: hyperagent ${setupFlag}`,
         );
       } else if (s.state === "connected") {
         parts.push(

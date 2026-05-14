@@ -467,10 +467,11 @@ function createTransport(config: MCPServerConfig, serverName?: string): any {
     ...(config.env ?? {}),
   };
 
-  // When not in verbose/debug mode, pipe subprocess stderr so MCP server
+  // When not in verbose/debug mode, discard subprocess stderr so MCP server
   // log output (e.g. Python INFO lines) doesn't leak to the terminal.
+  // Using "ignore" avoids back-pressure from an un-drained pipe buffer.
   // In verbose mode, inherit so the user sees everything.
-  const stderr = isVerbose() ? "inherit" : "pipe";
+  const stderr = isVerbose() ? "inherit" : "ignore";
 
   return new StdioClientTransport({
     command: config.command,

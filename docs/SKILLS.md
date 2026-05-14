@@ -236,7 +236,7 @@ Skills are discovered automatically from:
 List available skills:
 ```
 You: /skill list
-  📚 Available skills (9):
+  📚 Available skills (10):
      api-explorer - Discover, test, and document REST/GraphQL/JSON APIs
      data-processor - Transform, filter, and analyse data
      kql-expert - KQL expertise for Kusto queries via Fabric RTI MCP

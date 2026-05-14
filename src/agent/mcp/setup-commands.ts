@@ -310,11 +310,25 @@ function setupFabricRTI(args: string[]): void {
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
       case "--cluster-uri":
-        clusterUri = args[++i] ?? FABRIC_RTI_DEFAULT_URI;
+        if (i + 1 >= args.length || args[i + 1].startsWith("--")) {
+          console.error("Error: --cluster-uri requires a value.");
+          process.exit(1);
+        }
+        clusterUri = args[++i];
         break;
       case "--database":
-        defaultDb = args[++i] ?? FABRIC_RTI_DEFAULT_DB;
+        if (i + 1 >= args.length || args[i + 1].startsWith("--")) {
+          console.error("Error: --database requires a value.");
+          process.exit(1);
+        }
+        defaultDb = args[++i];
         break;
+      default:
+        console.error(`Error: unknown option '${args[i]}'.`);
+        console.error(
+          "Usage: hyperagent --mcp-setup-fabric-rti [--cluster-uri <uri>] [--database <db>]",
+        );
+        process.exit(1);
     }
   }
 

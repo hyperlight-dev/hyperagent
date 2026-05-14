@@ -261,7 +261,7 @@ describe("formatGuidance — MCP Servers section", () => {
     const output = formatGuidance(makeGuidance({ mcpStatus: [status] }));
     expect(output).toContain("MCP Servers:");
     expect(output).toContain("❌ fabric-rti-mcp — not configured");
-    expect(output).toContain("hyperagent --mcp setup-rti-mcp");
+    expect(output).toContain("hyperagent --mcp-setup-fabric-rti");
   });
 
   it("should show ✅ for connected MCP server", () => {

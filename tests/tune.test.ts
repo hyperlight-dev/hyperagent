@@ -133,6 +133,30 @@ describe("MCP setup CLI flags", () => {
     });
   });
 
+  it("parses fabric-rti setup with default and explicit args", () => {
+    expect(parseCliArgs(["--mcp-setup-fabric-rti"]).mcpSetupCommand).toEqual({
+      kind: "setup-fabric-rti",
+      args: [],
+    });
+    expect(
+      parseCliArgs([
+        "--mcp-setup-fabric-rti",
+        "--cluster-uri",
+        "https://my.kusto.windows.net",
+        "--database",
+        "MyDb",
+      ]).mcpSetupCommand,
+    ).toEqual({
+      kind: "setup-fabric-rti",
+      args: [
+        "--cluster-uri",
+        "https://my.kusto.windows.net",
+        "--database",
+        "MyDb",
+      ],
+    });
+  });
+
   it("captures remaining args for setup helpers with pass-through options", () => {
     expect(
       parseCliArgs([
