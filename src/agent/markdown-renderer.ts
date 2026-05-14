@@ -10,7 +10,20 @@
 
 import { marked, type MarkedOptions } from "marked";
 import TerminalRenderer from "marked-terminal";
+import { createRequire } from "node:module";
 import { resolve } from "node:path";
+import kqlLanguage from "./hljs-kql.js";
+
+// Register KQL/Kusto syntax highlighting on the shared highlight.js instance.
+// cli-highlight (used by marked-terminal) loads highlight.js via CJS require().
+// We use createRequire to get the same CJS singleton so registration is visible
+// to cli-highlight's highlight() calls.
+// Grammar derived from @kusto/monaco-kusto (MIT) Monarch definition.
+const cjsRequire = createRequire(import.meta.url);
+const hljsInstance = cjsRequire("highlight.js") as {
+  registerLanguage: Function;
+};
+hljsInstance.registerLanguage("kql", kqlLanguage);
 
 // Configure marked with the terminal renderer once at import time.
 // marked-terminal handles: headings, bold/italic, code blocks with

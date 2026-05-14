@@ -11,11 +11,12 @@ triggers:
   - API documentation
   - API reference
   - test endpoint
-  - request
-  - response
   - status code
   - rate limit
   - webhook
+  - API call
+  - REST API
+  - HTTP endpoint
 patterns:
   - fetch-and-process
   - data-extraction

@@ -3,14 +3,14 @@ name: report-builder
 description: Generate documents, reports, and formatted output files
 triggers:
   - report
-  - document
   - DOCX
   - markdown
-  - generate
-  - summary
-  - output
-  - write
-  - create file
+  - write a report
+  - generate report
+  - status report
+  - executive summary
+  - markdown report
+  - DOCX report
 patterns:
   - two-handler-pipeline
   - file-generation

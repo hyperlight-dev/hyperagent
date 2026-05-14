@@ -10,15 +10,12 @@ triggers:
   - competitive analysis
   - market research
   - deep dive
-  - investigate
-  - survey
   - comprehensive analysis
   - multi-source
   - cross-reference
   - state of the art
   - landscape
   - benchmark
-  - evaluate
 patterns:
   - fetch-and-process
   - data-extraction

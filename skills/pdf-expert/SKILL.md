@@ -4,9 +4,6 @@ description: Expert at building professional PDF documents using Hyperlight sand
 triggers:
   - pdf
   - PDF
-  - document
-  - report
-  - paper
   - brochure
   - poster
   - resume
@@ -15,6 +12,9 @@ triggers:
   - letter
   - manual
   - newsletter
+  - PDF report
+  - PDF document
+  - generate PDF
 patterns:
   - two-handler-pipeline
   - image-embed

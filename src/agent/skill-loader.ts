@@ -28,6 +28,8 @@ export interface Skill {
   patterns: string[];
   /** Things the LLM must NOT do. */
   antiPatterns: string[];
+  /** MCP server names this skill requires (e.g. ["fabric-rti-mcp"]). */
+  requiresMcp: string[];
   /** The markdown body — domain-specific guidance text. */
   guidance: string;
 }
@@ -155,6 +157,9 @@ export function loadSkills(dir: string): Map<string, Skill> {
     const antiPatterns = Array.isArray(meta.antiPatterns)
       ? (meta.antiPatterns as string[])
       : [];
+    const requiresMcp = Array.isArray(meta["requires-mcp"])
+      ? (meta["requires-mcp"] as string[])
+      : [];
 
     skills.set(name, {
       name,
@@ -162,6 +167,7 @@ export function loadSkills(dir: string): Map<string, Skill> {
       triggers,
       patterns,
       antiPatterns,
+      requiresMcp,
       guidance: body,
     });
   }
