@@ -119,7 +119,11 @@ import {
   printExtendedReasoningNotice,
   formatTokenSummary,
 } from "./llm-output.js";
-import { renderMarkdown, looksLikeMarkdown } from "./markdown-renderer.js";
+import {
+  renderMarkdown,
+  looksLikeMarkdown,
+  linkifyFiles,
+} from "./markdown-renderer.js";
 
 // ── Session Timing ───────────────────────────────────────────────────
 // Track session start time to display total elapsed time on exit.
@@ -718,7 +722,7 @@ const operatorConfig = loadOperatorConfig();
 
 // Run initial discovery (non-blocking, sync fs reads)
 const discoveredCount = pluginManager.discover();
-if (discoveredCount > 0) {
+if (discoveredCount > 0 && cli.verbose) {
   console.error(`[plugins] Discovered ${discoveredCount} plugin(s)`);
 }
 
@@ -799,7 +803,11 @@ let mcpManager: MCPClientManager | null = null;
           for (const [name, serverConfig] of mcpConfig.servers) {
             mcpManager.registerServer(name, serverConfig);
           }
-          console.error(`[mcp] ${mcpConfig.servers.size} server(s) configured`);
+          if (cli.verbose) {
+            console.error(
+              `[mcp] ${mcpConfig.servers.size} server(s) configured`,
+            );
+          }
         }
       }
     }
@@ -2119,8 +2127,14 @@ const executeJavascriptTool = defineTool("execute_javascript", {
           const outputPath = join(resultsDir, filename);
           writeFileSync(outputPath, fullResult, "utf-8");
           savedPath = `results/${filename}`;
+          const fileIdx = state.producedFiles.length + 1;
+          state.producedFiles.push({
+            index: fileIdx,
+            absPath: outputPath,
+            label: savedPath,
+          });
           console.error(
-            `  ${C.ok("📦")} Result (${(fullResultBytes / 1024).toFixed(1)} KB) → saved to ${savedPath}`,
+            `  ${C.ok("📦")} [${fileIdx}] Result (${(fullResultBytes / 1024).toFixed(1)} KB) → ${C.fileLink(outputPath, savedPath)}`,
           );
         } else {
           console.error(
@@ -2140,26 +2154,28 @@ const executeJavascriptTool = defineTool("execute_javascript", {
       };
 
       if (fullResult.length > MAX_LLM_RESULT_CHARS) {
-        // Display full result to user in the terminal
-        let displayText: string;
-        try {
-          const parsed = JSON.parse(fullResult);
-          displayText =
-            typeof parsed === "string"
-              ? parsed
-              : JSON.stringify(parsed, null, 2);
-        } catch {
-          displayText = fullResult;
-        }
-        console.error(`  ${C.ok("✅ Result:")}`);
-        if (
-          state.markdownEnabled &&
-          typeof displayText === "string" &&
-          looksLikeMarkdown(displayText)
-        ) {
-          console.error(renderMarkdown(displayText));
-        } else {
-          console.error(displayText);
+        // Display full result to user in verbose mode
+        if (state.verboseOutput) {
+          let displayText: string;
+          try {
+            const parsed = JSON.parse(fullResult);
+            displayText =
+              typeof parsed === "string"
+                ? parsed
+                : JSON.stringify(parsed, null, 2);
+          } catch {
+            displayText = fullResult;
+          }
+          console.error(`  ${C.ok("✅ Result:")}`);
+          if (
+            state.markdownEnabled &&
+            typeof displayText === "string" &&
+            looksLikeMarkdown(displayText)
+          ) {
+            console.error(renderMarkdown(displayText));
+          } else {
+            console.error(displayText);
+          }
         }
 
         // LLM gets first 50K chars + truncation guidance
@@ -2680,8 +2696,14 @@ const executeBashTool = defineTool("execute_bash", {
           const outputPath = join(resultsDir, filename);
           writeFileSync(outputPath, stdout, "utf-8");
           savedPath = `results/${filename}`;
+          const fileIdx = state.producedFiles.length + 1;
+          state.producedFiles.push({
+            index: fileIdx,
+            absPath: outputPath,
+            label: savedPath,
+          });
           console.error(
-            `  ${C.ok("📦")} stdout (${(fullResultBytes / 1024).toFixed(1)} KB) → saved to ${savedPath}`,
+            `  ${C.ok("📦")} [${fileIdx}] stdout (${(fullResultBytes / 1024).toFixed(1)} KB) → ${C.fileLink(outputPath, savedPath)}`,
           );
         } else {
           console.error(
@@ -2691,20 +2713,22 @@ const executeBashTool = defineTool("execute_bash", {
       }
 
       // ── Step 2: Display output to user ─────────────────────────
-      // Show full output for small results; preview for large ones
-      // to avoid flooding the terminal.
-      if (stdout) {
-        if (fullResultBytes > DISK_SAVE_THRESHOLD_BYTES) {
-          const previewLines = stdout.slice(0, 1024);
-          console.log(previewLines + (stdout.length > 1024 ? "\n..." : ""));
-        } else if (state.markdownEnabled && looksLikeMarkdown(stdout)) {
-          console.log(renderMarkdown(stdout));
-        } else {
-          console.log(stdout.endsWith("\n") ? stdout.slice(0, -1) : stdout);
+      // Show stdout/stderr in verbose mode; in non-verbose the LLM
+      // will summarise results for the user.
+      if (state.verboseOutput) {
+        if (stdout) {
+          if (fullResultBytes > DISK_SAVE_THRESHOLD_BYTES) {
+            const previewLines = stdout.slice(0, 1024);
+            console.log(previewLines + (stdout.length > 1024 ? "\n..." : ""));
+          } else if (state.markdownEnabled && looksLikeMarkdown(stdout)) {
+            console.log(renderMarkdown(stdout));
+          } else {
+            console.log(stdout.endsWith("\n") ? stdout.slice(0, -1) : stdout);
+          }
         }
-      }
-      if (stderr) {
-        console.error("  " + C.dim(stderr.trimEnd()));
+        if (stderr) {
+          console.error("  " + C.dim(stderr.trimEnd()));
+        }
       }
 
       // ── Step 3: Decide what the LLM sees ──────────────────────
@@ -2931,8 +2955,17 @@ async function configureSandboxImpl(params: {
     console.log(
       `\n  ${C.warn("🔧 Assistant wants to change sandbox configuration:")}`,
     );
-    for (const c of changes) {
-      console.log(`     ${c}`);
+    if (state.markdownEnabled) {
+      const rows = changes.map((c) => {
+        const [key, val] = c.split(" → ");
+        return `| ${key} | ${val} |`;
+      });
+      const table = `| Setting | Value |\n|---------|-------|\n${rows.join("\n")}`;
+      console.log(renderMarkdown(table));
+    } else {
+      for (const c of changes) {
+        console.log(`     ${c}`);
+      }
     }
 
     const willRebuild =
@@ -3064,21 +3097,6 @@ async function managePluginImpl(params: {
     console.log(
       `\n  ${C.warn("🔌 Assistant requests plugin:")} ${C.tool(params.name)}`,
     );
-    if (params.config) {
-      if (state.markdownEnabled) {
-        const rows = Object.entries(params.config).map(([k, v]) => {
-          const display = Array.isArray(v) ? `[${v.join(", ")}]` : String(v);
-          return `| ${k} | ${display} |`;
-        });
-        const table = `| Key | Value |\n|-----|-------|\n${rows.join("\n")}`;
-        console.log(renderMarkdown(table));
-      } else {
-        for (const [k, v] of Object.entries(params.config)) {
-          const display = Array.isArray(v) ? `[${v.join(", ")}]` : String(v);
-          console.log(`     ${k}: ${display}`);
-        }
-      }
-    }
     console.log(
       `  ${C.dim("This will run a security audit and prompt for configuration.")}`,
     );
@@ -3237,8 +3255,16 @@ const writeOutputTool = defineTool("write_output", {
 
     writeFileSync(targetPath, params.content, "utf-8");
 
+    // Track produced file for /files and /open commands
+    const fileIdx = state.producedFiles.length + 1;
+    state.producedFiles.push({
+      index: fileIdx,
+      absPath: targetPath,
+      label: params.path,
+    });
+
     console.error(
-      `  ${C.ok("📄")} Wrote ${params.content.length.toLocaleString()} chars → ${params.path}`,
+      `  ${C.ok("📄")} [${fileIdx}] Wrote ${params.content.length.toLocaleString()} chars → ${C.fileLink(targetPath, params.path)}`,
     );
 
     return wrapToolResult({
@@ -4586,7 +4612,9 @@ const manageMCPTool = defineTool("manage_mcp", {
         }
 
         // Connect and discover tools
-        console.error(`[mcp] Connecting to ${params.name}...`);
+        if (state.verboseOutput) {
+          console.error(`[mcp] Connecting to ${params.name}...`);
+        }
         const connected = await mcpManager!.connect(params.name);
 
         // Audit tool descriptions for prompt injection risks
@@ -5439,6 +5467,7 @@ function buildSessionConfig() {
     inputKb: buffers.inputKb,
     outputKb: buffers.outputKb,
     mcpConfigured: mcpManager !== null,
+    markdownEnabled: state.markdownEnabled,
   });
   const pluginAdditions = pluginManager.getSystemMessageAdditions();
 
@@ -5925,6 +5954,7 @@ async function processMessage(
 
   // Arm ESC-key cancellation so the user can bail at any time.
   enableAbortOnEsc(session, state, spinner, debugLog);
+  const fileCountBefore = state.producedFiles.length;
   try {
     const effectiveTimeout = state.sendTimeoutOverride ?? SEND_TIMEOUT_MS;
     const response = await sendAndWaitWithKeepAlive(
@@ -5938,18 +5968,49 @@ async function processMessage(
     // assistant.message content can be empty when the response
     // was delivered via message_delta events.
     const responseForSuggestions = content || state.streamedText;
+
+    // Resolve fs-write base dir for [[file:path]] link replacement
+    const fsWriteBase = getPluginBaseDir("fs-write");
+    // File tracker callback — registers files for /files and /open
+    // Deduplicates by absPath so the same file isn't listed twice
+    const trackFile = (absPath: string, label: string): number => {
+      const existing = state.producedFiles.find((f) => f.absPath === absPath);
+      if (existing) {
+        return existing.index;
+      }
+      const idx = state.producedFiles.length + 1;
+      state.producedFiles.push({ index: idx, absPath, label });
+      return idx;
+    };
+
     if (state.markdownEnabled && state.streamedText) {
       // Markdown mode: output was buffered (not streamed). Render now.
-      const rendered = renderMarkdown(state.streamedText);
+      let rendered = renderMarkdown(state.streamedText);
+      rendered = linkifyFiles(rendered, fsWriteBase, trackFile);
       console.log(rendered);
     } else if (!state.streamedContent && content) {
       // Non-streamed fallback (rare) — render through markdown if enabled
       if (state.markdownEnabled && looksLikeMarkdown(content)) {
-        console.log(renderMarkdown(content));
+        let rendered = renderMarkdown(content);
+        rendered = linkifyFiles(rendered, fsWriteBase, trackFile);
+        console.log(rendered);
       } else {
-        console.log(content);
+        console.log(linkifyFiles(content, fsWriteBase, trackFile));
       }
     }
+
+    // Show file footer if new files were produced during this turn
+    const newFiles = state.producedFiles.slice(fileCountBefore);
+    if (newFiles.length > 0) {
+      console.log();
+      console.log(`  ${ANSI.bold}📂 Files produced:${ANSI.reset}`);
+      for (const f of newFiles) {
+        console.log(
+          `    ${ANSI.cyan}[${f.index}]${ANSI.reset} ${f.label}  ${ANSI.dim}→ /open ${f.index}${ANSI.reset}`,
+        );
+      }
+    }
+
     console.log();
     return responseForSuggestions || undefined;
   } catch (err: unknown) {
@@ -6652,15 +6713,17 @@ async function main(): Promise<void> {
     if (transcript.active) {
       const paths = await transcript.stop();
       console.log("  📄 Transcript saved:");
-      console.log(`     ANSI log:  ${paths.logPath}`);
-      console.log(`     Clean text: ${paths.txtPath}`);
+      console.log(`     ANSI log:   ${C.fileLink(paths.logPath)}`);
+      console.log(`     Clean text: ${C.fileLink(paths.txtPath)}`);
       console.log();
     }
 
     // Close tune stream if active
     if (tuneStream) {
       tuneStream.end();
-      console.log(`  🎛️  Tune log saved: ${tuneLogPath}`);
+      console.log(
+        `  🎛️  Tune log saved: ${tuneLogPath ? C.fileLink(tuneLogPath) : "unknown"}`,
+      );
     }
 
     // Clean up: destroy the session and stop the CLI server
@@ -6703,8 +6766,10 @@ process.on("SIGINT", async () => {
   if (transcript.active) {
     const paths = transcript.stopSync();
     console.log("  📄 Transcript saved:");
-    if (paths.logPath) console.log(`     ANSI log:  ${paths.logPath}`);
-    if (paths.txtPath) console.log(`     Clean text: ${paths.txtPath}`);
+    if (paths.logPath)
+      console.log(`     ANSI log:   ${C.fileLink(paths.logPath)}`);
+    if (paths.txtPath)
+      console.log(`     Clean text: ${C.fileLink(paths.txtPath)}`);
     console.log();
   }
 

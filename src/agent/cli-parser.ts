@@ -104,7 +104,7 @@ Options:
   --show-timing          Log timing breakdown to ~/.hyperagent/logs/
   --show-reasoning [level] Set reasoning effort (low|medium|high|xhigh, default: high)
   --verbose              Verbose output mode (scrolling reasoning, turn details)
-  --markdown             Render LLM output as formatted markdown (disables streaming)
+  --no-markdown          Disable markdown rendering (use raw streaming instead)
   --transcript           Record session transcript to ~/.hyperagent/logs/
   --list-models          List available models and exit
   --resume [id]          Resume previous session (last if no ID given)
@@ -180,7 +180,7 @@ export function parseCliArgs(
     showTiming: false,
     showReasoning: process.env.HYPERAGENT_SHOW_REASONING || "",
     verbose: process.env.HYPERAGENT_VERBOSE === "1",
-    markdown: process.env.HYPERAGENT_MARKDOWN === "1",
+    markdown: process.env.HYPERAGENT_MARKDOWN !== "0",
     transcript: process.env.HYPERAGENT_TRANSCRIPT === "1",
     listModels: process.env.HYPERAGENT_LIST_MODELS === "1",
     resumeSession: process.env.HYPERAGENT_RESUME_SESSION || "",
@@ -264,6 +264,10 @@ export function parseCliArgs(
       }
       case "--verbose":
         config.verbose = true;
+        break;
+      case "--no-markdown":
+      case "--no-md":
+        config.markdown = false;
         break;
       case "--markdown":
       case "--md":

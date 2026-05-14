@@ -1,7 +1,7 @@
 // ── Terminal Markdown Renderer ────────────────────────────────────────
 //
 // Renders markdown text as ANSI-formatted terminal output using
-// marked + marked-terminal. Used when --markdown mode is enabled
+// marked + marked-terminal. Used when markdown mode is enabled (default)
 // to make LLM output readable instead of raw markdown syntax.
 //
 // Usage:
@@ -10,6 +10,7 @@
 
 import { marked, type MarkedOptions } from "marked";
 import TerminalRenderer from "marked-terminal";
+import { resolve } from "node:path";
 
 // Configure marked with the terminal renderer once at import time.
 // marked-terminal handles: headings, bold/italic, code blocks with
@@ -62,4 +63,43 @@ export function looksLikeMarkdown(text: string): boolean {
     /^\s*\d+\.\s/m.test(text) || // ordered lists
     /\|.*\|.*\|/m.test(text) // tables
   );
+}
+
+// ── File Link Post-Processor ─────────────────────────────────────────
+//
+// Converts [[file:path]] markers in LLM output into clickable OSC 8
+// terminal hyperlinks. The LLM is instructed (via system message) to
+// use this format when summarising produced files.
+
+/** Regex to match [[file:path]] markers in LLM output. */
+const FILE_LINK_RE = /\[\[file:([^\]]+)\]\]/g;
+
+/** Callback to register a produced file and get its reference number. */
+export type FileTracker = (absPath: string, label: string) => number;
+
+/**
+ * Replace [[file:path]] markers with numbered references and absolute
+ * paths. Registers each file via the tracker callback for later
+ * retrieval via `/files` and `/open` commands.
+ *
+ * @param text - Rendered text (post-markdown or raw)
+ * @param baseDir - Absolute path to the fs-write base directory
+ * @param trackFile - Callback to register file and get its index
+ * @returns Text with [[file:]] markers replaced
+ */
+export function linkifyFiles(
+  text: string,
+  baseDir: string | null,
+  trackFile?: FileTracker,
+): string {
+  if (!baseDir) return text.replaceAll(FILE_LINK_RE, "$1");
+  return text.replaceAll(FILE_LINK_RE, (_match, relPath: string) => {
+    const trimmed = relPath.trim();
+    const absPath = resolve(baseDir, trimmed);
+    if (trackFile) {
+      const idx = trackFile(absPath, trimmed);
+      return `${absPath} [${idx}]`;
+    }
+    return absPath;
+  });
 }

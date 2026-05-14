@@ -125,7 +125,7 @@ const COMMANDS: readonly CommandEntry[] = Object.freeze([
       "  • Raw text streamed in real-time (faster perceived response)\n" +
       "  • Markdown syntax shown as-is (# headings, **bold**, ```code```)\n" +
       "\n" +
-      "Also: --markdown CLI flag or HYPERAGENT_MARKDOWN=1.",
+      "Enabled by default. Disable: --no-markdown or HYPERAGENT_MARKDOWN=0.",
   },
 
   // ── Timeouts & Buffers ───────────────────────────────────
@@ -258,6 +258,23 @@ const COMMANDS: readonly CommandEntry[] = Object.freeze([
       "Omit the id to resume the most recent hyperagent session.\n" +
       "Pass a full or partial session ID (prefix optional).\n" +
       "Example: /resume abc123",
+  },
+  {
+    completion: "/files",
+    help: "List all files produced in this session",
+    detail:
+      "Shows numbered references for all files created during\n" +
+      "this session (via write_output, handlers, or auto-save).\n" +
+      "Use /open <n> to open a file by its number.",
+  },
+  {
+    completion: "/open",
+    help: "Open a produced file by number (/open <n>)",
+    detail:
+      "Opens a file from the /files list using the system default\n" +
+      "application. Works on WSL (converts to Windows path),\n" +
+      "macOS (open), and Linux (xdg-open).\n" +
+      "Example: /open 1",
   },
   {
     completion: "/history",

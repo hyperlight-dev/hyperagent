@@ -21,6 +21,8 @@ export interface SystemMessageParams {
   outputKb: number;
   /** Whether MCP servers are configured (controls MCP hint in prompt). */
   mcpConfigured?: boolean;
+  /** Whether markdown rendering is enabled. */
+  markdownEnabled?: boolean;
 }
 
 /** Bytes per kilobyte — used for buffer size calculations. */
@@ -178,7 +180,8 @@ RESOURCE LIMITS (call configure_sandbox to increase if you hit them):
   Heap: \${HEAP_MB}MB | Scratch: \${SCRATCH_MB}MB
   Input: \${INPUT_KB}KB | Output: \${OUTPUT_KB}KB
 
-OUTPUT: Plain terminal — no markdown rendering. Tool results auto-display — don't repeat them.`;
+OUTPUT: \${OUTPUT_MODE} Tool results auto-display — don't repeat them.
+\${FILE_LINK_INSTRUCTION}`;
 
 /**
  * Build the system message with current effective resource limits.
@@ -219,5 +222,23 @@ export function buildSystemMessage(params: SystemMessageParams): string {
     .replace("${INPUT_BYTES}", String(inputBytes))
     .replace("${OUTPUT_KB}", String(params.outputKb))
     .replace("${OUTPUT_BYTES}", String(outputBytes))
-    .replace("${MCP_SECTION}", mcpSection);
+    .replace("${MCP_SECTION}", mcpSection)
+    .replace(
+      "${OUTPUT_MODE}",
+      params.markdownEnabled
+        ? "Markdown rendering is enabled — format responses with headings, lists, tables, and code blocks."
+        : "Plain terminal — no markdown rendering.",
+    )
+    .replace(
+      "${FILE_LINK_INSTRUCTION}",
+      params.markdownEnabled
+        ? [
+            "FILE REFERENCES: When summarising produced files, use [[file:path]] markers",
+            "so the terminal can make them clickable. Example:",
+            "  Created [[file:report.md]] and [[file:charts/sales.pdf]]",
+            "Use the EXACT relative path passed to write_output or returned by the handler.",
+            "Always list produced files at the end of your response using this format.",
+          ].join("\n")
+        : "",
+    );
 }

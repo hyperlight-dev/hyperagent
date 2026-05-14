@@ -116,6 +116,12 @@ export interface AgentState {
   /** Flag: session needs rebuild (buffer sizes changed, model switch). */
   sessionNeedsRebuild: boolean;
 
+  /**
+   * Files produced during this session, tracked for `/files` listing
+   * and `/open <n>` command. Each entry has a 1-based index.
+   */
+  producedFiles: Array<{ index: number; absPath: string; label: string }>;
+
   /** The Copilot client — spawns the CLI server process. */
   copilotClient: CopilotClient | null;
 
@@ -304,11 +310,12 @@ export function createAgentState(
     scratchOverride: null,
     reasoningEffort: null,
     verboseOutput: cli.verbose,
-    markdownEnabled: cli.markdown ?? false,
+    markdownEnabled: cli.markdown ?? true,
     auditReasoningEffort: null,
 
     // Session management
     sessionNeedsRebuild: false,
+    producedFiles: [],
     copilotClient: null,
     activeSession: null,
     cachedModels: null,

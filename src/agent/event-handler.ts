@@ -290,20 +290,13 @@ export function registerEventHandler(
       }
 
       case "tool.execution_start": {
-        // Tool is executing — swap the label to show which tool
+        // Tool is executing — show which tool the LLM picked
         const toolName = event.data?.toolName ?? "unknown";
         const callId = event.data?.toolCallId;
         if (callId) pendingTools.set(callId, toolName);
 
-        if (toolName === "execute_javascript") {
-          // Our sandbox tool — stop spinner, show explicit line
-          spinner.stop();
-          console.log(`\n  ${C.tool("🔧 Running code...")}`);
-        } else {
-          // SDK protocol tool — restart spinner with tool label.
-          // start() not updateLabel() — spinner may be stopped.
-          spinner.start(`Running ${toolName}...`);
-        }
+        spinner.stop();
+        console.log(`\n  ${C.tool(`🔧 ${toolName}`)}`);
         break;
       }
 
@@ -315,7 +308,9 @@ export function registerEventHandler(
         if (callId) pendingTools.delete(callId);
 
         // Skip noisy protocol tools in non-debug mode
-        if (toolName !== "execute_javascript") {
+        const isSandboxTool =
+          toolName === "execute_javascript" || toolName === "execute_bash";
+        if (!isSandboxTool) {
           if (state.debugEnabled) {
             const status = event.data?.success ? "✅" : "❌";
             debugLog(`${status} ${toolName} complete`);
@@ -323,90 +318,101 @@ export function registerEventHandler(
           break;
         }
 
-        // Show result summary for our sandbox tool
+        // Show result summary for our sandbox tools
         if (event.data?.success) {
-          const content = event.data?.result?.content ?? "";
-          let parsed;
-          try {
-            parsed = JSON.parse(content);
-          } catch {
-            // Not JSON — show raw
-          }
-
-          if (parsed?.error) {
-            // If _userDisplayed is set, the tool handler already
-            // printed the clean error — don't re-display it.
-            if (!parsed._userDisplayed) {
-              console.log(`  ${C.err("❌ " + parsed.error)}`);
-              suggestBufferIncreaseIfNeeded(parsed.error);
-            }
+          // In non-verbose mode, skip the result display —
+          // the LLM will summarise results for the user anyway.
+          if (!state.verboseOutput) {
+            // Brief confirmation so the user knows something happened
+            console.log(`  ${C.ok("✅ Done")}`);
           } else {
-            const resultValue = parsed?.result;
+            const content = event.data?.result?.content ?? "";
+            let parsed;
+            try {
+              parsed = JSON.parse(content);
+            } catch {
+              // Not JSON — show raw
+            }
 
-            // If the tool handler already displayed the full
-            // result (large output), skip re-display here.
-            const wasTruncated =
-              typeof resultValue === "string" &&
-              resultValue.endsWith("[TRUNCATED_FOR_LLM]");
-            if (wasTruncated) {
-              // Already displayed by the tool handler — nothing to do.
-            } else if (resultValue !== undefined) {
-              let displayValue;
-              try {
-                displayValue = JSON.parse(resultValue);
-              } catch {
-                displayValue = resultValue;
-              }
-
-              if (typeof displayValue === "string") {
-                if (displayValue.includes("\n")) {
-                  console.log(`  ${C.ok("✅ Result:")}`);
-                  // Render markdown if enabled and text has markdown patterns;
-                  // otherwise dim the raw text for visual separation.
-                  if (
-                    state.markdownEnabled &&
-                    looksLikeMarkdown(displayValue)
-                  ) {
-                    console.log(renderMarkdown(displayValue));
-                  } else {
-                    console.log(C.dim(displayValue));
-                  }
-                } else {
-                  console.log(`  ${C.ok("✅ Result:")} ${displayValue}`);
-                }
-              } else if (
-                displayValue !== null &&
-                typeof displayValue === "object"
-              ) {
-                const pretty = JSON.stringify(displayValue, null, 2);
-                if (pretty.length > 500) {
-                  console.log(`  ${C.ok("✅ Result:")}`);
-                  // Wrap large JSON in a code block for markdown rendering
-                  if (state.markdownEnabled) {
-                    console.log(renderMarkdown("```json\n" + pretty + "\n```"));
-                  } else {
-                    console.log(C.dim(pretty));
-                  }
-                } else {
-                  console.log(`  ${C.ok("✅ Result:")} ${C.dim(pretty)}`);
-                }
-              } else {
-                console.log(`  ${C.ok("✅ Result:")} ${String(displayValue)}`);
-              }
-            } else if (content) {
-              const preview =
-                content.length > 300 ? content.slice(0, 300) + "…" : content;
-              // Render raw content preview through markdown if enabled
-              if (state.markdownEnabled && looksLikeMarkdown(preview)) {
-                console.log(`  ${C.ok("✅ Result:")}`);
-                console.log(renderMarkdown(preview));
-              } else {
-                console.log(`  ${C.ok("✅ Result:")} ${C.dim(preview)}`);
+            if (parsed?.error) {
+              // If _userDisplayed is set, the tool handler already
+              // printed the clean error — don't re-display it.
+              if (!parsed._userDisplayed) {
+                console.log(`  ${C.err("❌ " + parsed.error)}`);
+                suggestBufferIncreaseIfNeeded(parsed.error);
               }
             } else {
-              console.log(`  ${C.ok("✅ Tool complete")}`);
+              const resultValue = parsed?.result;
+
+              // If the tool handler already displayed the full
+              // result (large output), skip re-display here.
+              const wasTruncated =
+                typeof resultValue === "string" &&
+                resultValue.endsWith("[TRUNCATED_FOR_LLM]");
+              if (wasTruncated) {
+                // Already displayed by the tool handler — nothing to do.
+              } else if (resultValue !== undefined) {
+                let displayValue;
+                try {
+                  displayValue = JSON.parse(resultValue);
+                } catch {
+                  displayValue = resultValue;
+                }
+
+                if (typeof displayValue === "string") {
+                  if (displayValue.includes("\n")) {
+                    console.log(`  ${C.ok("✅ Result:")}`);
+                    // Render markdown if enabled and text has markdown patterns;
+                    // otherwise dim the raw text for visual separation.
+                    if (
+                      state.markdownEnabled &&
+                      looksLikeMarkdown(displayValue)
+                    ) {
+                      console.log(renderMarkdown(displayValue));
+                    } else {
+                      console.log(C.dim(displayValue));
+                    }
+                  } else {
+                    console.log(`  ${C.ok("✅ Result:")} ${displayValue}`);
+                  }
+                } else if (
+                  displayValue !== null &&
+                  typeof displayValue === "object"
+                ) {
+                  const pretty = JSON.stringify(displayValue, null, 2);
+                  if (pretty.length > 500) {
+                    console.log(`  ${C.ok("✅ Result:")}`);
+                    // Wrap large JSON in a code block for markdown rendering
+                    if (state.markdownEnabled) {
+                      console.log(
+                        renderMarkdown("```json\n" + pretty + "\n```"),
+                      );
+                    } else {
+                      console.log(C.dim(pretty));
+                    }
+                  } else {
+                    console.log(`  ${C.ok("✅ Result:")} ${C.dim(pretty)}`);
+                  }
+                } else {
+                  console.log(
+                    `  ${C.ok("✅ Result:")} ${String(displayValue)}`,
+                  );
+                }
+              } else if (content) {
+                const preview =
+                  content.length > 300 ? content.slice(0, 300) + "…" : content;
+                // Render raw content preview through markdown if enabled
+                if (state.markdownEnabled && looksLikeMarkdown(preview)) {
+                  console.log(`  ${C.ok("✅ Result:")}`);
+                  console.log(renderMarkdown(preview));
+                } else {
+                  console.log(`  ${C.ok("✅ Result:")} ${C.dim(preview)}`);
+                }
+              } else {
+                console.log(`  ${C.ok("✅ Tool complete")}`);
+              }
             }
-          }
+          } // end verbose gate
         } else {
           // Check if the tool handler already displayed the error to the user
           // (indicated by _userDisplayed flag in the result content). If so,

@@ -858,6 +858,70 @@ export async function handleSlashCommand(
       return true;
     }
 
+    case "/files": {
+      // List all files produced during this session
+      if (state.producedFiles.length === 0) {
+        console.log(`  ${C.dim("No files produced yet in this session.")}`);
+      } else {
+        console.log(`  ${C.label("📂 Files produced this session:")}`);
+        for (const f of state.producedFiles) {
+          console.log(
+            `    ${C.val(`[${f.index}]`)} ${f.absPath} ${C.dim(`(${f.label})`)}`,
+          );
+        }
+        console.log(
+          `\n  ${C.dim("Use /open <n> to open a file, e.g. /open 1")}`,
+        );
+      }
+      console.log();
+      return true;
+    }
+
+    case "/open": {
+      // Open a produced file by its reference number
+      const fileNum = parseInt(parts[1] ?? "", 10);
+      if (!parts[1] || !Number.isFinite(fileNum) || fileNum < 1) {
+        console.log(
+          `  ${C.err("Usage: /open <n>")} — open a produced file by number.`,
+        );
+        console.log(`  ${C.dim("Run /files to see available files.")}`);
+        console.log();
+        return true;
+      }
+      const file = state.producedFiles.find((f) => f.index === fileNum);
+      if (!file) {
+        console.log(
+          `  ${C.err(`File [${fileNum}] not found.`)} Run /files to see available files.`,
+        );
+        console.log();
+        return true;
+      }
+      // Use xdg-open on Linux, open on macOS, cmd.exe /c start on WSL
+      const { execSync } = await import("child_process");
+      try {
+        // Detect WSL — convert to Windows path and use cmd.exe /c start
+        const isWSL = existsSync("/proc/sys/fs/binfmt_misc/WSLInterop");
+        if (isWSL) {
+          const winPath = execSync(`wslpath -w "${file.absPath}"`, {
+            encoding: "utf-8",
+          }).trim();
+          execSync(`cmd.exe /c start '' '${winPath}'`, { stdio: "ignore" });
+        } else if (process.platform === "darwin") {
+          execSync(`open "${file.absPath}"`, { stdio: "ignore" });
+        } else {
+          execSync(`xdg-open "${file.absPath}"`, { stdio: "ignore" });
+        }
+        console.log(`  ${C.ok("✅")} Opened [${fileNum}] ${file.label}`);
+      } catch (err) {
+        console.log(
+          `  ${C.err("❌")} Failed to open: ${(err as Error).message}`,
+        );
+        console.log(`  ${C.dim("Path:")} ${file.absPath}`);
+      }
+      console.log();
+      return true;
+    }
+
     case "/history": {
       // Display recent conversation messages from the active session.
       // Uses the SDK's session.getMessages() to retrieve the full
@@ -1218,12 +1282,24 @@ export async function handleSlashCommand(
             pluginManager.markSandboxDirty();
 
             console.log(`  🔄 "${pluginName}" reconfigured:`);
-            for (const key of applied) {
-              const val = targetPlugin.config[key];
-              const display = Array.isArray(val)
-                ? `[${(val as string[]).join(", ")}]`
-                : String(val);
-              console.log(`     ${key} = ${display}`);
+            if (state.markdownEnabled) {
+              const rows = applied.map((key) => {
+                const val = targetPlugin.config[key];
+                const display = Array.isArray(val)
+                  ? `[${(val as string[]).join(", ")}]`
+                  : String(val);
+                return `| ${key} | ${display} |`;
+              });
+              const table = `| Key | Value |\n|-----|-------|\n${rows.join("\n")}`;
+              console.log(renderMarkdown(table));
+            } else {
+              for (const key of applied) {
+                const val = targetPlugin.config[key];
+                const display = Array.isArray(val)
+                  ? `[${(val as string[]).join(", ")}]`
+                  : String(val);
+                console.log(`     ${key} = ${display}`);
+              }
             }
             console.log("     Changes take effect on the next message.");
             console.log();
