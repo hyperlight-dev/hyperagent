@@ -18,6 +18,7 @@ import { renderHelp, renderTopicHelp } from "./commands.js";
 import { deepAudit, formatAuditResult } from "../plugin-system/auditor.js";
 import { makeAuditProgressCallback } from "./audit-progress.js";
 import { createAuditAbortHandler } from "./abort-controller.js";
+import { renderMarkdown } from "./markdown-renderer.js";
 import { closestMatch } from "./fuzzy-match.js";
 import type { createSandboxTool } from "../sandbox/tool.js";
 import type { createPluginManager } from "../plugin-system/manager.js";
@@ -55,6 +56,22 @@ function makeSessionId(): string {
   return `${SESSION_ID_PREFIX}${randomUUID()}`;
 }
 const operatorConfig = loadOperatorConfig();
+
+/**
+ * Convert formatConfigSummary lines into a markdown table.
+ * Lines have format "  key: value" or "  key: value (default)".
+ */
+function formatConfigTable(lines: string[]): string {
+  const rows = lines.map((line) => {
+    const trimmed = line.trim();
+    const colonIdx = trimmed.indexOf(":");
+    if (colonIdx === -1) return `| ${trimmed} | |`;
+    const key = trimmed.slice(0, colonIdx).trim();
+    const value = trimmed.slice(colonIdx + 1).trim();
+    return `| ${key} | ${value} |`;
+  });
+  return `| Key | Value |\n|-----|-------|\n${rows.join("\n")}`;
+}
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -754,54 +771,49 @@ export async function handleSlashCommand(
       const sendMs = state.sendTimeoutOverride ?? SEND_TIMEOUT_MS;
       const buffers = sandbox.getEffectiveBufferSizes();
       const ovr = C.warn(" (override)");
-      console.log(`  ${C.label("⚙️  Configuration:")}`);
-      console.log(`     Model:         ${C.val(state.currentModel)}`);
-      console.log(
-        `     CPU timeout:   ${C.val(cpuMs + "ms")}${state.cpuTimeoutOverride !== null ? ovr : ""}`,
-      );
-      console.log(
-        `     Wall timeout:  ${C.val(wallMs + "ms")}${state.wallTimeoutOverride !== null ? ovr : ""}`,
-      );
-      console.log(
-        `     Send timeout:  ${C.val(sendMs + "ms")}${state.sendTimeoutOverride !== null ? ovr : ""}`,
-      );
-      console.log(
-        `     Heap:          ${C.val(sandbox.getEffectiveMemorySizes().heapMb + "MB")}${state.heapOverride !== null ? ovr : ""}`,
-      );
-      console.log(
-        `     Scratch:        ${C.val(sandbox.getEffectiveMemorySizes().scratchMb + "MB")}${state.scratchOverride !== null ? ovr : ""}`,
-      );
-      console.log(
-        `     Input buffer:  ${C.val(buffers.inputKb + "KB")}${state.inputBufferOverride !== null ? ovr : ""}`,
-      );
-      console.log(
-        `     Output buffer: ${C.val(buffers.outputKb + "KB")}${state.outputBufferOverride !== null ? ovr : ""}`,
-      );
-      console.log(
-        `     Transcript:    ${transcript.active ? `${C.ok("ON")} → ${C.val(transcript.rawPath ?? "")}` : C.err("OFF")}`,
-      );
-      console.log(`     Show code:     ${C.onOff(state.showCodeEnabled)}`);
-      console.log(`     Show timing:   ${C.onOff(state.showTimingEnabled)}`);
-      console.log(`     Debug:         ${C.onOff(state.debugEnabled)}`);
-      console.log(`     Verbose:       ${C.onOff(state.verboseOutput)}`);
-      console.log(
-        `     Reasoning:     conversation: ${
-          state.reasoningEffort
-            ? C.val(state.reasoningEffort)
-            : C.dim("model default")
-        } · audit: ${
-          state.auditReasoningEffort
-            ? C.val(state.auditReasoningEffort)
-            : C.dim("medium")
-        }`,
-      );
+      // Build config rows for both plain and markdown display
+      const mem = sandbox.getEffectiveMemorySizes();
+      const ovrTag = " ⚠ override";
+      type CfgRow = [label: string, value: string, override: boolean];
+      const cfgRows: CfgRow[] = [
+        ["Model", state.currentModel, false],
+        ["CPU timeout", cpuMs + "ms", state.cpuTimeoutOverride !== null],
+        ["Wall timeout", wallMs + "ms", state.wallTimeoutOverride !== null],
+        ["Send timeout", sendMs + "ms", state.sendTimeoutOverride !== null],
+        ["Heap", mem.heapMb + "MB", state.heapOverride !== null],
+        ["Scratch", mem.scratchMb + "MB", state.scratchOverride !== null],
+        [
+          "Input buffer",
+          buffers.inputKb + "KB",
+          state.inputBufferOverride !== null,
+        ],
+        [
+          "Output buffer",
+          buffers.outputKb + "KB",
+          state.outputBufferOverride !== null,
+        ],
+        [
+          "Transcript",
+          transcript.active ? `ON → ${transcript.rawPath ?? ""}` : "OFF",
+          false,
+        ],
+        ["Show code", state.showCodeEnabled ? "ON" : "OFF", false],
+        ["Show timing", state.showTimingEnabled ? "ON" : "OFF", false],
+        ["Debug", state.debugEnabled ? "ON" : "OFF", false],
+        ["Verbose", state.verboseOutput ? "ON" : "OFF", false],
+        [
+          "Reasoning",
+          `conversation: ${
+            state.reasoningEffort ?? "model default"
+          } · audit: ${state.auditReasoningEffort ?? "medium"}`,
+          false,
+        ],
+      ];
       if (sandbox.config.timingLogPath) {
-        console.log(
-          `     Timing log:   ${C.val(sandbox.config.timingLogPath)}`,
-        );
+        cfgRows.push(["Timing log", sandbox.config.timingLogPath, false]);
       }
       if (sandbox.config.codeLogPath) {
-        console.log(`     Code log:     ${C.val(sandbox.config.codeLogPath)}`);
+        cfgRows.push(["Code log", sandbox.config.codeLogPath, false]);
       }
       // Plugin summary
       const enabledPlugins = pluginManager.getEnabledPlugins();
@@ -809,17 +821,35 @@ export async function handleSlashCommand(
       if (allPlugins.length > 0) {
         const audited = allPlugins.filter((p) => p.audit !== null).length;
         const approved = allPlugins.filter((p) => p.approved).length;
-        console.log(
-          `     Plugins:      ${C.ok(enabledPlugins.length + "/" + allPlugins.length)} enabled, ${audited} audited, ${approved} approved`,
-        );
+        cfgRows.push([
+          "Plugins",
+          `${enabledPlugins.length}/${allPlugins.length} enabled, ${audited} audited, ${approved} approved`,
+          false,
+        ]);
+      } else {
+        cfgRows.push(["Plugins", "none discovered", false]);
+      }
+
+      if (state.markdownEnabled) {
+        const mdRows = cfgRows
+          .map(([k, v, isOvr]) => `| ${k} | ${v}${isOvr ? ovrTag : ""} |`)
+          .join("\n");
+        const table = `| Setting | Value |\n|---------|-------|\n${mdRows}`;
+        console.log(`  **⚙️  Configuration:**`);
+        console.log(renderMarkdown(table));
+      } else {
+        console.log(`  ${C.label("⚙️  Configuration:")}`);
+        for (const [label, value, isOvr] of cfgRows) {
+          const ovrSuffix = isOvr ? ovr : "";
+          console.log(`     ${label.padEnd(15)} ${C.val(value)}${ovrSuffix}`);
+        }
+        // Show enabled plugin details in plain mode
         for (const p of enabledPlugins) {
           const risk = p.audit?.riskLevel ?? "?";
           console.log(
             `       ${C.ok("✅")} ${C.tool(p.manifest.name)} v${p.manifest.version} ${C.dim("[" + risk + "]")}`,
           );
         }
-      } else {
-        console.log(`     ${C.dim("Plugins:      none discovered")}`);
       }
       console.log(
         `     Risk policy:  ${C.val("max " + operatorConfig.maxRiskLevel)} ${C.dim("(via ~/.hyperagent/config.json)")}`,
@@ -1291,8 +1321,13 @@ export async function handleSlashCommand(
             const configSummary = pluginManager.formatConfigSummary(pluginName);
             if (configSummary.length > 0) {
               console.log(`\n  📋 Final configuration for "${pluginName}":`);
-              for (const line of configSummary) {
-                console.log(`    ${line}`);
+              if (state.markdownEnabled) {
+                const table = formatConfigTable(configSummary);
+                console.log(renderMarkdown(table));
+              } else {
+                for (const line of configSummary) {
+                  console.log(`    ${line}`);
+                }
               }
 
               await drainAndWarn(rl);
@@ -1613,8 +1648,13 @@ export async function handleSlashCommand(
           const configSummary = pluginManager.formatConfigSummary(pluginName);
           if (configSummary.length > 0) {
             console.log(`\n  📋 Final configuration for "${pluginName}":`);
-            for (const line of configSummary) {
-              console.log(`    ${line}`);
+            if (state.markdownEnabled) {
+              const table = formatConfigTable(configSummary);
+              console.log(renderMarkdown(table));
+            } else {
+              for (const line of configSummary) {
+                console.log(`    ${line}`);
+              }
             }
 
             await drainAndWarn(rl);

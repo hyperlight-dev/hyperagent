@@ -381,7 +381,12 @@ export function registerEventHandler(
                 const pretty = JSON.stringify(displayValue, null, 2);
                 if (pretty.length > 500) {
                   console.log(`  ${C.ok("✅ Result:")}`);
-                  console.log(C.dim(pretty));
+                  // Wrap large JSON in a code block for markdown rendering
+                  if (state.markdownEnabled) {
+                    console.log(renderMarkdown("```json\n" + pretty + "\n```"));
+                  } else {
+                    console.log(C.dim(pretty));
+                  }
                 } else {
                   console.log(`  ${C.ok("✅ Result:")} ${C.dim(pretty)}`);
                 }
@@ -391,7 +396,13 @@ export function registerEventHandler(
             } else if (content) {
               const preview =
                 content.length > 300 ? content.slice(0, 300) + "…" : content;
-              console.log(`  ${C.ok("✅ Result:")} ${C.dim(preview)}`);
+              // Render raw content preview through markdown if enabled
+              if (state.markdownEnabled && looksLikeMarkdown(preview)) {
+                console.log(`  ${C.ok("✅ Result:")}`);
+                console.log(renderMarkdown(preview));
+              } else {
+                console.log(`  ${C.ok("✅ Result:")} ${C.dim(preview)}`);
+              }
             } else {
               console.log(`  ${C.ok("✅ Tool complete")}`);
             }

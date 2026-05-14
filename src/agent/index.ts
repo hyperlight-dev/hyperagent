@@ -1122,6 +1122,67 @@ async function handleSlashCommand(
  *     with the CLI server. Raw JSON Schema bypasses this entirely.
  */
 
+// ── Large output constants ───────────────────────────────────────────
+//
+// Two independent thresholds for managing tool output size:
+//
+//   DISK_SAVE_THRESHOLD — save full output to results/ as a backup
+//     for later processing via bash or handlers. The LLM still gets
+//     up to MAX_LLM_RESULT_CHARS of the actual data.
+//
+//   MAX_LLM_RESULT_CHARS — cap on how many characters go to the LLM
+//     in textResultForLlm. ~50K chars ≈ 12K tokens, well within
+//     model context limits and enough for multi-handler orchestration.
+//
+// The disk threshold fires first (saves to disk), then the char
+// threshold decides how much the LLM actually sees. They are
+// independent — saving to disk does NOT starve the LLM.
+
+/** Byte threshold for persisting full output to results/ directory. */
+const DISK_SAVE_THRESHOLD_BYTES = parseInt(
+  process.env.HYPERAGENT_OUTPUT_THRESHOLD_BYTES || "20480",
+  10,
+);
+
+/** Max characters of result data sent to the LLM in textResultForLlm. */
+const MAX_LLM_RESULT_CHARS = 50_000;
+
+/** Marker appended when result is truncated for the LLM. */
+const TRUNCATION_MARKER = "\n[TRUNCATED_FOR_LLM]";
+
+// ── Tool result wrapper ──────────────────────────────────────────────
+
+/**
+ * Wrap a tool handler return value as a proper SDK ToolResultObject.
+ *
+ * Sets `textResultForLlm` to control exactly what the LLM sees, and
+ * `skipLargeOutputProcessing: true` to prevent the SDK's own VB()
+ * function from writing large results to /tmp (inaccessible from
+ * the Hyperlight sandbox).
+ *
+ * Internal fields like _resourceStats and _stats are excluded from
+ * textResultForLlm — they're only needed for terminal display and
+ * waste LLM tokens.
+ *
+ * @param llmFields - Object with fields the LLM should see (result,
+ *   error, consoleOutput, statePreserved, etc.). Will be JSON-stringified.
+ * @param resultType - "success" or "failure" (default: "success")
+ */
+function wrapToolResult(
+  llmFields: Record<string, unknown>,
+  resultType: "success" | "failure" = "success",
+): {
+  textResultForLlm: string;
+  resultType: "success" | "failure";
+  skipLargeOutputProcessing: true;
+} {
+  return {
+    textResultForLlm: JSON.stringify(llmFields),
+    resultType,
+    skipLargeOutputProcessing: true,
+  };
+}
+
 // ── Validation Token Store ────────────────────────────────────────────
 
 /**
@@ -2038,34 +2099,18 @@ const executeJavascriptTool = defineTool("execute_javascript", {
       );
     }
 
-    const resourceStats = timing
-      ? {
-          executeMs: timing.executeMs,
-          totalMs: timing.totalMs,
-          cpuLimitMs: effectiveCpuLimit,
-          wallLimitMs: effectiveWallLimit,
-          cpuUtilisation: `${Math.round((timing.executeMs / effectiveCpuLimit) * 100)}%`,
-          wallUtilisation: `${Math.round((timing.totalMs / effectiveWallLimit) * 100)}%`,
-        }
-      : undefined;
-
     if (success) {
       const fullResult = JSON.stringify(result, null, 2);
       const fullResultBytes = Buffer.byteLength(fullResult, "utf-8");
 
-      // ── Large output interception ──────────────────────────────
-      // If the result exceeds the configured threshold, save to disk
-      // and return a summary with read_output instructions.
-      // This fires BEFORE the SDK's own VB() truncation because we
-      // return a small replacement result.
-      const outputThreshold = parseInt(
-        process.env.HYPERAGENT_OUTPUT_THRESHOLD_BYTES || "20480",
-        10,
-      );
-      if (fullResultBytes > outputThreshold) {
+      // ── Step 1: Persist large output to disk ───────────────────
+      // Save full result to results/ as a backup for later processing.
+      // This is independent of what we send to the LLM — saving to
+      // disk does NOT starve the LLM of data.
+      let savedPath: string | undefined;
+      if (fullResultBytes > DISK_SAVE_THRESHOLD_BYTES) {
         const fsWriteBaseDir = getPluginBaseDir("fs-write");
         if (fsWriteBaseDir) {
-          // Save full result to results/ subdirectory
           const resultsDir = resolve(fsWriteBaseDir, "results");
           if (!existsSync(resultsDir)) {
             mkdirSync(resultsDir, { recursive: true });
@@ -2073,58 +2118,29 @@ const executeJavascriptTool = defineTool("execute_javascript", {
           const filename = `${handlerName}-${Date.now()}.txt`;
           const outputPath = join(resultsDir, filename);
           writeFileSync(outputPath, fullResult, "utf-8");
-          const relativePath = `results/${filename}`;
-
+          savedPath = `results/${filename}`;
           console.error(
-            `  ${C.ok("📦")} Result too large (${(fullResultBytes / 1024).toFixed(1)} KB) → saved to ${relativePath}`,
+            `  ${C.ok("📦")} Result (${(fullResultBytes / 1024).toFixed(1)} KB) → saved to ${savedPath}`,
           );
-
-          const preview = fullResult.slice(0, 500);
-          return {
-            result:
-              `Result saved to ${relativePath} (${(fullResultBytes / 1024).toFixed(1)} KB).\n` +
-              `Preview (first 500 chars):\n${preview}\n\n` +
-              `IMPORTANT: Read the full output by writing a handler that reads "${relativePath}" via host:fs-read,\n` +
-              `or use execute_bash to process it (e.g. cat, grep, jq, head, wc).\n` +
-              `Process the data in handler code or bash — do NOT summarize or propose changes based only on the preview.\n` +
-              `Only use read_output("${relativePath}") directly if you need a quick look at a specific section;\n` +
-              `read_output("${relativePath}", startLine, endLine) supports line ranges.`,
-            ...(consoleOutput?.length ? { consoleOutput } : {}),
-            _resourceStats: resourceStats,
-            _stats: stats ?? undefined,
-            _statePreserved: statePreserved,
-          };
         } else {
-          // fs-write not enabled — return truncated preview with guidance
           console.error(
-            `  ${C.warn("⚠️")} Result too large (${(fullResultBytes / 1024).toFixed(1)} KB) and fs-write not enabled`,
+            `  ${C.warn("⚠️")} Result large (${(fullResultBytes / 1024).toFixed(1)} KB) but fs-write not enabled — cannot save to disk`,
           );
-
-          const preview = fullResult.slice(0, 2048);
-          return {
-            result:
-              `Result truncated (${(fullResultBytes / 1024).toFixed(1)} KB). ` +
-              `The fs-write plugin is not enabled, so the full result could not be saved to disk.\n` +
-              `Enable it first: manage_plugin("fs-write", "enable") or apply_profile("file-builder")\n` +
-              `Then re-run the handler to get the full output saved to the results/ directory.\n\n` +
-              `Preview (first 2KB):\n${preview}`,
-            ...(consoleOutput?.length ? { consoleOutput } : {}),
-            _resourceStats: resourceStats,
-            _stats: stats ?? undefined,
-            _statePreserved: statePreserved,
-          };
         }
       }
 
-      const TRUNCATION_MARKER = "\n[TRUNCATED_FOR_LLM]";
-      // Allow up to 50KB of result data in the LLM's context.
-      // The LLM needs the full result to orchestrate multi-handler
-      // workflows (e.g. research handler → build handler). Truncating
-      // at 500 chars forced everything into monolithic handlers.
-      // 50KB is ~12K tokens — well within model context limits.
-      const MAX_LLM_RESULT_CHARS = 50_000;
+      // ── Step 2: Decide what the LLM sees ──────────────────────
+      // The LLM gets up to MAX_LLM_RESULT_CHARS of actual data.
+      // For orchestration workflows the model needs real data, not
+      // just a 500-char preview. Truncation guidance steers toward
+      // processing in the sandbox, not pulling data back into context.
+      const commonLlmFields = {
+        ...(consoleOutput?.length ? { consoleOutput } : {}),
+        ...(statePreserved !== undefined ? { statePreserved } : {}),
+      };
 
       if (fullResult.length > MAX_LLM_RESULT_CHARS) {
+        // Display full result to user in the terminal
         let displayText: string;
         try {
           const parsed = JSON.parse(fullResult);
@@ -2136,42 +2152,60 @@ const executeJavascriptTool = defineTool("execute_javascript", {
           displayText = fullResult;
         }
         console.error(`  ${C.ok("✅ Result:")}`);
-        console.error(displayText);
+        if (
+          state.markdownEnabled &&
+          typeof displayText === "string" &&
+          looksLikeMarkdown(displayText)
+        ) {
+          console.error(renderMarkdown(displayText));
+        } else {
+          console.error(displayText);
+        }
 
+        // LLM gets first 50K chars + truncation guidance
         const preview = fullResult.slice(0, MAX_LLM_RESULT_CHARS);
         const remaining = fullResult.length - MAX_LLM_RESULT_CHARS;
-        return {
-          result:
-            preview +
-            `\n\n[… ${remaining} more characters — full output already displayed to user]` +
-            TRUNCATION_MARKER,
-          ...(consoleOutput?.length ? { consoleOutput } : {}),
-          _resourceStats: resourceStats,
-          _stats: stats ?? undefined,
-          _statePreserved: statePreserved,
-        };
+        const truncationNote = savedPath
+          ? `\n\n[… ${remaining} more characters — full output saved to ${savedPath}]\n` +
+            `Process the full data in the sandbox — do NOT read it back into context.\n` +
+            `• execute_bash: cat ${savedPath} | grep ... | wc -l\n` +
+            `• Handler: import { readFile } from 'host:fs-read'; then process in code` +
+            TRUNCATION_MARKER
+          : `\n\n[… ${remaining} more characters — full output displayed to user]\n` +
+            `Enable fs-write to persist large output: manage_plugin("fs-write", "enable")` +
+            TRUNCATION_MARKER;
+
+        return wrapToolResult({
+          result: preview + truncationNote,
+          ...commonLlmFields,
+        });
       }
-      return {
-        result: fullResult,
-        ...(consoleOutput?.length ? { consoleOutput } : {}),
-        _resourceStats: resourceStats,
-        _stats: stats ?? undefined,
-        _statePreserved: statePreserved,
-      };
+
+      // Result fits in LLM context — include a note about the disk
+      // backup path if one was saved.
+      const resultForLlm = savedPath
+        ? fullResult +
+          `\n\n[Full output also saved to ${savedPath} for processing via bash or handlers]`
+        : fullResult;
+
+      return wrapToolResult({
+        result: resultForLlm,
+        ...commonLlmFields,
+      });
     } else {
       console.log(`  ${C.err("❌ " + error)}`);
       suggestBufferIncreaseIfNeeded(error ?? "");
       const llmError = llmInstruction
         ? `${error} ${llmInstruction}`
         : (error ?? "");
-      return {
-        error: llmError,
-        ...(consoleOutput?.length ? { consoleOutput } : {}),
-        _userDisplayed: true,
-        _resourceStats: resourceStats,
-        _stats: stats ?? undefined,
-        _statePreserved: statePreserved,
-      };
+      return wrapToolResult(
+        {
+          error: llmError,
+          ...(consoleOutput?.length ? { consoleOutput } : {}),
+          _userDisplayed: true,
+        },
+        "failure",
+      );
     }
   },
 });
@@ -2591,10 +2625,13 @@ const executeBashTool = defineTool("execute_bash", {
     // Get the dedicated bash sandbox (created lazily, separate from main JS sandbox)
     const bs = await getBashSandbox();
     if (!bs) {
-      return {
-        error:
-          "Bash module not available. Ensure builtin-modules/bash.js exists (run: just build-bash).",
-      };
+      return wrapToolResult(
+        {
+          error:
+            "Bash module not available. Ensure builtin-modules/bash.js exists (run: just build-bash).",
+        },
+        "failure",
+      );
     }
 
     // Log bash command to code log (same as show-code for JS handlers)
@@ -2626,34 +2663,13 @@ const executeBashTool = defineTool("execute_bash", {
       const stderr = String(result.stderr ?? "");
       const exitCode = Number(result.exitCode ?? 0);
 
-      // ── Large output interception ──────────────────────────────
-      // Check threshold BEFORE printing to avoid flooding the
-      // console with huge output. Same pattern as execute_javascript:
-      // save to disk and return a small summary before the SDK's
-      // VB() truncation (which writes to /tmp — inaccessible from
-      // the sandbox).
-      const outputThreshold = parseInt(
-        process.env.HYPERAGENT_OUTPUT_THRESHOLD_BYTES || "20480",
-        10,
-      );
       const fullResultBytes = Buffer.byteLength(stdout, "utf-8");
-      const isLargeOutput = fullResultBytes > outputThreshold;
 
-      // Show output to user (preview only if large)
-      if (stdout) {
-        if (isLargeOutput) {
-          // Print just a short preview so the terminal isn't flooded
-          const previewLines = stdout.slice(0, 1024);
-          console.log(previewLines + (stdout.length > 1024 ? "\n..." : ""));
-        } else {
-          console.log(stdout.endsWith("\n") ? stdout.slice(0, -1) : stdout);
-        }
-      }
-      if (stderr) {
-        console.error("  " + C.dim(stderr.trimEnd()));
-      }
-
-      if (isLargeOutput) {
+      // ── Step 1: Persist large output to disk ───────────────────
+      // Save full stdout as a backup for later processing via bash.
+      // Independent of what we send to the LLM.
+      let savedPath: string | undefined;
+      if (fullResultBytes > DISK_SAVE_THRESHOLD_BYTES) {
         const fsWriteBaseDir = getPluginBaseDir("fs-write");
         if (fsWriteBaseDir) {
           const resultsDir = resolve(fsWriteBaseDir, "results");
@@ -2663,52 +2679,78 @@ const executeBashTool = defineTool("execute_bash", {
           const filename = `bash-${Date.now()}.txt`;
           const outputPath = join(resultsDir, filename);
           writeFileSync(outputPath, stdout, "utf-8");
-          const relativePath = `results/${filename}`;
-
+          savedPath = `results/${filename}`;
           console.error(
-            `  ${C.ok("📦")} stdout too large (${(fullResultBytes / 1024).toFixed(1)} KB) → saved to ${relativePath}`,
+            `  ${C.ok("📦")} stdout (${(fullResultBytes / 1024).toFixed(1)} KB) → saved to ${savedPath}`,
           );
-
-          const preview = stdout.slice(0, 500);
-          return {
-            stdout:
-              `Output saved to ${relativePath} (${(fullResultBytes / 1024).toFixed(1)} KB).\n` +
-              `Preview (first 500 chars):\n${preview}\n\n` +
-              `Read the full output with: execute_bash({ command: "cat ${relativePath}" })\n` +
-              `Or process it: execute_bash({ command: "cat ${relativePath} | grep ... | wc -l" })`,
-            stderr,
-            exitCode,
-            ...(consoleOutput?.length ? { consoleOutput } : {}),
-          };
+        } else {
+          console.error(
+            `  ${C.warn("⚠️")} stdout large (${(fullResultBytes / 1024).toFixed(1)} KB) but fs-write not enabled — cannot save to disk`,
+          );
         }
-        // fs-write not enabled — truncate in-place with guidance
-        console.error(
-          `  ${C.warn("⚠️")} stdout too large (${(fullResultBytes / 1024).toFixed(1)} KB) and fs-write not enabled`,
-        );
-        const preview = stdout.slice(0, 2048);
-        return {
-          stdout:
-            `Output truncated (${(fullResultBytes / 1024).toFixed(1)} KB). ` +
-            `Enable fs-write to save large output: manage_plugin("fs-write", "enable")\n\n` +
-            `Preview (first 2KB):\n${preview}`,
+      }
+
+      // ── Step 2: Display output to user ─────────────────────────
+      // Show full output for small results; preview for large ones
+      // to avoid flooding the terminal.
+      if (stdout) {
+        if (fullResultBytes > DISK_SAVE_THRESHOLD_BYTES) {
+          const previewLines = stdout.slice(0, 1024);
+          console.log(previewLines + (stdout.length > 1024 ? "\n..." : ""));
+        } else if (state.markdownEnabled && looksLikeMarkdown(stdout)) {
+          console.log(renderMarkdown(stdout));
+        } else {
+          console.log(stdout.endsWith("\n") ? stdout.slice(0, -1) : stdout);
+        }
+      }
+      if (stderr) {
+        console.error("  " + C.dim(stderr.trimEnd()));
+      }
+
+      // ── Step 3: Decide what the LLM sees ──────────────────────
+      // LLM gets up to MAX_LLM_RESULT_CHARS of actual stdout data.
+      // Truncation guidance steers toward processing in the sandbox.
+      if (stdout.length > MAX_LLM_RESULT_CHARS) {
+        const preview = stdout.slice(0, MAX_LLM_RESULT_CHARS);
+        const remaining = stdout.length - MAX_LLM_RESULT_CHARS;
+        const truncationNote = savedPath
+          ? `\n\n[… ${remaining} more characters — full output saved to ${savedPath}]\n` +
+            `Process the full data with bash: cat ${savedPath} | grep ... | awk ...` +
+            TRUNCATION_MARKER
+          : `\n\n[… ${remaining} more characters — full output displayed to user]\n` +
+            `Enable fs-write to persist large output: manage_plugin("fs-write", "enable")` +
+            TRUNCATION_MARKER;
+
+        return wrapToolResult({
+          stdout: preview + truncationNote,
           stderr,
           exitCode,
           ...(consoleOutput?.length ? { consoleOutput } : {}),
-        };
+        });
       }
 
-      return {
-        stdout,
+      // stdout fits in LLM context — include disk backup note if saved
+      const stdoutForLlm =
+        savedPath && fullResultBytes > DISK_SAVE_THRESHOLD_BYTES
+          ? stdout +
+            `\n\n[Full output also saved to ${savedPath} for processing via bash]`
+          : stdout;
+
+      return wrapToolResult({
+        stdout: stdoutForLlm,
         stderr,
         exitCode,
         ...(consoleOutput?.length ? { consoleOutput } : {}),
-      };
+      });
     } else {
       console.error("  " + C.err("❌ " + (error ?? "Unknown bash error")));
-      return {
-        error: error ?? "Bash execution failed",
-        ...(consoleOutput?.length ? { consoleOutput } : {}),
-      };
+      return wrapToolResult(
+        {
+          error: error ?? "Bash execution failed",
+          ...(consoleOutput?.length ? { consoleOutput } : {}),
+        },
+        "failure",
+      );
     }
   },
 });
@@ -3023,9 +3065,18 @@ async function managePluginImpl(params: {
       `\n  ${C.warn("🔌 Assistant requests plugin:")} ${C.tool(params.name)}`,
     );
     if (params.config) {
-      for (const [k, v] of Object.entries(params.config)) {
-        const display = Array.isArray(v) ? `[${v.join(", ")}]` : String(v);
-        console.log(`     ${k}: ${display}`);
+      if (state.markdownEnabled) {
+        const rows = Object.entries(params.config).map(([k, v]) => {
+          const display = Array.isArray(v) ? `[${v.join(", ")}]` : String(v);
+          return `| ${k} | ${display} |`;
+        });
+        const table = `| Key | Value |\n|-----|-------|\n${rows.join("\n")}`;
+        console.log(renderMarkdown(table));
+      } else {
+        for (const [k, v] of Object.entries(params.config)) {
+          const display = Array.isArray(v) ? `[${v.join(", ")}]` : String(v);
+          console.log(`     ${k}: ${display}`);
+        }
       }
     }
     console.log(
@@ -3162,15 +3213,18 @@ const writeOutputTool = defineTool("write_output", {
   handler: async (params: { path: string; content: string }) => {
     const baseDir = getPluginBaseDir("fs-write");
     if (!baseDir) {
-      return {
-        error:
-          "fs-write plugin is not enabled. Enable it first with manage_plugin or apply_profile, then try again.",
-      };
+      return wrapToolResult(
+        {
+          error:
+            "fs-write plugin is not enabled. Enable it first with manage_plugin or apply_profile, then try again.",
+        },
+        "failure",
+      );
     }
 
     const check = validatePath(params.path, baseDir);
     if (!check.valid) {
-      return { error: check.error };
+      return wrapToolResult({ error: check.error }, "failure");
     }
 
     const targetPath = resolve(baseDir, params.path);
@@ -3187,12 +3241,12 @@ const writeOutputTool = defineTool("write_output", {
       `  ${C.ok("📄")} Wrote ${params.content.length.toLocaleString()} chars → ${params.path}`,
     );
 
-    return {
+    return wrapToolResult({
       success: true,
       path: params.path,
       bytes: Buffer.byteLength(params.content, "utf-8"),
       directory: baseDir,
-    };
+    });
   },
 });
 
@@ -3224,21 +3278,27 @@ const readInputTool = defineTool("read_input", {
   handler: async (params: { path: string }) => {
     const baseDir = getPluginBaseDir("fs-read");
     if (!baseDir) {
-      return {
-        error:
-          "fs-read plugin is not enabled. Enable it first with manage_plugin or apply_profile, then try again.",
-      };
+      return wrapToolResult(
+        {
+          error:
+            "fs-read plugin is not enabled. Enable it first with manage_plugin or apply_profile, then try again.",
+        },
+        "failure",
+      );
     }
 
     const check = validatePath(params.path, baseDir);
     if (!check.valid) {
-      return { error: check.error };
+      return wrapToolResult({ error: check.error }, "failure");
     }
 
     const targetPath = resolve(baseDir, params.path);
 
     if (!existsSync(targetPath)) {
-      return { error: `File not found: ${params.path}` };
+      return wrapToolResult(
+        { error: `File not found: ${params.path}` },
+        "failure",
+      );
     }
 
     const content = readFileSync(targetPath, "utf-8");
@@ -3247,11 +3307,31 @@ const readInputTool = defineTool("read_input", {
       `  ${C.ok("📖")} Read ${content.length.toLocaleString()} chars ← ${params.path}`,
     );
 
-    return {
+    // Guard against sending huge files into LLM context.
+    // Steer the LLM toward processing in the sandbox instead.
+    if (content.length > MAX_LLM_RESULT_CHARS) {
+      const preview = content.slice(0, MAX_LLM_RESULT_CHARS);
+      const remaining = content.length - MAX_LLM_RESULT_CHARS;
+      return wrapToolResult({
+        content:
+          preview +
+          `\n\n[… ${remaining} more characters — file too large for context]\n` +
+          `Process the full file in the sandbox instead of reading more into context:\n` +
+          `• execute_bash: cat ${params.path} | grep ... | awk '{...}'\n` +
+          `• Handler: import { readFile } from 'host:fs-read'; then process in code` +
+          TRUNCATION_MARKER,
+        path: params.path,
+        bytes: Buffer.byteLength(content, "utf-8"),
+        totalChars: content.length,
+        truncated: true,
+      });
+    }
+
+    return wrapToolResult({
       content,
       path: params.path,
       bytes: Buffer.byteLength(content, "utf-8"),
-    };
+    });
   },
 });
 
@@ -3298,21 +3378,27 @@ const readOutputTool = defineTool("read_output", {
   }) => {
     const baseDir = getPluginBaseDir("fs-write");
     if (!baseDir) {
-      return {
-        error:
-          "fs-write plugin is not enabled. Enable it first with manage_plugin or apply_profile, then try again.",
-      };
+      return wrapToolResult(
+        {
+          error:
+            "fs-write plugin is not enabled. Enable it first with manage_plugin or apply_profile, then try again.",
+        },
+        "failure",
+      );
     }
 
     const check = validatePath(params.path, baseDir);
     if (!check.valid) {
-      return { error: check.error };
+      return wrapToolResult({ error: check.error }, "failure");
     }
 
     const targetPath = resolve(baseDir, params.path);
 
     if (!existsSync(targetPath)) {
-      return { error: `File not found: ${params.path}` };
+      return wrapToolResult(
+        { error: `File not found: ${params.path}` },
+        "failure",
+      );
     }
 
     const fullContent = readFileSync(targetPath, "utf-8");
@@ -3329,13 +3415,35 @@ const readOutputTool = defineTool("read_output", {
       `  ${C.ok("📖")} Read ${params.path} lines ${start}-${end} of ${totalLines} (${content.length.toLocaleString()} chars)`,
     );
 
-    return {
+    // Guard against sending huge content into LLM context.
+    // Steer toward using line ranges or processing in the sandbox.
+    if (content.length > MAX_LLM_RESULT_CHARS) {
+      const preview = content.slice(0, MAX_LLM_RESULT_CHARS);
+      const remaining = content.length - MAX_LLM_RESULT_CHARS;
+      return wrapToolResult({
+        content:
+          preview +
+          `\n\n[… ${remaining} more characters — content too large for context]\n` +
+          `Use startLine/endLine to read specific sections, or process in the sandbox:\n` +
+          `• read_output("${params.path}", startLine, endLine) for targeted reads\n` +
+          `• execute_bash: cat ${params.path} | grep ... | awk '{...}'\n` +
+          `• Handler: import { readFile } from 'host:fs-read'; then process in code` +
+          TRUNCATION_MARKER,
+        path: params.path,
+        totalLines,
+        range: { start, end },
+        bytes: Buffer.byteLength(content, "utf-8"),
+        truncated: true,
+      });
+    }
+
+    return wrapToolResult({
       content,
       path: params.path,
       totalLines,
       range: { start, end },
       bytes: Buffer.byteLength(content, "utf-8"),
-    };
+    });
   },
 });
 
@@ -6043,54 +6151,53 @@ async function main(): Promise<void> {
   }
 
   console.log();
-  console.log(`  ${bold}Configuration:${reset}`);
-  console.log(`    Model:         ${cyan}${state.currentModel}${reset}`);
-  console.log(
-    `    CPU timeout:   ${cyan}${sandbox.config.cpuTimeoutMs}ms${reset}`,
-  );
-  console.log(
-    `    Wall timeout:  ${cyan}${sandbox.config.wallClockTimeoutMs}ms${reset}`,
-  );
-  console.log(
-    `    Send timeout:  ${cyan}${SEND_TIMEOUT_MS}ms${reset} ${dim}(inactivity)${reset}`,
-  );
-  console.log(
-    `    Heap size:     ${cyan}${sandbox.config.heapSizeMb}MB${reset}`,
-  );
-  console.log(
-    `    Scratch size:  ${cyan}${sandbox.config.scratchSizeMb}MB${reset}`,
-  );
-  console.log(
-    `    Buffers:       ${cyan}${sandbox.config.inputBufferKb}KB${reset} input / ${cyan}${sandbox.config.outputBufferKb}KB${reset} output`,
-  );
-  console.log(`    Context:       infinite sessions (auto-compaction)`);
-  {
-    const bannerPlugins = pluginManager.listPlugins();
-    const bannerEnabled = pluginManager.getEnabledPlugins();
-    if (bannerPlugins.length > 0) {
-      const audited = bannerPlugins.filter((p) => p.audit !== null).length;
-      const approved = bannerPlugins.filter((p) => p.approved).length;
-      console.log(
-        `    Plugins:       ${green}${bannerEnabled.length}/${bannerPlugins.length}${reset} enabled, ${audited} audited, ${approved} approved`,
-      );
-    } else {
-      console.log(
-        `    Plugins:       ${dim}none (create plugins/ directory to extend)${reset}`,
-      );
-    }
-  }
+  // Build config rows as key-value pairs for both plain and markdown display
+  const bannerPlugins = pluginManager.listPlugins();
+  const bannerEnabled = pluginManager.getEnabledPlugins();
+  const pluginSummary =
+    bannerPlugins.length > 0
+      ? (() => {
+          const audited = bannerPlugins.filter((p) => p.audit !== null).length;
+          const approved = bannerPlugins.filter((p) => p.approved).length;
+          return `${bannerEnabled.length}/${bannerPlugins.length} enabled, ${audited} audited, ${approved} approved`;
+        })()
+      : "none (create plugins/ directory to extend)";
+
+  type ConfigRow = [label: string, value: string];
+  const configRows: ConfigRow[] = [
+    ["Model", state.currentModel],
+    ["CPU timeout", `${sandbox.config.cpuTimeoutMs}ms`],
+    ["Wall timeout", `${sandbox.config.wallClockTimeoutMs}ms`],
+    ["Send timeout", `${SEND_TIMEOUT_MS}ms (inactivity)`],
+    ["Heap size", `${sandbox.config.heapSizeMb}MB`],
+    ["Scratch size", `${sandbox.config.scratchSizeMb}MB`],
+    [
+      "Buffers",
+      `${sandbox.config.inputBufferKb}KB input / ${sandbox.config.outputBufferKb}KB output`,
+    ],
+    ["Context", "infinite sessions (auto-compaction)"],
+    ["Plugins", pluginSummary],
+  ];
   if (cli.showCode && process.env.HYPERAGENT_CODE_LOG) {
-    console.log(
-      `    Code log:      ${green}${process.env.HYPERAGENT_CODE_LOG}${reset}`,
-    );
+    configRows.push(["Code log", process.env.HYPERAGENT_CODE_LOG]);
   }
   if (cli.showTiming && process.env.HYPERAGENT_TIMING_LOG) {
-    console.log(
-      `    Timing log:    ${green}${process.env.HYPERAGENT_TIMING_LOG}${reset}`,
-    );
+    configRows.push(["Timing log", process.env.HYPERAGENT_TIMING_LOG]);
   }
   if (transcript.active) {
-    console.log(`    Transcript:    ${green}${transcript.rawPath}${reset}`);
+    configRows.push(["Transcript", transcript.rawPath ?? ""]);
+  }
+
+  if (state.markdownEnabled) {
+    const mdRows = configRows.map(([k, v]) => `| ${k} | ${v} |`).join("\n");
+    const table = `| Setting | Value |\n|---------|-------|\n${mdRows}`;
+    console.log(`  **Configuration:**`);
+    console.log(renderMarkdown(table));
+  } else {
+    console.log(`  ${bold}Configuration:${reset}`);
+    for (const [label, value] of configRows) {
+      console.log(`    ${label.padEnd(14)} ${cyan}${value}${reset}`);
+    }
   }
   console.log();
   console.log(
