@@ -5993,10 +5993,19 @@ async function processMessage(
     };
 
     if (state.markdownEnabled && state.streamedText) {
-      // Markdown mode: output was buffered (not streamed). Render now.
-      let rendered = renderMarkdown(state.streamedText);
-      rendered = linkifyFiles(rendered, fsWriteBase, trackFile);
-      console.log(rendered);
+      // Markdown mode: output was buffered (not streamed). Render now
+      // if it looks like markdown; otherwise print as-is to avoid
+      // mangling plain prose with ANSI escapes.
+      let output: string;
+      if (looksLikeMarkdown(state.streamedText)) {
+        output = renderMarkdown(state.streamedText);
+      } else {
+        output = state.streamedText;
+      }
+      // Replace [[file:path]] markers before printing so ANSI codes
+      // from renderMarkdown don't split the markers.
+      output = linkifyFiles(output, fsWriteBase, trackFile);
+      console.log(output);
     } else if (!state.streamedContent && content) {
       // Non-streamed fallback (rare) — render through markdown if enabled
       if (state.markdownEnabled && looksLikeMarkdown(content)) {
