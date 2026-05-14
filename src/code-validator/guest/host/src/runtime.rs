@@ -40,6 +40,17 @@ const MAX_BLOCKING_THREADS: usize = 8;
 /// Timeout for graceful runtime shutdown.
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// Check whether verbose/debug output is enabled via env vars.
+/// Returns true if HYPERAGENT_VERBOSE=1 or HYPERAGENT_DEBUG=1.
+fn is_verbose() -> bool {
+    std::env::var("HYPERAGENT_VERBOSE")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+        || std::env::var("HYPERAGENT_DEBUG")
+            .map(|v| v == "1")
+            .unwrap_or(false)
+}
+
 /// Shared Tokio runtime for all analysis operations.
 ///
 /// Uses `OnceLock<Mutex<Option<Runtime>>>` instead of `LazyLock<Option<Runtime>>`
@@ -62,10 +73,12 @@ fn init_runtime() -> Mutex<Option<Runtime>> {
         .build()
     {
         Ok(rt) => {
-            eprintln!(
-                "[hyperlight-analysis] Initialized runtime with {} workers",
-                workers
-            );
+            if is_verbose() {
+                eprintln!(
+                    "[hyperlight-analysis] Initialized runtime with {} workers",
+                    workers
+                );
+            }
             Mutex::new(Some(rt))
         }
         Err(e) => {
@@ -98,8 +111,12 @@ pub(crate) fn shutdown_runtime() {
         && let Ok(mut guard) = mutex.lock()
         && let Some(rt) = guard.take()
     {
-        eprintln!("[hyperlight-analysis] Shutting down runtime...");
+        if is_verbose() {
+            eprintln!("[hyperlight-analysis] Shutting down runtime...");
+        }
         rt.shutdown_timeout(SHUTDOWN_TIMEOUT);
-        eprintln!("[hyperlight-analysis] Runtime shutdown complete");
+        if is_verbose() {
+            eprintln!("[hyperlight-analysis] Runtime shutdown complete");
+        }
     }
 }

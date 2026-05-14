@@ -1,6 +1,6 @@
 ---
 name: kql-expert
-description: KQL language expertise for writing correct, efficient Kusto queries using Fabric RTI MCP or Azure MCP kusto tools
+description: KQL language expertise for writing correct, efficient Kusto queries using Fabric RTI MCP tools
 triggers:
   - KQL
   - Kusto
@@ -49,6 +49,7 @@ antiPatterns:
   - Don't call kusto_query for management commands — use kusto_command for .show/.create/.alter
   - Don't hardcode MCP tool schemas — call mcp_tool_info first
   - Don't call MCP tools directly — execute them inside registered handler code
+  - Don't use azuremcpserver for KQL — always use fabric-rti-mcp which has dedicated Kusto tools
 requires-mcp:
   - fabric-rti-mcp
 allowed-tools:
