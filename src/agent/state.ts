@@ -95,6 +95,14 @@ export interface AgentState {
   verboseOutput: boolean;
 
   /**
+   * Markdown rendering mode. When true, LLM output is buffered
+   * (not streamed character-by-character) and rendered through
+   * marked-terminal for proper headings, code blocks, lists, etc.
+   * Toggled via `/markdown` command or `--markdown` CLI flag.
+   */
+  markdownEnabled: boolean;
+
+  /**
    * Reasoning effort level for audit sessions, or null → "medium".
    * Minimum is "medium" — audits should never skimp on thinking.
    * Changed via `/reasoning audit <low|medium|high|xhigh>`.
@@ -107,6 +115,12 @@ export interface AgentState {
 
   /** Flag: session needs rebuild (buffer sizes changed, model switch). */
   sessionNeedsRebuild: boolean;
+
+  /**
+   * Files produced during this session, tracked for `/files` listing
+   * and `/open <n>` command. Each entry has a 1-based index.
+   */
+  producedFiles: Array<{ index: number; absPath: string; label: string }>;
 
   /** The Copilot client — spawns the CLI server process. */
   copilotClient: CopilotClient | null;
@@ -296,10 +310,12 @@ export function createAgentState(
     scratchOverride: null,
     reasoningEffort: null,
     verboseOutput: cli.verbose,
+    markdownEnabled: cli.markdown ?? true,
     auditReasoningEffort: null,
 
     // Session management
     sessionNeedsRebuild: false,
+    producedFiles: [],
     copilotClient: null,
     activeSession: null,
     cachedModels: null,

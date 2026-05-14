@@ -33,6 +33,7 @@ if (!existsSync(join(repoRoot, "node_modules", "just-bash"))) {
 }
 
 const aliasArgs = [
+  `--alias:node:module=${join(stubDir, "module-stub.mjs")}`,
   `--alias:node:zlib=${join(stubDir, "zlib-stub.mjs")}`,
   `--alias:node:worker_threads=${join(stubDir, "worker-stub.mjs")}`,
   `--alias:node:path=${join(stubDir, "node-path-stub.mjs")}`,

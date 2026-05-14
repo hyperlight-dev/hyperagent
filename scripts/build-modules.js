@@ -87,8 +87,13 @@ try {
     });
   }
 } catch (e) {
-  console.error("  \u26a0\ufe0f  bash bundle build failed:", e.message);
-  // Non-fatal — bash is optional, core agent works without it
+  if (process.env.CI) {
+    // Fail hard in CI — stale bash bundles must not slip through
+    console.error("  ❌  bash bundle build failed (fatal in CI):", e.message);
+    process.exit(1);
+  }
+  console.error("  ⚠️  bash bundle build failed:", e.message);
+  // Non-fatal locally — bash is optional, core agent works without it
 }
 
 // Step 5b: Auto-update hashes in .json metadata files

@@ -12,6 +12,7 @@ import type {
 import { C, ANSI } from "./ansi.js";
 import type { AgentState } from "./state.js";
 import type { Spinner } from "./spinner.js";
+import { renderMarkdown, looksLikeMarkdown } from "./markdown-renderer.js";
 import {
   formatUsageStats,
   printUsageStats,
@@ -232,8 +233,12 @@ export function registerEventHandler(
           process.stdout.write(`${ANSI.reset}\n\n`);
         }
         // Stream response text token-by-token to stdout
+        // When markdown mode is enabled, buffer silently — the
+        // complete response is rendered at the end by processMessage.
         if (event.data?.deltaContent) {
-          process.stdout.write(event.data.deltaContent);
+          if (!state.markdownEnabled) {
+            process.stdout.write(event.data.deltaContent);
+          }
           state.streamedContent = true;
           state.streamedText += event.data.deltaContent;
         }
@@ -285,20 +290,15 @@ export function registerEventHandler(
       }
 
       case "tool.execution_start": {
-        // Tool is executing — swap the label to show which tool
+        // Tool is executing — show which tool the LLM picked
         const toolName = event.data?.toolName ?? "unknown";
         const callId = event.data?.toolCallId;
         if (callId) pendingTools.set(callId, toolName);
 
-        if (toolName === "execute_javascript") {
-          // Our sandbox tool — stop spinner, show explicit line
-          spinner.stop();
-          console.log(`\n  ${C.tool("🔧 Running code...")}`);
-        } else {
-          // SDK protocol tool — restart spinner with tool label.
-          // start() not updateLabel() — spinner may be stopped.
-          spinner.start(`Running ${toolName}...`);
-        }
+        spinner.stop();
+        console.log(`\n  ${C.tool(`🔧 ${toolName}`)}`);
+        // Restart spinner so the user sees activity while the tool runs
+        spinner.start(" ");
         break;
       }
 
@@ -310,7 +310,9 @@ export function registerEventHandler(
         if (callId) pendingTools.delete(callId);
 
         // Skip noisy protocol tools in non-debug mode
-        if (toolName !== "execute_javascript") {
+        const isSandboxTool =
+          toolName === "execute_javascript" || toolName === "execute_bash";
+        if (!isSandboxTool) {
           if (state.debugEnabled) {
             const status = event.data?.success ? "✅" : "❌";
             debugLog(`${status} ${toolName} complete`);
@@ -318,70 +320,109 @@ export function registerEventHandler(
           break;
         }
 
-        // Show result summary for our sandbox tool
+        // Show result summary for our sandbox tools
         if (event.data?.success) {
-          const content = event.data?.result?.content ?? "";
-          let parsed;
-          try {
-            parsed = JSON.parse(content);
-          } catch {
-            // Not JSON — show raw
-          }
-
-          if (parsed?.error) {
-            // If _userDisplayed is set, the tool handler already
-            // printed the clean error — don't re-display it.
-            if (!parsed._userDisplayed) {
+          // In non-verbose mode, still show errors — but skip verbose
+          // result display since the LLM will summarise for the user.
+          if (!state.verboseOutput) {
+            const content = event.data?.result?.content ?? "";
+            let parsed;
+            try {
+              parsed = JSON.parse(content);
+            } catch {
+              // Not JSON — that's fine
+            }
+            if (parsed?.error && !parsed._userDisplayed) {
+              // Always show errors, even in non-verbose mode
               console.log(`  ${C.err("❌ " + parsed.error)}`);
               suggestBufferIncreaseIfNeeded(parsed.error);
+            } else {
+              console.log(`  ${C.ok("✅ Done")}`);
             }
           } else {
-            const resultValue = parsed?.result;
-
-            // If the tool handler already displayed the full
-            // result (large output), skip re-display here.
-            const wasTruncated =
-              typeof resultValue === "string" &&
-              resultValue.endsWith("[TRUNCATED_FOR_LLM]");
-            if (wasTruncated) {
-              // Already displayed by the tool handler — nothing to do.
-            } else if (resultValue !== undefined) {
-              let displayValue;
-              try {
-                displayValue = JSON.parse(resultValue);
-              } catch {
-                displayValue = resultValue;
-              }
-
-              if (typeof displayValue === "string") {
-                if (displayValue.includes("\n")) {
-                  console.log(`  ${C.ok("✅ Result:")}`);
-                  console.log(C.dim(displayValue));
-                } else {
-                  console.log(`  ${C.ok("✅ Result:")} ${displayValue}`);
-                }
-              } else if (
-                displayValue !== null &&
-                typeof displayValue === "object"
-              ) {
-                const pretty = JSON.stringify(displayValue, null, 2);
-                if (pretty.length > 500) {
-                  console.log(`  ${C.ok("✅ Result:")}`);
-                  console.log(C.dim(pretty));
-                } else {
-                  console.log(`  ${C.ok("✅ Result:")} ${C.dim(pretty)}`);
-                }
-              } else {
-                console.log(`  ${C.ok("✅ Result:")} ${String(displayValue)}`);
-              }
-            } else if (content) {
-              const preview =
-                content.length > 300 ? content.slice(0, 300) + "…" : content;
-              console.log(`  ${C.ok("✅ Result:")} ${C.dim(preview)}`);
-            } else {
-              console.log(`  ${C.ok("✅ Tool complete")}`);
+            const content = event.data?.result?.content ?? "";
+            let parsed;
+            try {
+              parsed = JSON.parse(content);
+            } catch {
+              // Not JSON — show raw
             }
-          }
+
+            if (parsed?.error) {
+              // If _userDisplayed is set, the tool handler already
+              // printed the clean error — don't re-display it.
+              if (!parsed._userDisplayed) {
+                console.log(`  ${C.err("❌ " + parsed.error)}`);
+                suggestBufferIncreaseIfNeeded(parsed.error);
+              }
+            } else {
+              const resultValue = parsed?.result;
+
+              // If the tool handler already displayed the full
+              // result (large output), skip re-display here.
+              const wasTruncated =
+                typeof resultValue === "string" &&
+                resultValue.endsWith("[TRUNCATED_FOR_LLM]");
+              if (wasTruncated) {
+                // Already displayed by the tool handler — nothing to do.
+              } else if (resultValue !== undefined) {
+                let displayValue;
+                try {
+                  displayValue = JSON.parse(resultValue);
+                } catch {
+                  displayValue = resultValue;
+                }
+
+                if (typeof displayValue === "string") {
+                  if (displayValue.includes("\n")) {
+                    console.log(`  ${C.ok("✅ Result:")}`);
+                    // Render markdown if enabled and text has markdown patterns;
+                    // otherwise dim the raw text for visual separation.
+                    if (
+                      state.markdownEnabled &&
+                      looksLikeMarkdown(displayValue)
+                    ) {
+                      console.log(renderMarkdown(displayValue));
+                    } else {
+                      console.log(C.dim(displayValue));
+                    }
+                  } else {
+                    console.log(`  ${C.ok("✅ Result:")} ${displayValue}`);
+                  }
+                } else if (
+                  displayValue !== null &&
+                  typeof displayValue === "object"
+                ) {
+                  const pretty = JSON.stringify(displayValue, null, 2);
+                  if (pretty.length > 500) {
+                    console.log(`  ${C.ok("✅ Result:")}`);
+                    // Wrap large JSON in a code block for markdown rendering
+                    if (state.markdownEnabled) {
+                      console.log(
+                        renderMarkdown("```json\n" + pretty + "\n```"),
+                      );
+                    } else {
+                      console.log(C.dim(pretty));
+                    }
+                  } else {
+                    console.log(`  ${C.ok("✅ Result:")} ${C.dim(pretty)}`);
+                  }
+                } else {
+                  console.log(
+                    `  ${C.ok("✅ Result:")} ${String(displayValue)}`,
+                  );
+                }
+              } else if (content) {
+                const preview =
+                  content.length > 300 ? content.slice(0, 300) + "…" : content;
+                // Don't render truncated content as markdown — truncation
+                // may break mid-token (code fence, table) producing garbled output.
+                console.log(`  ${C.ok("✅ Result:")} ${C.dim(preview)}`);
+              } else {
+                console.log(`  ${C.ok("✅ Tool complete")}`);
+              }
+            }
+          } // end verbose gate
         } else {
           // Check if the tool handler already displayed the error to the user
           // (indicated by _userDisplayed flag in the result content). If so,
@@ -402,7 +443,7 @@ export function registerEventHandler(
             if (errCode === "denied") {
               console.log(`  ${C.warn("🚫 Tool denied by policy")}`);
             } else {
-              console.log(`  ${C.err("❌ Error:")} ${errMsg}`);
+              console.log(`  ${C.err("❌ Error: " + errMsg)}`);
               suggestBufferIncreaseIfNeeded(errMsg);
             }
           }

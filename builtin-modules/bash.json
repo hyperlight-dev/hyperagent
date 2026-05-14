@@ -4,7 +4,7 @@
   "author": "system",
   "mutable": false,
   "type": "script",
-  "sourceHash": "sha256:31219cbf85cf26d1",
+  "sourceHash": "sha256:a86d1d576100eb10",
   "hints": {
     "overview": "Pure-JS bash interpreter for the sandbox. Used internally by the execute_bash tool — not intended for direct import in handlers."
   }
