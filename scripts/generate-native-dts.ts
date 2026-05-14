@@ -231,8 +231,14 @@ function main() {
     const functions = parseRustModule(source);
 
     if (functions.length === 0) {
-      // native-globals registers globals (TextEncoder, crypto, etc.) on
-      // globalThis — it doesn't export module functions. Skip silently.
+      if (moduleDir === "native-globals") {
+        // native-globals registers globals (TextEncoder, crypto, etc.) on
+        // globalThis — it doesn't export module functions. Skip silently.
+        continue;
+      }
+      console.warn(
+        ` ⚠️ No #[rquickjs::function] exports found for native module '${moduleDir}'; skipping .d.ts generation.`,
+      );
       continue;
     }
 
