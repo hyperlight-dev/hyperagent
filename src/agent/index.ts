@@ -111,6 +111,7 @@ import {
   writeUserSkill,
   userSkillExists,
   systemSkillExists,
+  validateSkillName,
   type SkillData,
 } from "./skill-writer.js";
 import { validatePath } from "../../plugins/shared/path-jail.js";
@@ -7167,16 +7168,25 @@ async function main(): Promise<void> {
         // "/skills <name>" string was forwarded; the SDK couldn't
         // parse it as a skill invocation and the LLM interpreted it
         // as natural language — sometimes calling generate_skill to
-        // SAVE a same-named skill, shadowing the built-in.  /skills
-        // followed by a known subcommand (info|edit|delete|list) is
-        // left alone so those commands keep working.
+        // SAVE a same-named skill, shadowing the built-in.
+        //
+        // We gate the rewrite on `validateSkillName(token) === null` so:
+        //   • Subcommands (info|edit|delete|list|reload) are left alone
+        //     because they live in RESERVED_SKILL_NAMES — the canonical
+        //     list used by validateSkillName.  Adding a new subcommand
+        //     only requires updating RESERVED_SKILL_NAMES, not a parallel
+        //     hardcoded set here that could drift (PR #151 review found
+        //     `/skills reload` was getting rewritten to `/reload` before
+        //     this fix).
+        //   • Path-traversal-shaped tokens ("../etc", "a/b") are also
+        //     rejected at the rewrite step — defence in depth even though
+        //     downstream handlers re-validate.
         const skillsParts = trimmed.split(/\s+/);
-        const KNOWN_SKILLS_SUBS = new Set(["info", "edit", "delete", "list"]);
         if (
           skillsParts[0] === "/skills" &&
           skillsParts.length === 2 &&
           skillsParts[1] &&
-          !KNOWN_SKILLS_SUBS.has(skillsParts[1].toLowerCase())
+          validateSkillName(skillsParts[1].toLowerCase()) === null
         ) {
           trimmed = `/${skillsParts[1]}`;
         }

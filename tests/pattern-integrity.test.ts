@@ -275,6 +275,73 @@ describe("pattern-integrity", () => {
           "SDK API that clears the skill cache and re-scans skillDirectories.",
       ).toBe(true);
     });
+
+    it("REPL `/skills <name>` rewrite gates on validateSkillName, not a hardcoded set", () => {
+      // PR #151 review caught a regression: the rewrite used a
+      // `KNOWN_SKILLS_SUBS = new Set(["info","edit","delete","list"])`
+      // local set that omitted `reload`, so typing `/skills reload`
+      // got rewritten to `/reload` and broke the hot-reload command.
+      // The fix is to delegate to `validateSkillName()` which uses
+      // the canonical `RESERVED_SKILL_NAMES` set in skill-writer.ts
+      // (single source of truth — adding a new subcommand only requires
+      // updating one place).  This test pins the new mechanism so a
+      // future "quick fix" doesn't reintroduce a parallel hardcoded
+      // list that can drift again.
+      expect(
+        indexSource.includes(
+          "validateSkillName(skillsParts[1].toLowerCase()) === null",
+        ),
+        "The /skills rewrite must gate on `validateSkillName(...) === null` " +
+          "so reserved subcommands (info|edit|delete|list|reload) and any " +
+          "future additions are automatically excluded via RESERVED_SKILL_NAMES.",
+      ).toBe(true);
+      expect(
+        !indexSource.includes("KNOWN_SKILLS_SUBS"),
+        "The hardcoded `KNOWN_SKILLS_SUBS` set was the source of the " +
+          "`/skills reload` regression — it must stay deleted.  Use " +
+          "validateSkillName() / RESERVED_SKILL_NAMES instead.",
+      ).toBe(true);
+    });
+  });
+
+  describe("slash-command skill detection (no path traversal)", () => {
+    // PR #151 review found that the default-case skill-detection used
+    // `existsSync(join(skillsDir, skillName, "SKILL.md"))` with `skillName`
+    // taken directly from `cmd.slice(1)` — unsanitised user input.
+    // A literal `/../etc` would resolve outside `skillsDir`, turning
+    // the "is this a skill?" check into an arbitrary filesystem probe.
+    //
+    // Fix: route the system-skill side of the check through
+    // `systemSkillExists()` which calls `validateSkillName()` first —
+    // rejecting empty / oversized / kebab-case-violating / path-traversal
+    // / reserved names BEFORE any `join()` touches disk.
+    const slashSource = readFileSync(
+      join(ROOT, "src", "agent", "slash-commands.ts"),
+      "utf-8",
+    );
+
+    it("default case uses systemSkillExists, not a raw existsSync(join(skillsDir, ...))", () => {
+      // The validated helper is the canonical entry-point.
+      expect(
+        slashSource.includes("systemSkillExists(skillName, skillsDir)"),
+        "Slash-command default case must call " +
+          "`systemSkillExists(skillName, skillsDir)` — it validates the " +
+          "name before any path join, preventing /../etc-style traversal.",
+      ).toBe(true);
+
+      // The raw pattern must NOT come back in the same file.  Grep on
+      // the exact arg shape (`skillName, "SKILL.md"`) so unrelated
+      // existsSync calls elsewhere in slash-commands.ts (there are
+      // several legitimate ones) don't trip this guard.
+      expect(
+        slashSource.includes(
+          'existsSync(join(skillsDir, skillName, "SKILL.md"))',
+        ),
+        'Found a raw `existsSync(join(skillsDir, skillName, "SKILL.md"))` ' +
+          "in slash-commands.ts — this is the exact unsafe pattern PR #151 " +
+          "review flagged.  Replace it with `systemSkillExists()`.",
+      ).toBe(false);
+    });
   });
 
   describe("markdown UX (no toggle-trap, no raw `**` rendering)", () => {

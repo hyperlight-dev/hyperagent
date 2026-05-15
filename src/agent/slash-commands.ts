@@ -52,6 +52,7 @@ import {
   readUserSkill,
   deleteUserSkill,
   userSkillExists,
+  systemSkillExists,
   getUserSkillsDir,
   validateSkillName,
 } from "./skill-writer.js";
@@ -3123,20 +3124,28 @@ export async function handleSlashCommand(
     default: {
       // Check if it's a skill invocation — skills are handled by the SDK,
       // not by our slash command handler. Return false to pass through.
+      //
+      // System skills live under <CONTENT_ROOT>/skills/, user skills
+      // under getUserSkillsDir().  The SDK has both in skillDirectories
+      // so it can invoke either — we just need to recognise both here
+      // so the "Invoking skill" log fires and the input gets forwarded
+      // instead of reported as unknown.
+      //
+      // SECURITY: we MUST validate `skillName` before any fs operation —
+      // `cmd.slice(1)` is unsanitised user input and a literal
+      // `/../etc/passwd` would otherwise turn this into a filesystem
+      // probe via `join(skillsDir, skillName, ...)` (PR #151 review).
+      // `systemSkillExists` validates via `validateSkillName` first,
+      // rejecting empty / oversized / path-traversal / reserved names
+      // before touching disk.  `userSkillExists` does the same.
       const __scDir = dirname(new URL(import.meta.url).pathname);
       const skillsDir = existsSync(join(__scDir, "skills"))
         ? join(__scDir, "skills")
         : resolve(__scDir, "../..", "skills");
       try {
-        const { existsSync } = await import("node:fs");
         const skillName = cmd.slice(1); // remove leading /
-        // System skills live under <CONTENT_ROOT>/skills/, user skills
-        // under getUserSkillsDir().  The SDK has both in
-        // skillDirectories so it can invoke either — we just need to
-        // recognise both here so the "Invoking skill" log fires and
-        // the input gets forwarded instead of reported as unknown.
         if (
-          existsSync(join(skillsDir, skillName, "SKILL.md")) ||
+          systemSkillExists(skillName, skillsDir) ||
           userSkillExists(skillName)
         ) {
           console.log(`  ${C.info("📚")} Invoking skill: ${C.tool(skillName)}`);
