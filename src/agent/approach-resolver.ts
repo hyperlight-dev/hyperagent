@@ -13,10 +13,23 @@ import { loadPatterns } from "./pattern-loader.js";
 import { loadModule, type ModuleHints } from "./module-store.js";
 
 // ── MCP server name → CLI setup command mapping ──────────────────────
-// Maps an MCP server name (as declared in skills) to the CLI flag that
-// configures it.  Used by formatGuidance() to show actionable hints.
+// Maps an MCP server name (the key written into ~/.hyperagent/config.json
+// under `mcpServers`) to the CLI flag that configures it.  When a skill
+// requires a server that is NOT yet configured, formatGuidance() uses
+// this table to recommend the specific shortcut to the LLM (and through
+// it, to the user).  Servers absent from this table fall back to the
+// generic "edit ~/.hyperagent/config.json" guidance — we deliberately
+// don't suggest a `--mcp-setup-${name}` flag for unsupported names
+// because that flag does NOT exist and would set the user up for failure.
+//
+// Keep in sync with the setup functions in src/agent/mcp/setup-commands.ts
+// and the CLI cases in src/agent/cli-parser.ts.
 const MCP_SETUP_COMMANDS: Record<string, string> = {
   "fabric-rti-mcp": "--mcp-setup-fabric-rti",
+  everything: "--mcp-setup-everything",
+  github: "--mcp-setup-github",
+  filesystem: "--mcp-setup-filesystem",
+  workiq: "--mcp-setup-workiq",
 };
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -253,7 +266,42 @@ const GENERIC_GUIDANCE: MaterialisedGuidance = {
 export function formatGuidance(guidance: MaterialisedGuidance): string {
   const parts: string[] = ["--- TASK GUIDANCE ---"];
 
-  // Anti-patterns and rules go FIRST — the LLM is most likely to follow
+  // ── Unconfigured MCP servers go FIRST as a blocker ──────────────
+  // A missing prerequisite is the single most important thing the LLM
+  // needs to surface to the user.  Buried under "Rules:" or "Modules:"
+  // it gets ignored — the model has been observed to skip the hint and
+  // hallucinate config.json snippets or non-existent CLI flags instead.
+  // Promoting this block to the top, with strong "TELL THE USER" wording,
+  // measurably improves the user-visible recommendation quality.
+  const missingMcp = guidance.mcpStatus.filter((s) => !s.configured);
+  if (missingMcp.length > 0) {
+    parts.push("🛑 MISSING PREREQUISITES — tell the user how to fix this:");
+    for (const s of missingMcp) {
+      const setupFlag = MCP_SETUP_COMMANDS[s.name];
+      if (setupFlag) {
+        // Explicitly supported — recommend the specific shortcut.
+        parts.push(
+          `  ❌ MCP server "${s.name}" is required but not configured.`,
+          `     SHORTCUT: have the user run \`hyperagent ${setupFlag}\` ` +
+            `(exits after writing config, then restart hyperagent).`,
+        );
+      } else {
+        // Not in the supported-shortcuts table — give honest generic
+        // guidance.  DO NOT suggest a `--mcp-setup-${name}` flag here;
+        // that flag does not exist and the user will hit "unknown
+        // option" if you say it does.
+        parts.push(
+          `  ❌ MCP server "${s.name}" is required but not configured.`,
+          `     This server has no built-in setup shortcut. Tell the ` +
+            `user to add it to \`~/.hyperagent/config.json\` under ` +
+            `\`mcpServers\` (see https://modelcontextprotocol.io for ` +
+            `the entry shape), then restart hyperagent.`,
+        );
+      }
+    }
+  }
+
+  // Anti-patterns and rules — the LLM is most likely to follow
   // instructions at the top of the context injection.
   if (guidance.antiPatterns.length > 0) {
     parts.push("⚠️ DO NOT:");
@@ -278,15 +326,13 @@ export function formatGuidance(guidance: MaterialisedGuidance): string {
       `Plugins: ${guidance.plugins.join(", ")} — enable via manage_plugin or apply_profile`,
     );
   }
-  if (guidance.mcpStatus.length > 0) {
+  // MCP server status block — only shows CONFIGURED servers here.
+  // Unconfigured ones are surfaced above as missing prerequisites.
+  const configuredMcp = guidance.mcpStatus.filter((s) => s.configured);
+  if (configuredMcp.length > 0) {
     parts.push("MCP Servers:");
-    for (const s of guidance.mcpStatus) {
-      if (!s.configured) {
-        const setupFlag = MCP_SETUP_COMMANDS[s.name] ?? `--mcp-setup-${s.name}`;
-        parts.push(
-          `  ❌ ${s.name} — not configured. Run: hyperagent ${setupFlag}`,
-        );
-      } else if (s.state === "connected") {
+    for (const s of configuredMcp) {
+      if (s.state === "connected") {
         parts.push(
           `  ✅ ${s.name} — connected (${s.toolCount ?? 0} tools). Import from host:mcp-${s.name}`,
         );

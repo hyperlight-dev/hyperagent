@@ -321,15 +321,44 @@ export async function handleSlashCommand(
 
     case "/markdown":
     case "/md": {
-      // Toggle markdown rendering — buffers output instead of streaming
-      // and renders through marked-terminal for proper formatting.
-      state.markdownEnabled = !state.markdownEnabled;
-      // System prompt includes markdown-specific instructions (OUTPUT mode,
-      // FILE REFERENCES). Rebuild the session so the LLM gets the update.
-      state.sessionNeedsRebuild = true;
-      console.log(
-        `  📝 Markdown rendering: ${state.markdownEnabled ? C.ok("ON") + C.dim(" (output buffered, not streamed)") : C.err("OFF") + C.dim(" (raw streaming)")}`,
-      );
+      // Subcommand dispatcher — bare invocation is a pure status query
+      // that NEVER mutates state. Mutation requires an explicit verb
+      // (on/off/toggle). This avoids the "I just wanted to check"
+      // toggle-trap that flips state at inspection time.
+      const sub = (parts[1] ?? "").toLowerCase();
+      const prev = state.markdownEnabled;
+      let next = prev;
+      let unknown = false;
+
+      if (sub === "" || sub === "status") {
+        // Pure status query — leave state untouched.
+      } else if (sub === "on" || sub === "true" || sub === "1") {
+        next = true;
+      } else if (sub === "off" || sub === "false" || sub === "0") {
+        next = false;
+      } else if (sub === "toggle") {
+        next = !prev;
+      } else {
+        unknown = true;
+      }
+
+      if (unknown) {
+        console.log(
+          `  ${C.warn("⚠️")}  Usage: ${C.tool("/markdown [on|off|toggle|status]")} ${C.dim("(bare = status, never mutates)")}`,
+        );
+      } else {
+        if (next !== prev) {
+          state.markdownEnabled = next;
+          // System prompt includes markdown-specific instructions
+          // (OUTPUT mode, FILE REFERENCES). Rebuild so the LLM
+          // gets the update on the next turn.
+          state.sessionNeedsRebuild = true;
+        }
+        const detail = state.markdownEnabled
+          ? C.ok("ON") + C.dim(" (output buffered, not streamed)")
+          : C.err("OFF") + C.dim(" (raw streaming)");
+        console.log(`  📝 Markdown rendering: ${detail}`);
+      }
       console.log();
       return true;
     }
@@ -881,7 +910,10 @@ export async function handleSlashCommand(
           .map(([k, v, isOvr]) => `| ${k} | ${v}${isOvr ? ovrTag : ""} |`)
           .join("\n");
         const table = `| Setting | Value |\n|---------|-------|\n${mdRows}`;
-        console.log(`  **⚙️  Configuration:**`);
+        // Use C.label() rather than literal markdown bold — console.log
+        // does not pass through the markdown renderer, so `**foo**` would
+        // print raw asterisks.
+        console.log(`  ${C.label("⚙️  Configuration:")}`);
         console.log(renderMarkdown(table));
       } else {
         console.log(`  ${C.label("⚙️  Configuration:")}`);
@@ -2241,6 +2273,36 @@ export async function handleSlashCommand(
         return true;
       }
 
+      // /skills reload — hot-reload the SDK's skill registry so
+      // freshly authored skills (via `/save-skill`, `generate_skill`,
+      // or an external editor on `~/.hyperagent/skills/<name>/SKILL.md`)
+      // become invocable without restarting the agent.  The SDK's
+      // `ensureSkillsLoaded()` is one-shot per session, so without
+      // this lever any mid-session skill writes are dead until the
+      // process recycles — exactly the user-facing footgun this
+      // fixes.  Calls the experimental `session.rpc.skills.reload()`
+      // RPC which clears the loaded-skills cache, re-scans every
+      // configured `skillDirectories` entry, and re-emits the
+      // `<available_skills>` block to the model on its next turn.
+      if (sub === "reload") {
+        if (!state.activeSession) {
+          console.log(
+            `  ${C.err("❌ No active session — start the agent first.")}`,
+          );
+          return true;
+        }
+        try {
+          await state.activeSession.rpc.skills.reload();
+          console.log(
+            `  ${C.ok("📚 Skills reloaded")} ${C.dim("— new skills are now invocable.")}`,
+          );
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.log(`  ${C.err("❌ Skill reload failed:")} ${msg}`);
+        }
+        return true;
+      }
+
       // /skills <name> — bridge to "/<name>" so the SDK's skill-
       // invocation grammar matches (Bug 3).  Previously this block
       // printed "Invoking skill" and forwarded the raw "/skills <name>"
@@ -2319,7 +2381,7 @@ export async function handleSlashCommand(
           console.log(`     ${C.dim(row.desc)}\n`);
         }
         console.log(
-          `  ${C.dim("Invoke: /<name> · Manage: /skills info|edit|delete <name>")}`,
+          `  ${C.dim("Invoke: /<name> · Manage: /skills info|edit|delete <name> · Refresh: /skills reload")}`,
         );
       } catch {
         console.log("  Error reading skills directory.");

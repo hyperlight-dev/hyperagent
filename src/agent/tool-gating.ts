@@ -39,4 +39,11 @@ export const ALLOWED_TOOLS = new Set<string>([
   "mcp_server_info", // Detailed MCP server info + tool schemas
   "mcp_tool_info", // Focused MCP tool schema lookup
   "manage_mcp", // Connect/disconnect MCP servers
+  // ── SDK built-in tools we rely on ───────────────────────────────
+  // The SDK exposes a "skill" tool when `skillDirectories` is set; the
+  // model calls it with `{ skill: "<name>" }` to load the matching
+  // SKILL.md body into the conversation. Without this entry our
+  // onPreToolUse gate would block /<name> invocations and the model
+  // sees only the raw "/kql-expert" string with no skill content.
+  "skill",
 ]);

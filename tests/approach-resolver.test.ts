@@ -261,15 +261,61 @@ describe("formatGuidance — MCP Servers section", () => {
     };
   }
 
-  it("should show ❌ for unconfigured MCP server", () => {
+  it("should surface supported unconfigured MCP server as a top-level prerequisite", () => {
+    // fabric-rti-mcp is in MCP_SETUP_COMMANDS — guidance must recommend
+    // the specific `--mcp-setup-fabric-rti` shortcut, not a generic flag.
     const status: MCPServerStatus = {
       name: "fabric-rti-mcp",
       configured: false,
     };
     const output = formatGuidance(makeGuidance({ mcpStatus: [status] }));
-    expect(output).toContain("MCP Servers:");
-    expect(output).toContain("❌ fabric-rti-mcp — not configured");
+    expect(output).toContain("🛑 MISSING PREREQUISITES");
+    expect(output).toContain(
+      'MCP server "fabric-rti-mcp" is required but not configured',
+    );
     expect(output).toContain("hyperagent --mcp-setup-fabric-rti");
+    // Must NOT leak into the regular "MCP Servers:" status block —
+    // unconfigured servers are surfaced as prerequisites, not status.
+    expect(output).not.toContain("MCP Servers:\n  ❌");
+  });
+
+  it("should give honest generic guidance for an unsupported MCP server", () => {
+    // "made-up-mcp" is NOT in MCP_SETUP_COMMANDS — the guidance MUST NOT
+    // hallucinate a `--mcp-setup-made-up-mcp` flag (it would not exist
+    // and would fail at the CLI parser). Honest fallback: point at
+    // ~/.hyperagent/config.json.
+    const status: MCPServerStatus = {
+      name: "made-up-mcp",
+      configured: false,
+    };
+    const output = formatGuidance(makeGuidance({ mcpStatus: [status] }));
+    expect(output).toContain("🛑 MISSING PREREQUISITES");
+    expect(output).toContain(
+      'MCP server "made-up-mcp" is required but not configured',
+    );
+    expect(output).toContain("~/.hyperagent/config.json");
+    expect(output).not.toContain("--mcp-setup-made-up-mcp");
+  });
+
+  it("missing prerequisites block precedes Rules/Modules", () => {
+    // Ordering matters — buried prerequisites get ignored.
+    const status: MCPServerStatus = {
+      name: "fabric-rti-mcp",
+      configured: false,
+    };
+    const output = formatGuidance(
+      makeGuidance({
+        mcpStatus: [status],
+        rules: ["always pre-filter with where"],
+        modules: ["doc-core"],
+      }),
+    );
+    const blockerIdx = output.indexOf("🛑 MISSING PREREQUISITES");
+    const rulesIdx = output.indexOf("Rules:");
+    const modulesIdx = output.indexOf("Modules:");
+    expect(blockerIdx).toBeGreaterThanOrEqual(0);
+    expect(blockerIdx).toBeLessThan(rulesIdx);
+    expect(blockerIdx).toBeLessThan(modulesIdx);
   });
 
   it("should show ✅ for connected MCP server", () => {
@@ -310,5 +356,6 @@ describe("formatGuidance — MCP Servers section", () => {
   it("should omit MCP section when mcpStatus is empty", () => {
     const output = formatGuidance(makeGuidance());
     expect(output).not.toContain("MCP Servers:");
+    expect(output).not.toContain("🛑 MISSING PREREQUISITES");
   });
 });

@@ -39,16 +39,57 @@ hljsInstance.registerLanguage("kql", kqlLanguage);
 //
 // The @types/marked-terminal declaration mis-types the return as
 // `TerminalRenderer`; cast through `unknown` to the correct shape.
-const localMarked = new Marked(
-  markedTerminal({
-    // Indent code blocks for visual separation
-    tab: 2,
-    // Show URLs inline rather than as footnotes
-    showSectionPrefix: true,
-    // Convert HTML entities back to characters
-    unescape: true,
-  }) as unknown as MarkedExtension,
-);
+const terminalExt = markedTerminal({
+  // Indent code blocks for visual separation
+  tab: 2,
+  // Render headings WITHOUT a literal `### ` prefix on screen.  The
+  // ANSI bold + green colour applied by marked-terminal is enough to
+  // distinguish a heading from prose; keeping `###` visible defeats
+  // the whole point of terminal markdown rendering (users see raw
+  // markdown markers and assume rendering is broken — exactly the
+  // bug report this fixes).
+  showSectionPrefix: false,
+  // Convert HTML entities back to characters
+  unescape: true,
+}) as unknown as MarkedExtension;
+
+// ── Patch: process inline tokens inside `text`-block tokens ─────────
+// marked-terminal v7.3.0's stock `text` renderer reads `token.text`
+// (the raw markdown source) instead of `parser.parseInline(token.tokens)`.
+// That's correct for *leaf* inline text tokens (no children) but wrong for
+// the *block-level* `text` tokens that marked emits as the body of tight
+// list items.  Result: `* **bold** rest` in a list rendered as the literal
+// `* **bold** rest` instead of `*  bold  rest`.  See the README's KQL
+// Expert example — that bug is what surfaced this.
+//
+// Fix: wrap the `text` renderer so that whenever the token has a
+// non-empty `tokens` array, we recurse via `parseInline` to get proper
+// inline formatting (strong/em/code/links/…).  Leaf tokens fall through
+// to the original behaviour so escape-handling is preserved.
+//
+// This is a marked-terminal upstream bug; revisit when that ships a fix.
+const patchedRenderer = terminalExt as unknown as {
+  renderer: {
+    text: (
+      this: { parser: { parseInline: (t: unknown[]) => string } },
+      token: unknown,
+    ) => string;
+  };
+};
+const originalText = patchedRenderer.renderer.text;
+patchedRenderer.renderer.text = function (token: unknown): string {
+  if (
+    typeof token === "object" &&
+    token !== null &&
+    Array.isArray((token as { tokens?: unknown[] }).tokens) &&
+    (token as { tokens: unknown[] }).tokens.length > 0
+  ) {
+    return this.parser.parseInline((token as { tokens: unknown[] }).tokens);
+  }
+  return originalText.call(this, token);
+};
+
+const localMarked = new Marked(terminalExt);
 
 /**
  * Render a markdown string as ANSI-formatted terminal output.

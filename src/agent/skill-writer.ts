@@ -53,7 +53,7 @@ const VALID_NAME_RE = /^[a-z][a-z0-9-]*$/;
 
 /**
  * Names that double as `/skills` subcommands — accepting them as skill
- * names would let `/skills <name>` shadow `/skills info|edit|delete|list`
+ * names would let `/skills <name>` shadow `/skills info|edit|delete|list|reload`
  * and create confusing CLI behaviour.
  */
 const RESERVED_SKILL_NAMES: ReadonlySet<string> = new Set([
@@ -61,6 +61,7 @@ const RESERVED_SKILL_NAMES: ReadonlySet<string> = new Set([
   "edit",
   "delete",
   "list",
+  "reload",
 ]);
 
 /**

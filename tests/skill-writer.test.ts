@@ -86,11 +86,12 @@ describe("validateSkillName", () => {
   });
 
   it("rejects reserved /skills subcommand names", () => {
-    // These would shadow `/skills info|edit|delete|list` if accepted.
+    // These would shadow `/skills info|edit|delete|list|reload` if accepted.
     expect(writer.validateSkillName("info")).toMatch(/reserved/i);
     expect(writer.validateSkillName("edit")).toMatch(/reserved/i);
     expect(writer.validateSkillName("delete")).toMatch(/reserved/i);
     expect(writer.validateSkillName("list")).toMatch(/reserved/i);
+    expect(writer.validateSkillName("reload")).toMatch(/reserved/i);
   });
 });
 
