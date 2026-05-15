@@ -8,6 +8,19 @@ It is built for useful, bounded work: data analysis, document generation, API wo
 >
 > **Platform note:** HyperAgent requires hardware virtualization: Linux with KVM, Azure Linux with MSHV, Windows with WHP, or WSL2 with KVM. It does not currently run on macOS [because of this Hyperlight issue](https://github.com/hyperlight-dev/hyperlight/issues/45).
 
+## Quick Install
+
+```bash
+# Authenticate with GitHub (Copilot access required)
+gh auth login
+
+# Install and run
+npm install -g @hyperlight-dev/hyperagent
+hyperagent
+```
+
+Requires Node.js 22+ and hardware virtualization (Linux/KVM, Windows/WHP, Azure Linux/MSHV, or WSL2/KVM). For Docker, building from source, and full prerequisites, see [Install and Run](#install-and-run) below.
+
 ## Why HyperAgent?
 
 Most agent CLIs are powerful because they can touch your machine directly: shell commands, file edits, network calls, local tools, credentials, and long-lived process state. That is useful, but it also means a bad instruction, hallucinated command, or prompt-injected webpage can become real host activity very quickly.
@@ -121,14 +134,14 @@ User prompt
 
 The sandbox has no direct filesystem, network, shell, or process access. Capabilities are added deliberately:
 
-| Capability       | How it is exposed                                                |
-| ---------------- | ---------------------------------------------------------------- |
-| Files            | `fs-read` and `fs-write` plugins with path jails                 |
-| HTTP             | `fetch` plugin with domain allowlists and SSRF checks            |
+| Capability       | How it is exposed                                                         |
+| ---------------- | ------------------------------------------------------------------------- |
+| Files            | `fs-read` and `fs-write` plugins with path jails                          |
+| HTTP             | `fetch` plugin with domain allowlists and SSRF checks                     |
 | Bash commands    | `execute_bash` — sandboxed pure-JS interpreter (ls, grep, jq, curl, etc.) |
-| Reusable code    | `ha:*` system and user modules                                   |
-| External systems | MCP servers exposed as typed `host:mcp-*` modules                |
-| Bigger jobs      | Profiles that raise limits; profile tools can enable plugin sets |
+| Reusable code    | `ha:*` system and user modules                                            |
+| External systems | MCP servers exposed as typed `host:mcp-*` modules                         |
+| Bigger jobs      | Profiles that raise limits; profile tools can enable plugin sets          |
 
 ## Built-In Modules
 
