@@ -110,6 +110,8 @@ import {
   getUserSkillsDir,
   writeUserSkill,
   userSkillExists,
+  systemSkillExists,
+  validateSkillName,
   type SkillData,
 } from "./skill-writer.js";
 import { validatePath } from "../../plugins/shared/path-jail.js";
@@ -709,8 +711,13 @@ const MAX_TOOL_HISTORY = 200;
 /**
  * Create the sandbox tool instance. Configuration is resolved from
  * environment variables (see shared/sandbox-tool.js for details).
+ *
+ * `debugLog` routes the sandbox's verbose lifecycle traces (the noisy
+ * `[sandbox] setPlugins`, `invalidateSandboxWithSave`, etc. lines) into
+ * `~/.hyperagent/logs/agent-debug-*.log` when --debug is on, keeping
+ * them OFF the user-facing terminal.
  */
-const sandbox = createSandboxTool();
+const sandbox = createSandboxTool({ debugLog });
 
 /**
  * Session transcript recorder. Created at module level so the SIGINT
@@ -2579,6 +2586,7 @@ async function getBashSandbox() {
     outputBufferKb: 2048,
     cpuTimeoutMs: 10000,
     wallClockTimeoutMs: 15000,
+    debugLog,
   });
 
   // Load ONLY the bash module — no pptx/pdf/xlsx
@@ -3950,6 +3958,129 @@ const applyProfileTool = defineTool("apply_profile", {
   },
 });
 
+// ── Profile preview rendering ─────────────────────────────────────────
+//
+// `applyProfileImpl` shows a preview of which limits will change and
+// which plugins will be enabled before prompting the user for approval.
+// We render this preview in one of two formats:
+//
+//   1. Plain indented console block — the default.  Works on any
+//      terminal, no markdown dependency, easy to grep in transcripts.
+//
+//   2. Markdown table via `renderMarkdown` — only when the user has
+//      opted in via `/markdown on`.  marked-terminal renders the table
+//      with aligned columns and bold headers, which is much easier to
+//      scan than a flat list of `cpu: 1000ms → 2000ms` lines.
+//
+// The data is collected up-front into `LimitChange` records so the two
+// renderers share a single source of truth; if you add a new limit to
+// the schema, add it once to the `applyProfileImpl` collection block
+// and both renderers pick it up automatically.
+
+/** A single before/after row in the profile-apply preview. */
+type LimitChange = {
+  /** Short display name shown in the leftmost column ("cpu", "heap", …). */
+  readonly name: string;
+  /** Current value rendered with its unit (e.g. "1000ms", "16MB"). */
+  readonly before: string;
+  /** Target value rendered with its unit (e.g. "2000ms", "32MB"). */
+  readonly after: string;
+  /** True if the target value actually exceeds the current value. */
+  readonly willChange: boolean;
+};
+
+/**
+ * Build a `LimitChange` row, annotating no-op rows with "(no change)"
+ * in the After column so the table stays rectangular without forcing
+ * the caller to assemble a sentinel string.
+ */
+function buildLimitChange(
+  name: string,
+  before: string,
+  after: string,
+  willChange: boolean,
+): LimitChange {
+  return {
+    name,
+    before,
+    after: willChange ? after : `${after} (no change)`,
+    willChange,
+  };
+}
+
+/**
+ * Render the profile-apply preview to the terminal.
+ *
+ * Routes to the markdown-table renderer when `state.markdownEnabled` is
+ * true; otherwise emits the legacy indented plain-text block.  Always
+ * starts with a leading newline so the preview is visually separated
+ * from whatever spinner / tool output came before.
+ */
+function renderProfilePreview(
+  profileLabel: string,
+  limitChanges: readonly LimitChange[],
+  pluginNames: readonly string[],
+): void {
+  if (state.markdownEnabled) {
+    renderProfilePreviewMarkdown(profileLabel, limitChanges, pluginNames);
+    return;
+  }
+  renderProfilePreviewPlain(profileLabel, limitChanges, pluginNames);
+}
+
+/** Legacy plain-text renderer — preserved verbatim for non-markdown sessions. */
+function renderProfilePreviewPlain(
+  profileLabel: string,
+  limitChanges: readonly LimitChange[],
+  pluginNames: readonly string[],
+): void {
+  console.log(`\n  ${C.warn("📋 Profile:")} ${C.tool(profileLabel)}`);
+  if (limitChanges.length > 0) {
+    console.log(`     Limits:`);
+    for (const c of limitChanges) {
+      console.log(`       ${c.name}: ${c.before} → ${c.after}`);
+    }
+  }
+  if (pluginNames.length > 0) {
+    console.log(`     Plugins: ${pluginNames.join(", ")}`);
+  } else {
+    console.log(`     Plugins: none`);
+  }
+}
+
+/**
+ * Markdown-table renderer.  Produces a GitHub-flavoured markdown table
+ * that marked-terminal converts to a unicode box-drawing table with
+ * bold/coloured headers.  Falls back to the plain renderer if there
+ * are no limit changes to show (a one-row table looks awkward and the
+ * plain "Plugins:" line is fine on its own).
+ */
+function renderProfilePreviewMarkdown(
+  profileLabel: string,
+  limitChanges: readonly LimitChange[],
+  pluginNames: readonly string[],
+): void {
+  if (limitChanges.length === 0) {
+    renderProfilePreviewPlain(profileLabel, limitChanges, pluginNames);
+    return;
+  }
+  const lines: string[] = [];
+  lines.push(`📋 **Profile:** \`${profileLabel}\``);
+  lines.push("");
+  lines.push("| Limit | Before | After |");
+  lines.push("|---|---|---|");
+  for (const c of limitChanges) {
+    lines.push(`| ${c.name} | ${c.before} | ${c.after} |`);
+  }
+  lines.push("");
+  lines.push(
+    pluginNames.length > 0
+      ? `**Plugins:** ${pluginNames.join(", ")}`
+      : `**Plugins:** none`,
+  );
+  process.stdout.write("\n" + renderMarkdown(lines.join("\n")) + "\n");
+}
+
 /** Internal implementation for apply_profile — called under lock. */
 async function applyProfileImpl(
   names: string[],
@@ -3972,60 +4103,70 @@ async function applyProfileImpl(
   // Get current config for comparison
   const currentConfig = getEffectiveConfig(sandbox, state);
 
-  // Build a summary showing profile values vs current values
-  const limitChanges: string[] = [];
+  // Build a structured summary of profile values vs current values so
+  // we can render the preview either as a plain console block (default)
+  // or as a markdown table when the user has opted in to markdown via
+  // `/markdown on`.  Keeping the data structured (instead of pre-joined
+  // strings) is what makes the table renderer possible.
+  const limitChanges: LimitChange[] = [];
   if (merged.limits.cpuTimeoutMs !== undefined) {
-    const current = currentConfig.cpuTimeoutMs;
-    const willChange = merged.limits.cpuTimeoutMs > current;
     limitChanges.push(
-      willChange
-        ? `cpu: ${current}ms → ${merged.limits.cpuTimeoutMs}ms`
-        : `cpu: ${merged.limits.cpuTimeoutMs}ms (already ≥)`,
+      buildLimitChange(
+        "cpu",
+        `${currentConfig.cpuTimeoutMs}ms`,
+        `${merged.limits.cpuTimeoutMs}ms`,
+        merged.limits.cpuTimeoutMs > currentConfig.cpuTimeoutMs,
+      ),
     );
   }
   if (merged.limits.wallTimeoutMs !== undefined) {
-    const current = currentConfig.wallTimeoutMs;
-    const willChange = merged.limits.wallTimeoutMs > current;
     limitChanges.push(
-      willChange
-        ? `wall: ${current}ms → ${merged.limits.wallTimeoutMs}ms`
-        : `wall: ${merged.limits.wallTimeoutMs}ms (already ≥)`,
+      buildLimitChange(
+        "wall",
+        `${currentConfig.wallTimeoutMs}ms`,
+        `${merged.limits.wallTimeoutMs}ms`,
+        merged.limits.wallTimeoutMs > currentConfig.wallTimeoutMs,
+      ),
     );
   }
   if (merged.limits.heapMb !== undefined) {
-    const current = currentConfig.heapMb;
-    const willChange = merged.limits.heapMb > current;
     limitChanges.push(
-      willChange
-        ? `heap: ${current}MB → ${merged.limits.heapMb}MB`
-        : `heap: ${merged.limits.heapMb}MB (already ≥)`,
+      buildLimitChange(
+        "heap",
+        `${currentConfig.heapMb}MB`,
+        `${merged.limits.heapMb}MB`,
+        merged.limits.heapMb > currentConfig.heapMb,
+      ),
     );
   }
   if (merged.limits.scratchMb !== undefined) {
-    const current = currentConfig.scratchMb;
-    const willChange = merged.limits.scratchMb > current;
     limitChanges.push(
-      willChange
-        ? `scratch: ${current}MB → ${merged.limits.scratchMb}MB`
-        : `scratch: ${merged.limits.scratchMb}MB (already ≥)`,
+      buildLimitChange(
+        "scratch",
+        `${currentConfig.scratchMb}MB`,
+        `${merged.limits.scratchMb}MB`,
+        merged.limits.scratchMb > currentConfig.scratchMb,
+      ),
     );
   }
   if (merged.limits.inputBufferKb !== undefined) {
-    const current = currentConfig.inputBufferKb;
-    const willChange = merged.limits.inputBufferKb > current;
     limitChanges.push(
-      willChange
-        ? `input: ${current}KB → ${merged.limits.inputBufferKb}KB`
-        : `input: ${merged.limits.inputBufferKb}KB (already ≥)`,
+      buildLimitChange(
+        "input",
+        `${currentConfig.inputBufferKb}KB`,
+        `${merged.limits.inputBufferKb}KB`,
+        merged.limits.inputBufferKb > currentConfig.inputBufferKb,
+      ),
     );
   }
   if (merged.limits.outputBufferKb !== undefined) {
-    const current = currentConfig.outputBufferKb;
-    const willChange = merged.limits.outputBufferKb > current;
     limitChanges.push(
-      willChange
-        ? `output: ${current}KB → ${merged.limits.outputBufferKb}KB`
-        : `output: ${merged.limits.outputBufferKb}KB (already ≥)`,
+      buildLimitChange(
+        "output",
+        `${currentConfig.outputBufferKb}KB`,
+        `${merged.limits.outputBufferKb}KB`,
+        merged.limits.outputBufferKb > currentConfig.outputBufferKb,
+      ),
     );
   }
 
@@ -4040,18 +4181,7 @@ async function applyProfileImpl(
       ? merged.appliedProfiles[0]
       : merged.appliedProfiles.join(" + ");
 
-  console.log(`\n  ${C.warn("📋 Profile:")} ${C.tool(profileLabel)}`);
-  if (limitChanges.length > 0) {
-    console.log(`     Limits:`);
-    for (const change of limitChanges) {
-      console.log(`       ${change}`);
-    }
-  }
-  if (pluginNames.length > 0) {
-    console.log(`     Plugins: ${pluginNames.join(", ")}`);
-  } else {
-    console.log(`     Plugins: none`);
-  }
+  renderProfilePreview(profileLabel, limitChanges, pluginNames);
 
   await drainAndWarn(rl);
   const approval = state.autoApprove
@@ -5552,11 +5682,33 @@ const generateSkillTool = defineTool("generate_skill", {
         return { success: false, error: "No readline available" };
       }
 
-      // Refuse silent overwrite — the LLM must opt in explicitly.
-      if (!params.overwrite && userSkillExists(params.name)) {
+      // Detect collisions with BOTH user skills and the bundled
+      // built-in skills under <CONTENT_ROOT>/skills/.
+      //
+      // Without this check the user-skill loader would silently
+      // shadow the curated built-in (see Bug 2: kql-expert) — the
+      // LLM hallucinates a half-formed replacement and the carefully
+      // authored bundled skill becomes unreachable.  Require an
+      // explicit overwrite=true to make the destructive intent visible.
+      const systemSkillsDir = join(CONTENT_ROOT, "skills");
+      const userExists = userSkillExists(params.name);
+      const systemExists = systemSkillExists(params.name, systemSkillsDir);
+
+      if (!params.overwrite && userExists) {
         return {
           success: false,
           error: `Skill "${params.name}" already exists. Set overwrite=true to replace it.`,
+        };
+      }
+      if (!params.overwrite && systemExists) {
+        return {
+          success: false,
+          error:
+            `Skill "${params.name}" is a built-in system skill. ` +
+            `Saving a user skill with this name would SHADOW the curated ` +
+            `built-in for this user only — almost always not what you want. ` +
+            `Pick a different name (e.g. "${params.name}-custom"), or set ` +
+            `overwrite=true to deliberately shadow the built-in.`,
         };
       }
 
@@ -5588,9 +5740,26 @@ const generateSkillTool = defineTool("generate_skill", {
       // Surface the overwrite path explicitly — the LLM passing
       // `overwrite=true` is necessary but not sufficient.  The user
       // gets a chance to refuse before we replace existing content.
-      const isOverwrite =
-        params.overwrite === true && userSkillExists(params.name);
-      if (isOverwrite) {
+      // Shadowing a built-in is louder because it's almost always
+      // a regrettable action (the curated skill becomes unreachable
+      // for this user only — see Bug 2).
+      const isOverwrite = params.overwrite === true && userExists;
+      const isShadowingBuiltin =
+        params.overwrite === true && systemExists && !userExists;
+      if (isShadowingBuiltin) {
+        console.log(
+          `\n  ${C.err("⚠️  SHADOW built-in skill:")} ${C.tool(params.name)}`,
+        );
+        console.log(
+          `     ${C.warn("This will OVERRIDE the curated built-in skill for THIS USER only.")}`,
+        );
+        console.log(
+          `     ${C.warn("The bundled version stays on disk but stops loading.")}`,
+        );
+        console.log(
+          `     ${C.warn("Consider using a different name unless you really mean to override.")}`,
+        );
+      } else if (isOverwrite) {
         console.log(
           `\n  ${C.warn("⚠️  Overwrite existing user skill:")} ${C.tool(params.name)}`,
         );
@@ -5611,9 +5780,11 @@ const generateSkillTool = defineTool("generate_skill", {
       }
 
       await drainAndWarn(rl);
-      const promptLabel = isOverwrite
-        ? `  ${C.dim("Overwrite skill? [y/n] ")}`
-        : `  ${C.dim("Save skill? [y/n] ")}`;
+      const promptLabel = isShadowingBuiltin
+        ? `  ${C.dim("Shadow built-in skill? [y/n] ")}`
+        : isOverwrite
+          ? `  ${C.dim("Overwrite skill? [y/n] ")}`
+          : `  ${C.dim("Save skill? [y/n] ")}`;
       const approval = state.autoApprove
         ? "y"
         : await promptUser(rl, promptLabel);
@@ -5673,6 +5844,27 @@ const generateSkillTool = defineTool("generate_skill", {
       console.error(
         `  ${C.ok("📚 Skill saved:")} ${params.name} → ${skillPath}`,
       );
+
+      // Hot-reload the SDK's skill registry so the freshly-written
+      // skill is invocable on the very next turn — without this the
+      // SDK's `ensureSkillsLoaded()` cache stays stale until process
+      // restart and `/<name>` lands as plain text, with the model
+      // improvising instead of using the SKILL.md body.  Best-effort:
+      // a reload failure is logged but does NOT roll back the save —
+      // the file is on disk and `/skills reload` is one keystroke
+      // away as a manual fallback.
+      if (state.activeSession) {
+        try {
+          await state.activeSession.rpc.skills.reload();
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(
+            `  ${C.warn("⚠️")} Skill saved but live reload failed (${msg}). ` +
+              `Run ${C.tool("/skills reload")} to make it invocable.`,
+          );
+        }
+      }
+
       return {
         success: true,
         skill: {
@@ -5882,6 +6074,14 @@ function buildSessionConfig() {
       "mcp_server_info",
       "mcp_tool_info",
       "manage_mcp",
+      // SDK built-in "skill" tool — required so /<skill-name> actually
+      // injects the matching SKILL.md body into the conversation. The
+      // SDK loads skills from `skillDirectories` above, but the model
+      // can't invoke them unless the tool itself is whitelisted here.
+      // Without this, /kql-expert lands as raw text and the model
+      // improvises a generic greeting instead of using the curated
+      // guidance.
+      "skill",
       // Conditionally expose tuning tool
       ...(state.tuneEnabled ? ["llm_thought"] : []),
     ],
@@ -6365,22 +6565,20 @@ async function processMessage(
     };
 
     if (state.markdownEnabled && state.streamedText) {
-      // Markdown mode: output was buffered (not streamed). Render now
-      // if it looks like markdown; otherwise print as-is to avoid
-      // mangling plain prose with ANSI escapes.
-      let output: string;
-      if (looksLikeMarkdown(state.streamedText)) {
-        output = renderMarkdown(state.streamedText);
-      } else {
-        output = state.streamedText;
-      }
-      // Replace [[file:path]] markers before printing so ANSI codes
+      // Markdown mode: output was buffered (not streamed). The user has
+      // explicitly opted in via the default-on flag or `/markdown on` —
+      // render unconditionally. Earlier versions gated on looksLikeMarkdown()
+      // to avoid "mangling plain prose", but that produced inconsistent
+      // output (some turns rendered, others raw) and surprised users who
+      // had opted in. marked-terminal handles plain prose gracefully.
+      let output = renderMarkdown(state.streamedText);
+      // Replace [[file:path]] markers AFTER rendering so ANSI codes
       // from renderMarkdown don't split the markers.
       output = linkifyFiles(output, fsWriteBase, trackFile);
       console.log(output);
     } else if (!state.streamedContent && content) {
-      // Non-streamed fallback (rare) — render through markdown if enabled
-      if (state.markdownEnabled && looksLikeMarkdown(content)) {
+      // Non-streamed fallback (rare) — same opt-in logic as above.
+      if (state.markdownEnabled) {
         let rendered = renderMarkdown(content);
         rendered = linkifyFiles(rendered, fsWriteBase, trackFile);
         console.log(rendered);
@@ -6651,7 +6849,9 @@ async function main(): Promise<void> {
   if (state.markdownEnabled) {
     const mdRows = configRows.map(([k, v]) => `| ${k} | ${v} |`).join("\n");
     const table = `| Setting | Value |\n|---------|-------|\n${mdRows}`;
-    console.log(`  **Configuration:**`);
+    // Use ANSI bold directly — console.log doesn't pass through the
+    // markdown renderer, so `**foo**` would print raw asterisks.
+    console.log(`  ${bold}Configuration:${reset}`);
     console.log(renderMarkdown(table));
   } else {
     console.log(`  ${bold}Configuration:${reset}`);
@@ -6963,6 +7163,33 @@ async function main(): Promise<void> {
       // suggestion acceptance is stale.
       if (trimmed.startsWith("/")) {
         pendingContinuation = null;
+        // Bug 3: rewrite "/skills <name>" → "/<name>" so the Copilot
+        // SDK's skill-invocation grammar matches.  Previously the raw
+        // "/skills <name>" string was forwarded; the SDK couldn't
+        // parse it as a skill invocation and the LLM interpreted it
+        // as natural language — sometimes calling generate_skill to
+        // SAVE a same-named skill, shadowing the built-in.
+        //
+        // We gate the rewrite on `validateSkillName(token) === null` so:
+        //   • Subcommands (info|edit|delete|list|reload) are left alone
+        //     because they live in RESERVED_SKILL_NAMES — the canonical
+        //     list used by validateSkillName.  Adding a new subcommand
+        //     only requires updating RESERVED_SKILL_NAMES, not a parallel
+        //     hardcoded set here that could drift (PR #151 review found
+        //     `/skills reload` was getting rewritten to `/reload` before
+        //     this fix).
+        //   • Path-traversal-shaped tokens ("../etc", "a/b") are also
+        //     rejected at the rewrite step — defence in depth even though
+        //     downstream handlers re-validate.
+        const skillsParts = trimmed.split(/\s+/);
+        if (
+          skillsParts[0] === "/skills" &&
+          skillsParts.length === 2 &&
+          skillsParts[1] &&
+          validateSkillName(skillsParts[1].toLowerCase()) === null
+        ) {
+          trimmed = `/${skillsParts[1]}`;
+        }
         const handled = await handleSlashCommand(trimmed, rl);
         if (handled) continue;
         // Not handled — could be a skill (/<skill-name>).

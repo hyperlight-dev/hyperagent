@@ -53,7 +53,7 @@ const VALID_NAME_RE = /^[a-z][a-z0-9-]*$/;
 
 /**
  * Names that double as `/skills` subcommands — accepting them as skill
- * names would let `/skills <name>` shadow `/skills info|edit|delete|list`
+ * names would let `/skills <name>` shadow `/skills info|edit|delete|list|reload`
  * and create confusing CLI behaviour.
  */
 const RESERVED_SKILL_NAMES: ReadonlySet<string> = new Set([
@@ -61,6 +61,7 @@ const RESERVED_SKILL_NAMES: ReadonlySet<string> = new Set([
   "edit",
   "delete",
   "list",
+  "reload",
 ]);
 
 /**
@@ -379,4 +380,25 @@ export function userSkillExists(name: string): boolean {
   const nameError = validateSkillName(name);
   if (nameError) return false;
   return existsSync(join(getUserSkillsDir(), name, "SKILL.md"));
+}
+
+/**
+ * Check whether a built-in (system) skill with the given name exists.
+ *
+ * Used by `generate_skill` to detect when the LLM is about to silently
+ * shadow a curated skill — see Bug 2 in [`docs/BACKLOG.md`].  System
+ * skills live under `<CONTENT_ROOT>/skills/<name>/SKILL.md`; the caller
+ * supplies the root so this module stays decoupled from agent paths.
+ *
+ * @param name - Skill identifier (validated to kebab-case).
+ * @param systemSkillsDir - Absolute path to the bundled skills root
+ *   (typically `join(CONTENT_ROOT, "skills")`).
+ */
+export function systemSkillExists(
+  name: string,
+  systemSkillsDir: string,
+): boolean {
+  const nameError = validateSkillName(name);
+  if (nameError) return false;
+  return existsSync(join(systemSkillsDir, name, "SKILL.md"));
 }

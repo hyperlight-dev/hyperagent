@@ -154,6 +154,9 @@ export function parsePositiveInt(raw, defaultVal) {
  * @param {string|null} [options.timingLogPath]       — Override HYPERAGENT_TIMING_LOG
  * @param {string|null} [options.codeLogPath]         — Override HYPERAGENT_CODE_LOG
  * @param {boolean}     [options.verbose]             — Log lifecycle events (default: HYPERAGENT_DEBUG=1)
+ * @param {(msg: string) => void} [options.debugLog]  — Sink for verbose lifecycle traces.
+ *   When supplied, verbose output routes here (typically a debug-log file) instead of
+ *   stderr — keeps `[sandbox]` lifecycle chatter out of the user-facing terminal.
  * @returns {SandboxTool}
  */
 export function createSandboxTool(options = {}) {
@@ -214,6 +217,21 @@ export function createSandboxTool(options = {}) {
 
   /** Whether to log lifecycle messages (init, shutdown, etc.). */
   const verbose = options.verbose ?? process.env.HYPERAGENT_DEBUG === "1";
+
+  /**
+   * Sink for verbose lifecycle traces.  Default: console.error
+   * (preserves standalone-usage behaviour, e.g. tests).  When the host
+   * wires up a `debugLog` callback, verbose output routes there instead
+   * of mixing with the user-visible terminal stream.  Either way the
+   * call sites still gate on `verbose` first so messages only fire
+   * when debugging is enabled.
+   *
+   * @param {string} msg
+   */
+  const verboseLog =
+    typeof options.debugLog === "function"
+      ? options.debugLog
+      : (msg) => console.error(msg);
 
   // ── Plugin Registrations ─────────────────────────────────────
   //
@@ -393,7 +411,7 @@ export function createSandboxTool(options = {}) {
   async function autoSaveState() {
     if (!loadedSandbox) {
       if (verbose) {
-        console.error("[sandbox] autoSaveState: SKIP - no loadedSandbox");
+        verboseLog("[sandbox] autoSaveState: SKIP - no loadedSandbox");
       }
       return;
     }
@@ -401,7 +419,7 @@ export function createSandboxTool(options = {}) {
     // Saving would overwrite the good stash from before the poison event.
     if (loadedSandbox.poisoned) {
       if (verbose) {
-        console.error(
+        verboseLog(
           "[sandbox] autoSaveState: SKIP - sandbox is POISONED, preserving existing stash",
         );
       }
@@ -411,7 +429,7 @@ export function createSandboxTool(options = {}) {
     // The guest has old/empty state; saving would overwrite the good stash.
     if (guestStateStale) {
       if (verbose) {
-        console.error(
+        verboseLog(
           "[sandbox] autoSaveState: SKIP - guest state is STALE (post-crash-recovery), preserving existing stash",
         );
       }
@@ -419,7 +437,7 @@ export function createSandboxTool(options = {}) {
     }
     if (!handlerCache.has("_save_state")) {
       if (verbose) {
-        console.error(
+        verboseLog(
           "[sandbox] autoSaveState: SKIP - _save_state handler not in cache. " +
             `handlerCache keys: [${[...handlerCache.keys()].join(", ")}]`,
         );
@@ -428,7 +446,7 @@ export function createSandboxTool(options = {}) {
     }
     try {
       if (verbose) {
-        console.error(
+        verboseLog(
           "[sandbox] autoSaveState: CALLING _save_state handler...",
         );
       }
@@ -443,7 +461,7 @@ export function createSandboxTool(options = {}) {
       );
       if (verbose) {
         const stashSize = savedSharedState ? savedSharedState.size : 0;
-        console.error(
+        verboseLog(
           `[sandbox] autoSaveState: SUCCESS - result=${JSON.stringify(result)}, stash size=${stashSize} keys`,
         );
       }
@@ -451,7 +469,7 @@ export function createSandboxTool(options = {}) {
       // Only log failure in verbose mode — these are expected during
       // CPU timeouts and shouldn't clutter the UI.
       if (verbose) {
-        console.error(
+        verboseLog(
           `[sandbox] ⚠️  Failed to save shared-state: ${err.message ?? err}`,
         );
       }
@@ -472,13 +490,13 @@ export function createSandboxTool(options = {}) {
   async function autoRestoreState() {
     if (!loadedSandbox) {
       if (verbose) {
-        console.error("[sandbox] autoRestoreState: SKIP - no loadedSandbox");
+        verboseLog("[sandbox] autoRestoreState: SKIP - no loadedSandbox");
       }
       return false;
     }
     if (savedSharedState === null) {
       if (verbose) {
-        console.error(
+        verboseLog(
           "[sandbox] autoRestoreState: SKIP - savedSharedState is null",
         );
       }
@@ -486,7 +504,7 @@ export function createSandboxTool(options = {}) {
     }
     if (savedSharedState.size === 0) {
       if (verbose) {
-        console.error(
+        verboseLog(
           "[sandbox] autoRestoreState: SKIP - savedSharedState is empty",
         );
       }
@@ -494,7 +512,7 @@ export function createSandboxTool(options = {}) {
     }
     if (!handlerCache.has("_restore_state")) {
       if (verbose) {
-        console.error(
+        verboseLog(
           "[sandbox] autoRestoreState: SKIP - _restore_state handler not in cache. " +
             `handlerCache keys: [${[...handlerCache.keys()].join(", ")}]`,
         );
@@ -534,7 +552,7 @@ export function createSandboxTool(options = {}) {
 
     try {
       if (verbose) {
-        console.error(
+        verboseLog(
           `[sandbox] autoRestoreState: CALLING _restore_state handler... (stash has ${savedSharedState.size} keys: [${[...savedSharedState.keys()].join(", ")}])`,
         );
       }
@@ -548,7 +566,7 @@ export function createSandboxTool(options = {}) {
         },
       );
       if (verbose) {
-        console.error(
+        verboseLog(
           `[sandbox] autoRestoreState: SUCCESS - result=${JSON.stringify(result)}`,
         );
       }
@@ -569,7 +587,7 @@ export function createSandboxTool(options = {}) {
         // Clear stale flag so we don't keep trying every execution
         guestStateStale = false;
       } else if (verbose) {
-        console.error(`[sandbox] ⚠️  Failed to restore shared-state: ${msg}`);
+        verboseLog(`[sandbox] ⚠️  Failed to restore shared-state: ${msg}`);
       }
 
       return false;
@@ -737,13 +755,13 @@ export function createSandboxTool(options = {}) {
   async function invalidateSandboxWithSave() {
     if (loadedSandbox !== null) {
       if (verbose) {
-        console.error(
+        verboseLog(
           "[sandbox] invalidateSandboxWithSave: loadedSandbox exists, saving state...",
         );
       }
       await autoSaveState();
     } else if (verbose) {
-      console.error(
+      verboseLog(
         "[sandbox] invalidateSandboxWithSave: loadedSandbox is null, nothing to save",
       );
     }
@@ -938,7 +956,7 @@ export function createSandboxTool(options = {}) {
         }
 
         if (verbose) {
-          console.error(
+          verboseLog(
             `[hyperlight] Plugin "${plugin.name}" registered modules: ${registeredModules.join(", ")}`,
           );
         }
@@ -956,7 +974,7 @@ export function createSandboxTool(options = {}) {
     jsSandbox = await proto.loadRuntime();
 
     if (verbose) {
-      console.error("[hyperlight] Sandbox initialized");
+      verboseLog("[hyperlight] Sandbox initialized");
     }
   }
 
@@ -1035,7 +1053,7 @@ export function createSandboxTool(options = {}) {
       // The next execute will recompile all handlers.
       if (loadedSandbox !== null) {
         if (verbose) {
-          console.error(
+          verboseLog(
             `[sandbox] registerHandler("${name}"): loadedSandbox exists, calling autoSaveState before invalidating...`,
           );
         }
@@ -1051,13 +1069,13 @@ export function createSandboxTool(options = {}) {
         currentSnapshot = null;
         if (verbose) {
           const stashSize = savedSharedState ? savedSharedState.size : 0;
-          console.error(
+          verboseLog(
             `[sandbox] registerHandler("${name}"): sandbox invalidated, stash preserved with ${stashSize} keys`,
           );
         }
       } else {
         if (verbose) {
-          console.error(
+          verboseLog(
             `[sandbox] registerHandler("${name}"): loadedSandbox is null, no state to save`,
           );
         }
@@ -1324,7 +1342,7 @@ export function createSandboxTool(options = {}) {
       // Invalidate compiled state (same as registerHandler)
       if (loadedSandbox !== null) {
         if (verbose) {
-          console.error(
+          verboseLog(
             `[sandbox] editHandler("${name}"): loadedSandbox exists, calling autoSaveState before invalidating...`,
           );
         }
@@ -1339,7 +1357,7 @@ export function createSandboxTool(options = {}) {
         currentSnapshot = null;
         if (verbose) {
           const stashSize = savedSharedState ? savedSharedState.size : 0;
-          console.error(
+          verboseLog(
             `[sandbox] editHandler("${name}"): sandbox invalidated, stash preserved with ${stashSize} keys`,
           );
         }
@@ -1473,7 +1491,7 @@ export function createSandboxTool(options = {}) {
 
       if (loadedSandbox !== null) {
         if (verbose) {
-          console.error(
+          verboseLog(
             `[sandbox] editHandlerLines("${name}"): loadedSandbox exists, calling autoSaveState before invalidating...`,
           );
         }
@@ -1488,7 +1506,7 @@ export function createSandboxTool(options = {}) {
         currentSnapshot = null;
         if (verbose) {
           const stashSize = savedSharedState ? savedSharedState.size : 0;
-          console.error(
+          verboseLog(
             `[sandbox] editHandlerLines("${name}"): sandbox invalidated, stash preserved with ${stashSize} keys`,
           );
         }
@@ -1767,7 +1785,7 @@ export function createSandboxTool(options = {}) {
         savedSharedState.size > 0
       ) {
         if (verbose) {
-          console.error(
+          verboseLog(
             "[sandbox] executeJavaScript: guest state is STALE, restoring from stash before execution...",
           );
         }
@@ -1780,7 +1798,7 @@ export function createSandboxTool(options = {}) {
           }
           guestStateStale = false;
           if (verbose) {
-            console.error(
+            verboseLog(
               "[sandbox] executeJavaScript: stash restored, guestStateStale cleared",
             );
           }
@@ -1791,7 +1809,7 @@ export function createSandboxTool(options = {}) {
         // This happens when a crash occurs before any state was saved.
         guestStateStale = false;
         if (verbose) {
-          console.error(
+          verboseLog(
             "[sandbox] executeJavaScript: guestStateStale cleared (no stash to restore)",
           );
         }
@@ -1968,7 +1986,7 @@ export function createSandboxTool(options = {}) {
 
       // Auto-restore shared state after recompile if we have a stash.
       if (verbose) {
-        console.error(
+        verboseLog(
           `[sandbox] executeJavaScript: after recompile, checking for state restore... ` +
             `savedSharedState=${savedSharedState !== null ? `Map(${savedSharedState.size})` : "null"}`,
         );
@@ -1984,12 +2002,12 @@ export function createSandboxTool(options = {}) {
         // Guest state now matches host stash — clear stale flag.
         guestStateStale = false;
         if (verbose) {
-          console.error(
+          verboseLog(
             "[sandbox] executeJavaScript: statePreserved=true after restore, guestStateStale cleared",
           );
         }
       } else if (verbose) {
-        console.error(
+        verboseLog(
           "[sandbox] executeJavaScript: NO state restore (savedSharedState=" +
             (savedSharedState === null
               ? "null"
@@ -2101,7 +2119,7 @@ export function createSandboxTool(options = {}) {
           // successful execution. Don't let autoSaveState overwrite it.
           guestStateStale = true;
           if (verbose) {
-            console.error(
+            verboseLog(
               "[sandbox] crash recovery: restored from snapshot, marked guest state as STALE",
             );
           }
@@ -2218,7 +2236,7 @@ export function createSandboxTool(options = {}) {
   async function setPlugins(plugins) {
     if (verbose) {
       const stashBefore = savedSharedState ? savedSharedState.size : 0;
-      console.error(
+      verboseLog(
         `[sandbox] setPlugins: called with ${plugins.length} plugins, stash has ${stashBefore} keys before invalidate`,
       );
     }
@@ -2229,7 +2247,7 @@ export function createSandboxTool(options = {}) {
     await invalidateSandboxWithSave();
     if (verbose) {
       const stashAfter = savedSharedState ? savedSharedState.size : 0;
-      console.error(
+      verboseLog(
         `[sandbox] setPlugins: after invalidate, stash has ${stashAfter} keys`,
       );
     }

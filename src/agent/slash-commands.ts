@@ -52,6 +52,7 @@ import {
   readUserSkill,
   deleteUserSkill,
   userSkillExists,
+  systemSkillExists,
   getUserSkillsDir,
   validateSkillName,
 } from "./skill-writer.js";
@@ -321,15 +322,44 @@ export async function handleSlashCommand(
 
     case "/markdown":
     case "/md": {
-      // Toggle markdown rendering — buffers output instead of streaming
-      // and renders through marked-terminal for proper formatting.
-      state.markdownEnabled = !state.markdownEnabled;
-      // System prompt includes markdown-specific instructions (OUTPUT mode,
-      // FILE REFERENCES). Rebuild the session so the LLM gets the update.
-      state.sessionNeedsRebuild = true;
-      console.log(
-        `  📝 Markdown rendering: ${state.markdownEnabled ? C.ok("ON") + C.dim(" (output buffered, not streamed)") : C.err("OFF") + C.dim(" (raw streaming)")}`,
-      );
+      // Subcommand dispatcher — bare invocation is a pure status query
+      // that NEVER mutates state. Mutation requires an explicit verb
+      // (on/off/toggle). This avoids the "I just wanted to check"
+      // toggle-trap that flips state at inspection time.
+      const sub = (parts[1] ?? "").toLowerCase();
+      const prev = state.markdownEnabled;
+      let next = prev;
+      let unknown = false;
+
+      if (sub === "" || sub === "status") {
+        // Pure status query — leave state untouched.
+      } else if (sub === "on" || sub === "true" || sub === "1") {
+        next = true;
+      } else if (sub === "off" || sub === "false" || sub === "0") {
+        next = false;
+      } else if (sub === "toggle") {
+        next = !prev;
+      } else {
+        unknown = true;
+      }
+
+      if (unknown) {
+        console.log(
+          `  ${C.warn("⚠️")}  Usage: ${C.tool("/markdown [on|off|toggle|status]")} ${C.dim("(bare = status, never mutates)")}`,
+        );
+      } else {
+        if (next !== prev) {
+          state.markdownEnabled = next;
+          // System prompt includes markdown-specific instructions
+          // (OUTPUT mode, FILE REFERENCES). Rebuild so the LLM
+          // gets the update on the next turn.
+          state.sessionNeedsRebuild = true;
+        }
+        const detail = state.markdownEnabled
+          ? C.ok("ON") + C.dim(" (output buffered, not streamed)")
+          : C.err("OFF") + C.dim(" (raw streaming)");
+        console.log(`  📝 Markdown rendering: ${detail}`);
+      }
       console.log();
       return true;
     }
@@ -881,7 +911,10 @@ export async function handleSlashCommand(
           .map(([k, v, isOvr]) => `| ${k} | ${v}${isOvr ? ovrTag : ""} |`)
           .join("\n");
         const table = `| Setting | Value |\n|---------|-------|\n${mdRows}`;
-        console.log(`  **⚙️  Configuration:**`);
+        // Use C.label() rather than literal markdown bold — console.log
+        // does not pass through the markdown renderer, so `**foo**` would
+        // print raw asterisks.
+        console.log(`  ${C.label("⚙️  Configuration:")}`);
         console.log(renderMarkdown(table));
       } else {
         console.log(`  ${C.label("⚙️  Configuration:")}`);
@@ -2241,11 +2274,47 @@ export async function handleSlashCommand(
         return true;
       }
 
-      // /skills <name> — invoke a skill (delegates to SDK).
+      // /skills reload — hot-reload the SDK's skill registry so
+      // freshly authored skills (via `/save-skill`, `generate_skill`,
+      // or an external editor on `~/.hyperagent/skills/<name>/SKILL.md`)
+      // become invocable without restarting the agent.  The SDK's
+      // `ensureSkillsLoaded()` is one-shot per session, so without
+      // this lever any mid-session skill writes are dead until the
+      // process recycles — exactly the user-facing footgun this
+      // fixes.  Calls the experimental `session.rpc.skills.reload()`
+      // RPC which clears the loaded-skills cache, re-scans every
+      // configured `skillDirectories` entry, and re-emits the
+      // `<available_skills>` block to the model on its next turn.
+      if (sub === "reload") {
+        if (!state.activeSession) {
+          console.log(
+            `  ${C.err("❌ No active session — start the agent first.")}`,
+          );
+          return true;
+        }
+        try {
+          await state.activeSession.rpc.skills.reload();
+          console.log(
+            `  ${C.ok("📚 Skills reloaded")} ${C.dim("— new skills are now invocable.")}`,
+          );
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.log(`  ${C.err("❌ Skill reload failed:")} ${msg}`);
+        }
+        return true;
+      }
+
+      // /skills <name> — bridge to "/<name>" so the SDK's skill-
+      // invocation grammar matches (Bug 3).  Previously this block
+      // printed "Invoking skill" and forwarded the raw "/skills <name>"
+      // text to the SDK, which doesn't speak that grammar — the LLM
+      // saw it as natural language and sometimes mis-fired
+      // generate_skill.  The REPL intake layer also rewrites this
+      // form, but we cover synthetic callers (--skill flag, suggested
+      // command auto-apply, /save-skill prompts) here as well.
       const skillArg = parts[1]?.trim();
       if (skillArg && sub !== "list") {
-        console.log(`  ${C.info("📚")} Invoking skill: ${C.tool(skillArg)}`);
-        return false;
+        return await handleSlashCommand(`/${skillArg}`, rl, deps);
       }
 
       // /skills (no args) or /skills list — list system + user skills,
@@ -2313,7 +2382,7 @@ export async function handleSlashCommand(
           console.log(`     ${C.dim(row.desc)}\n`);
         }
         console.log(
-          `  ${C.dim("Invoke: /skills <name> · Manage: /skills info|edit|delete <name>")}`,
+          `  ${C.dim("Invoke: /<name> · Manage: /skills info|edit|delete <name> · Refresh: /skills reload")}`,
         );
       } catch {
         console.log("  Error reading skills directory.");
@@ -3055,15 +3124,30 @@ export async function handleSlashCommand(
     default: {
       // Check if it's a skill invocation — skills are handled by the SDK,
       // not by our slash command handler. Return false to pass through.
+      //
+      // System skills live under <CONTENT_ROOT>/skills/, user skills
+      // under getUserSkillsDir().  The SDK has both in skillDirectories
+      // so it can invoke either — we just need to recognise both here
+      // so the "Invoking skill" log fires and the input gets forwarded
+      // instead of reported as unknown.
+      //
+      // SECURITY: we MUST validate `skillName` before any fs operation —
+      // `cmd.slice(1)` is unsanitised user input and a literal
+      // `/../etc/passwd` would otherwise turn this into a filesystem
+      // probe via `join(skillsDir, skillName, ...)` (PR #151 review).
+      // `systemSkillExists` validates via `validateSkillName` first,
+      // rejecting empty / oversized / path-traversal / reserved names
+      // before touching disk.  `userSkillExists` does the same.
       const __scDir = dirname(new URL(import.meta.url).pathname);
       const skillsDir = existsSync(join(__scDir, "skills"))
         ? join(__scDir, "skills")
         : resolve(__scDir, "../..", "skills");
       try {
-        const { existsSync } = await import("node:fs");
         const skillName = cmd.slice(1); // remove leading /
-        const skillPath = join(skillsDir, skillName, "SKILL.md");
-        if (existsSync(skillPath)) {
+        if (
+          systemSkillExists(skillName, skillsDir) ||
+          userSkillExists(skillName)
+        ) {
           console.log(`  ${C.info("📚")} Invoking skill: ${C.tool(skillName)}`);
           return false; // Let SDK handle it
         }

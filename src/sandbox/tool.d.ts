@@ -64,6 +64,9 @@ export function parsePositiveInt(
  * @param {string|null} [options.timingLogPath]       — Override HYPERAGENT_TIMING_LOG
  * @param {string|null} [options.codeLogPath]         — Override HYPERAGENT_CODE_LOG
  * @param {boolean}     [options.verbose]             — Log lifecycle events (default: HYPERAGENT_DEBUG=1)
+ * @param {(msg: string) => void} [options.debugLog]  — Sink for verbose lifecycle traces.
+ *   When supplied, verbose output routes here (typically a debug-log file) instead of
+ *   stderr — keeps `[sandbox]` lifecycle chatter out of the user-facing terminal.
  * @returns {SandboxTool}
  */
 export function createSandboxTool(options?: {
@@ -76,6 +79,7 @@ export function createSandboxTool(options?: {
   timingLogPath?: string | null | undefined;
   codeLogPath?: string | null | undefined;
   verbose?: boolean | undefined;
+  debugLog?: ((msg: string) => void) | undefined;
 }): SandboxTool;
 export type SandboxToolConfig = {
   /**
