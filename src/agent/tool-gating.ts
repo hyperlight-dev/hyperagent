@@ -29,6 +29,7 @@ export const ALLOWED_TOOLS = new Set<string>([
   "list_modules", // List available modules (system + user)
   "module_info", // Detailed module info + exports
   "delete_module", // Delete a user module
+  "generate_skill", // Persist a SKILL.md learned this session
   "write_output", // Write text content directly to fs-write base directory
   "read_input", // Read text content directly from fs-read base directory
   "read_output", // Read content from a previously written output

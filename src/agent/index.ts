@@ -100,12 +100,18 @@ import {
   formatCompact,
 } from "./format-exports.js";
 import { loadPatterns } from "./pattern-loader.js";
-import { loadSkills } from "./skill-loader.js";
+import { loadSkillsFromDirs } from "./skill-loader.js";
 import {
   runSuggestApproach,
   formatGuidance,
   type MCPServerStatus,
 } from "./approach-resolver.js";
+import {
+  getUserSkillsDir,
+  writeUserSkill,
+  userSkillExists,
+  type SkillData,
+} from "./skill-writer.js";
 import { validatePath } from "../../plugins/shared/path-jail.js";
 import {
   validateJavaScript as validateJavaScriptGuest,
@@ -690,6 +696,14 @@ const DEFAULT_SEND_TIMEOUT_MS = 300_000;
 const SEND_TIMEOUT_MS: number =
   parseInt(cli.sendTimeout, 10) || DEFAULT_SEND_TIMEOUT_MS;
 
+/**
+ * Maximum number of tool-call entries kept in `state.toolCallHistory`.
+ * Older entries are evicted FIFO to keep memory flat for long sessions.
+ * The cap is small because /save-skill only needs a representative
+ * sample of recent activity — not a full transcript.
+ */
+const MAX_TOOL_HISTORY = 200;
+
 // ── Sandbox Setup ────────────────────────────────────────────────────
 
 /**
@@ -1002,6 +1016,14 @@ async function syncPluginsToSandbox(): Promise<void> {
             conn,
             mcpManager,
             mcpWriteSafetyGate,
+            // Session-learning: record any MCP server the LLM
+            // actually exercised — including calls made from inside
+            // `execute_javascript` via `host:mcp-<name>` imports
+            // (which never surface as a top-level `mcp__*` tool name
+            // and so are invisible to onPostToolUse).
+            (serverName: string) => {
+              state.mcpServersUsed.add(serverName);
+            },
           );
           registrations.push(adapter);
         }
@@ -1117,6 +1139,12 @@ async function handleSlashCommand(
     drainAndWarn,
     mcpManager, // Real MCP manager (or null if no config)
     syncPlugins: syncPluginsToSandbox,
+    submitToLLM: (prompt: string, options?: { skipAutoSuggest?: boolean }) => {
+      state.pendingPrompt = prompt;
+      if (options?.skipAutoSuggest) {
+        state.skipNextAutoSuggest = true;
+      }
+    },
   };
   return handleSlashCommandImpl(rawInput, rl, slashDeps);
 }
@@ -4952,6 +4980,12 @@ async function registerModuleImpl(params: {
       `  ${C.ok("📦 Module registered:")} ${params.name} (${exports.length} exports, ${params.source.length} bytes)`,
     );
 
+    // Record for /save-skill — a module registered this session is a
+    // candidate companion module when the lesson learned is saved.
+    if (!state.modulesRegistered.includes(params.name)) {
+      state.modulesRegistered.push(params.name);
+    }
+
     return {
       success: true,
       name: info.name,
@@ -5394,6 +5428,266 @@ const deleteModuleTool = defineTool("delete_module", {
   },
 });
 
+// ── generate_skill ───────────────────────────────────────────────────
+//
+// Persist a user-generated skill to `~/.hyperagent/skills/<name>/SKILL.md`
+// so the lesson learned in this session is available — and automatically
+// surfaced via /suggest_approach trigger matching — in future sessions.
+//
+// Optionally writes a companion ES module (saved like /register_module)
+// so the skill can reference a reusable bundle of helper functions.
+//
+// Skill names collide deterministically: a user skill with the same name
+// as a built-in skill overrides the built-in (see loadSkillsFromDirs).
+
+const generateSkillTool = defineTool("generate_skill", {
+  description: [
+    "Save a reusable SKILL.md (and optional companion module) to the user's",
+    "skill library based on what was learned in the current session.",
+    "",
+    "Use this when the user asks to 'save what we learned' or runs",
+    "/save-skill. The skill is persisted to ~/.hyperagent/skills/<name>/",
+    "and is automatically loaded on next start; its triggers are matched",
+    "by /suggest_approach so it's surfaced again when relevant.",
+    "",
+    "Choose triggers carefully — short, distinctive keywords/phrases that",
+    "will appear in future prompts about the same task. Guidance should be",
+    "concise, action-oriented domain knowledge, NOT a session transcript.",
+    "",
+    "If the workflow uses a non-trivial bundle of helpers, include a",
+    "companionModule so future sessions get the code too.",
+  ].join("\n"),
+  parameters: {
+    type: "object",
+    properties: {
+      name: {
+        type: "string",
+        description:
+          "Skill name in kebab-case, used as the directory name (e.g. 'teams-transcript-finder')",
+      },
+      description: {
+        type: "string",
+        description:
+          "One-line summary (≤280 chars) shown in `/skill list` and surfaced to suggest_approach",
+      },
+      triggers: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Short keywords/phrases that match future prompts about this topic (≤50)",
+      },
+      guidance: {
+        type: "string",
+        description:
+          "Markdown body — domain knowledge, workflow steps, gotchas. Concise + action-oriented.",
+      },
+      patterns: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Optional: names of built-in patterns (in patterns/) this skill draws on",
+      },
+      antiPatterns: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Optional: 'DO NOT' rules surfaced first when this skill activates",
+      },
+      requiresMcp: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Optional: MCP server names this skill depends on (e.g. ['workiq'])",
+      },
+      allowedTools: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Tools this skill is permitted to invoke (must be a subset of the agent's allowed tools)",
+      },
+      companionModule: {
+        type: "object",
+        description:
+          "Optional: a reusable ES module to save alongside the skill",
+        properties: {
+          name: {
+            type: "string",
+            description: "Module name in kebab-case",
+          },
+          source: {
+            type: "string",
+            description: "ES module JavaScript source code (must use `export`)",
+          },
+          description: {
+            type: "string",
+            description: "One-line description of the module",
+          },
+        },
+        required: ["name", "source", "description"],
+      },
+      overwrite: {
+        type: "boolean",
+        description:
+          "Set true to overwrite an existing user skill with the same name",
+      },
+    },
+    required: ["name", "description", "triggers", "guidance", "allowedTools"],
+  },
+  handler: async (params: {
+    name: string;
+    description: string;
+    triggers: string[];
+    guidance: string;
+    patterns?: string[];
+    antiPatterns?: string[];
+    requiresMcp?: string[];
+    allowedTools: string[];
+    companionModule?: { name: string; source: string; description: string };
+    overwrite?: boolean;
+  }) => {
+    const release = await acquireInteractiveLock();
+    try {
+      const rl = state.readlineInstance;
+      if (!rl) {
+        return { success: false, error: "No readline available" };
+      }
+
+      // Refuse silent overwrite — the LLM must opt in explicitly.
+      if (!params.overwrite && userSkillExists(params.name)) {
+        return {
+          success: false,
+          error: `Skill "${params.name}" already exists. Set overwrite=true to replace it.`,
+        };
+      }
+
+      // Build the typed payload — strip undefined fields so the YAML stays clean.
+      const skillData: SkillData = {
+        name: params.name,
+        description: params.description,
+        triggers: params.triggers,
+        guidance: params.guidance,
+        allowedTools: params.allowedTools,
+        ...(params.patterns && params.patterns.length > 0
+          ? { patterns: params.patterns }
+          : {}),
+        ...(params.antiPatterns && params.antiPatterns.length > 0
+          ? { antiPatterns: params.antiPatterns }
+          : {}),
+        ...(params.requiresMcp && params.requiresMcp.length > 0
+          ? { requiresMcp: params.requiresMcp }
+          : {}),
+      };
+
+      // Show the user what we're about to save and require approval.
+      spinner.stop();
+      const triggerPreview = params.triggers.slice(0, 5).join(", ");
+      const triggerSuffix =
+        params.triggers.length > 5
+          ? ` (+${params.triggers.length - 5} more)`
+          : "";
+      // Surface the overwrite path explicitly — the LLM passing
+      // `overwrite=true` is necessary but not sufficient.  The user
+      // gets a chance to refuse before we replace existing content.
+      const isOverwrite =
+        params.overwrite === true && userSkillExists(params.name);
+      if (isOverwrite) {
+        console.log(
+          `\n  ${C.warn("⚠️  Overwrite existing user skill:")} ${C.tool(params.name)}`,
+        );
+      } else {
+        console.log(`\n  ${C.warn("📚 Save skill:")} ${C.tool(params.name)}`);
+      }
+      console.log(`     ${params.description}`);
+      console.log(`     Triggers: ${triggerPreview}${triggerSuffix}`);
+      console.log(
+        `     Tools: ${params.allowedTools.join(", ")} ` +
+          `(${params.guidance.length} bytes of guidance)`,
+      );
+      if (params.companionModule) {
+        console.log(
+          `     ${C.warn("+ module:")} ${params.companionModule.name} ` +
+            `(${params.companionModule.source.length} bytes)`,
+        );
+      }
+
+      await drainAndWarn(rl);
+      const promptLabel = isOverwrite
+        ? `  ${C.dim("Overwrite skill? [y/n] ")}`
+        : `  ${C.dim("Save skill? [y/n] ")}`;
+      const approval = state.autoApprove
+        ? "y"
+        : await promptUser(rl, promptLabel);
+      if (approval.trim().toLowerCase() !== "y") {
+        console.log(`  ${C.dim("Denied by user.")}`);
+        return { success: false, error: "Skill save denied by user" };
+      }
+
+      // Write the skill — validation happens inside writeUserSkill().
+      let skillPath: string;
+      try {
+        skillPath = writeUserSkill(skillData, join(CONTENT_ROOT, "patterns"));
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`  ${C.err("❌ " + msg)}`);
+        return { success: false, error: msg };
+      }
+
+      // Optionally save a companion module (delegated to register_module
+      // so we get the same validation pipeline + sandbox cache update).
+      let moduleResult:
+        | { name: string; importAs: string; sizeBytes?: number }
+        | undefined;
+      if (params.companionModule) {
+        const m = params.companionModule;
+        const moduleSaveResult = (await registerModuleImpl({
+          name: m.name,
+          source: m.source,
+          description: m.description,
+        })) as {
+          success: boolean;
+          error?: string;
+          name?: string;
+          importAs?: string;
+          sourceSize?: number;
+        };
+        if (!moduleSaveResult.success) {
+          // The skill itself saved fine — surface the module failure but
+          // don't roll back the skill (the user can re-run the module step).
+          console.error(
+            `  ${C.warn("⚠️")} Skill saved, but companion module failed: ${moduleSaveResult.error}`,
+          );
+          return {
+            success: true,
+            skill: { name: params.name, filePath: skillPath },
+            moduleError: moduleSaveResult.error,
+          };
+        }
+        moduleResult = {
+          name: moduleSaveResult.name ?? m.name,
+          importAs:
+            moduleSaveResult.importAs ?? `import { ... } from "ha:${m.name}"`,
+          sizeBytes: moduleSaveResult.sourceSize,
+        };
+      }
+
+      console.error(
+        `  ${C.ok("📚 Skill saved:")} ${params.name} → ${skillPath}`,
+      );
+      return {
+        success: true,
+        skill: {
+          name: params.name,
+          filePath: skillPath,
+          triggers: params.triggers,
+        },
+        module: moduleResult,
+      };
+    } finally {
+      release();
+    }
+  },
+});
+
 // ── Startup Module Loading ───────────────────────────────────────────
 //
 // Load builtin system modules from builtin-modules/ directory and
@@ -5514,7 +5808,9 @@ function buildSessionConfig() {
     workingDirectory: process.cwd(),
     // Skills — markdown instruction files that inject expertise on demand.
     // The LLM can invoke /pptx-expert to get PPTX building best practices.
-    skillDirectories: [join(CONTENT_ROOT, "skills")],
+    // System skills ship with the binary; user skills live in
+    // ~/.hyperagent/skills/ and override system skills with the same name.
+    skillDirectories: [join(CONTENT_ROOT, "skills"), getUserSkillsDir()],
     systemMessage: {
       mode: "replace" as const,
       content: fullSystemMessage,
@@ -5539,6 +5835,7 @@ function buildSessionConfig() {
       listModulesTool,
       moduleInfoTool,
       deleteModuleTool,
+      generateSkillTool,
       writeOutputTool,
       readInputTool,
       readOutputTool,
@@ -5574,6 +5871,7 @@ function buildSessionConfig() {
       "list_modules",
       "module_info",
       "delete_module",
+      "generate_skill",
       "write_output",
       "read_input",
       "read_output",
@@ -5740,13 +6038,23 @@ function buildSessionConfig() {
         state.currentUserPrompt = input.prompt;
         state.hasCalledListModules = false;
 
+        // Slash commands that queue a synthetic prompt (e.g. /save-skill)
+        // set state.skipNextAutoSuggest so the auto-suggest pass doesn't
+        // match unrelated skills on scaffolding terms like "MCP" or
+        // "SKILL.md".  Consume the flag before the suggest pass below.
+        const skipAutoSuggest = state.skipNextAutoSuggest;
+        state.skipNextAutoSuggest = false;
+
         // Auto-invoke suggest_approach for non-trivial prompts
         const isNonTrivial = input.prompt.length > 25;
-        if (isNonTrivial) {
+        if (isNonTrivial && !skipAutoSuggest) {
           const result = runSuggestApproach(
             input.prompt,
             state.preLoadedSkills,
-            join(CONTENT_ROOT, "skills"),
+            [
+              { dir: join(CONTENT_ROOT, "skills"), source: "system" },
+              { dir: getUserSkillsDir(), source: "user" },
+            ],
             join(CONTENT_ROOT, "patterns"),
             debugLog,
           );
@@ -5846,6 +6154,37 @@ function buildSessionConfig() {
         toolResult: { resultType: string; error?: string };
       }) => {
         const { toolName, toolResult } = input;
+
+        // ── Session learning tracking ────────────────────────────
+        // Capture lightweight per-tool history for /save-skill to
+        // mine when authoring SKILL.md.  Bounded FIFO so memory
+        // stays flat over long sessions.
+        const success = toolResult.resultType !== "failure";
+        const errorSummary =
+          !success && toolResult.error
+            ? toolResult.error.split("\n")[0].slice(0, 200)
+            : undefined;
+        state.toolCallHistory.push({
+          tool: toolName,
+          success,
+          errorSummary,
+          timestamp: Date.now(),
+        });
+        if (state.toolCallHistory.length > MAX_TOOL_HISTORY) {
+          state.toolCallHistory.splice(
+            0,
+            state.toolCallHistory.length - MAX_TOOL_HISTORY,
+          );
+        }
+        // Top-level MCP tool fallback: when an SDK ever surfaces a
+        // tool as `mcp__<server>__<tool>` we still count the server.
+        // The primary tracking path is the MCP plugin-adapter's onCall
+        // observer (wired in syncPluginsToSandbox above) which catches
+        // calls made via `host:mcp-<name>` imports too.
+        if (success && toolName.startsWith("mcp__")) {
+          const server = toolName.split("__")[1];
+          if (server) state.mcpServersUsed.add(server);
+        }
 
         // For sandbox memory errors, tell the LLM about the current
         // heap size and how to suggest an increase to the user.
@@ -6146,10 +6485,19 @@ async function main(): Promise<void> {
   loadAllModules();
 
   // ── Load skills and patterns for suggest_approach ──────────────
-  const allSkills = loadSkills(join(CONTENT_ROOT, "skills"));
+  // User skills (in ~/.hyperagent/skills/) are loaded after system skills,
+  // so a user skill with the same name overrides the built-in version.
+  const userSkillsDir = getUserSkillsDir();
+  const allSkills = loadSkillsFromDirs([
+    { dir: join(CONTENT_ROOT, "skills"), source: "system" },
+    { dir: userSkillsDir, source: "user" },
+  ]);
   const allPatterns = loadPatterns(join(CONTENT_ROOT, "patterns"));
+  const userSkillCount = Array.from(allSkills.values()).filter(
+    (s) => s.source === "user",
+  ).length;
   debugLog(
-    `Loaded ${allSkills.size} skills, ${allPatterns.size} patterns for suggest_approach`,
+    `Loaded ${allSkills.size} skills (${userSkillCount} user), ${allPatterns.size} patterns for suggest_approach`,
   );
 
   // Wire --skill CLI flag → preLoadedSkills
@@ -6580,6 +6928,15 @@ async function main(): Promise<void> {
         pendingContinuation = null;
         console.log(
           `${ANSI.bold}${ANSI.cyan}You: ${ANSI.reset}${C.dim("(continuing after config change…)")}`,
+        );
+      } else if (state.pendingPrompt) {
+        // A slash command (e.g. /save-skill) queued a synthetic prompt
+        // for the LLM.  Drain it before reading stdin so it reaches
+        // the model exactly once.
+        trimmed = state.pendingPrompt;
+        state.pendingPrompt = null;
+        console.log(
+          `${ANSI.bold}${ANSI.cyan}You: ${ANSI.reset}${C.dim("(submitting queued prompt…)")}`,
         );
       } else {
         const userInput = await questionCapturingPaste(

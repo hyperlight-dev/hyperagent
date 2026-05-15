@@ -8,7 +8,7 @@
 import type { Skill } from "./skill-loader.js";
 import type { Pattern } from "./pattern-loader.js";
 import { matchIntent } from "./intent-matcher.js";
-import { loadSkills } from "./skill-loader.js";
+import { loadSkills, loadSkillsFromDirs } from "./skill-loader.js";
 import { loadPatterns } from "./pattern-loader.js";
 import { loadModule, type ModuleHints } from "./module-store.js";
 
@@ -323,20 +323,25 @@ export function formatGuidance(guidance: MaterialisedGuidance): string {
  *
  * @param prompt - The user's prompt text
  * @param preLoadedSkills - Pre-loaded skill names (from --skill flag)
- * @param skillsDir - Path to skills/ directory
+ * @param skillsDir - Path to skills directory(ies). A single string loads
+ *   only system skills; pass an array of `{ dir, source }` records to load
+ *   user skills alongside system skills (user wins on name collision).
  * @param patternsDir - Path to patterns/ directory
  * @param debugLog - Optional debug logger
  */
 export function runSuggestApproach(
   prompt: string,
   preLoadedSkills: string[],
-  skillsDir: string,
+  skillsDir: string | Array<{ dir: string; source: "system" | "user" }>,
   patternsDir: string,
   debugLog?: (msg: string) => void,
 ): SuggestApproachResult {
   const log = debugLog ?? (() => {});
 
-  const skills = loadSkills(skillsDir);
+  const skills =
+    typeof skillsDir === "string"
+      ? loadSkills(skillsDir)
+      : loadSkillsFromDirs(skillsDir);
   const patterns = loadPatterns(patternsDir);
 
   let matchedSkillNames: string[];

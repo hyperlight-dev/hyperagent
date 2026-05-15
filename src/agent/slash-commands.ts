@@ -47,6 +47,18 @@ import {
   createMCPPluginAdapter,
   generateMCPDeclarations,
 } from "./mcp/plugin-adapter.js";
+import {
+  listUserSkills,
+  readUserSkill,
+  deleteUserSkill,
+  userSkillExists,
+  getUserSkillsDir,
+  validateSkillName,
+} from "./skill-writer.js";
+import {
+  extractSessionContext,
+  renderSessionContext,
+} from "./session-context.js";
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -96,6 +108,20 @@ export interface SlashCommandDeps {
   mcpManager: MCPClientManager | null;
   /** Callback to sync plugins to sandbox after MCP changes. */
   syncPlugins: () => Promise<void>;
+  /**
+   * Queue a synthetic prompt for the LLM (used by `/save-skill` and
+   * similar commands that want to inject a user-turn-shaped message).
+   * The prompt is drained at the top of the next REPL iteration.
+   *
+   * `options.skipAutoSuggest` suppresses the automatic
+   * `runSuggestApproach` pass on the next turn — synthetic prompts
+   * contain scaffolding text (e.g. "MCP", "SKILL.md") that would
+   * otherwise match unrelated skill triggers.
+   */
+  submitToLLM: (
+    prompt: string,
+    options?: { skipAutoSuggest?: boolean },
+  ) => void;
 }
 
 // ── Handler ──────────────────────────────────────────────────────────
@@ -557,6 +583,15 @@ export async function handleSlashCommand(
           ...buildSessionConfig(),
         } as any);
         registerEventHandler(state.activeSession);
+        // Reset session-learning fields — the new conversation starts
+        // with no history of what we did last time, and the previous
+        // user-prompt should not anchor /save-skill or auto-suggest on
+        // the next turn either.
+        state.toolCallHistory = [];
+        state.mcpServersUsed = new Set();
+        state.modulesRegistered = [];
+        state.currentUserPrompt = "";
+        state.lastGuidance = null;
         console.log(
           `  ${C.ok("🆕 New session started.")} Conversation history cleared.`,
         );
@@ -755,6 +790,14 @@ export async function handleSlashCommand(
           } as any,
         );
         registerEventHandler(state.activeSession);
+        // Local session-learning state cannot be reconstructed from a
+        // resumed remote session — clear it so /save-skill doesn't
+        // mine stale history from the previously active conversation.
+        state.toolCallHistory = [];
+        state.mcpServersUsed = new Set();
+        state.modulesRegistered = [];
+        state.currentUserPrompt = "";
+        state.lastGuidance = null;
         console.log(
           `  ${C.ok("⏮️  Resumed session:")} ${C.val(targetId.slice(0, 12) + "…")}`,
         );
@@ -2091,56 +2134,263 @@ export async function handleSlashCommand(
     }
 
     case "/skills": {
-      // Resolve skills dir: in dev mode go up two levels (src/agent/ → repo root),
-      // in binary mode runtime content is alongside the bundle.
+      // Resolve built-in skills dir: in dev mode go up two levels
+      // (src/agent/ → repo root), in binary mode runtime content is
+      // alongside the bundle.
       const __scDirname = dirname(new URL(import.meta.url).pathname);
       const skillsDir = existsSync(join(__scDirname, "skills"))
         ? join(__scDirname, "skills")
         : resolve(__scDirname, "../..", "skills");
-      const skillArg = parts[1]?.trim();
 
-      if (!skillArg) {
-        // List available skills
-        try {
-          const { readdirSync, readFileSync, existsSync } =
-            await import("node:fs");
-          if (!existsSync(skillsDir)) {
-            console.log("  No skills directory found.");
-            return true;
-          }
-          const dirs = readdirSync(skillsDir, { withFileTypes: true }).filter(
-            (d) => d.isDirectory(),
-          );
-          if (dirs.length === 0) {
-            console.log("  No skills found.");
-            return true;
-          }
-          console.log(
-            `  ${C.label("📚 Available skills")} (${dirs.length}):\n`,
-          );
-          for (const dir of dirs) {
-            const skillFile = join(skillsDir, dir.name, "SKILL.md");
-            if (existsSync(skillFile)) {
-              const content = readFileSync(skillFile, "utf8");
-              // Extract description from YAML frontmatter
-              const descMatch = content.match(/^description:\s*(.+)$/m);
-              const desc = descMatch ? descMatch[1] : "(no description)";
-              console.log(`     /${dir.name}`);
-              console.log(`     ${C.dim(desc)}\n`);
-            }
-          }
-          console.log(`  ${C.dim("Invoke: /skills <name> or /<name>")}`);
-        } catch {
-          console.log("  Error reading skills directory.");
+      const sub = parts[1]?.trim()?.toLowerCase() ?? "";
+      const arg = parts[2]?.trim();
+
+      // /skills info <name> — show full SKILL.md (user > system precedence)
+      if (sub === "info") {
+        if (!arg) {
+          console.log(`  ${C.dim("Usage: /skills info <name>")}`);
+          return true;
         }
+        // Validate the name BEFORE touching the filesystem so a value
+        // like "../etc" can never be `join`-ed into a path we read.
+        const nameError = validateSkillName(arg);
+        if (nameError) {
+          console.log(`  ${C.err("❌ Invalid skill name:")} ${nameError}`);
+          return true;
+        }
+        const userContent = readUserSkill(arg);
+        if (userContent) {
+          console.log(
+            `  ${C.label("📚 User skill:")} ${C.tool(arg)} ${C.dim("(👤)")}\n`,
+          );
+          console.log(userContent);
+          return true;
+        }
+        const systemFile = join(skillsDir, arg, "SKILL.md");
+        if (existsSync(systemFile)) {
+          const { readFileSync } = await import("node:fs");
+          console.log(`  ${C.label("📚 System skill:")} ${C.tool(arg)}\n`);
+          console.log(readFileSync(systemFile, "utf8"));
+          return true;
+        }
+        console.log(`  ${C.err("❌ Skill not found:")} ${arg}`);
         return true;
       }
 
-      // Invoke a specific skill by name — delegate to the SDK's
-      // skill handling via the slash command
-      console.log(`  ${C.info("📚")} Invoking skill: ${C.tool(skillArg)}`);
-      // The SDK handles /skill-name natively — just fall through
-      return false;
+      // /skills edit <name> — print the user-skill path for $EDITOR.
+      if (sub === "edit") {
+        if (!arg) {
+          console.log(`  ${C.dim("Usage: /skills edit <name>")}`);
+          return true;
+        }
+        const nameError = validateSkillName(arg);
+        if (nameError) {
+          console.log(`  ${C.err("❌ Invalid skill name:")} ${nameError}`);
+          return true;
+        }
+        if (!userSkillExists(arg)) {
+          console.log(
+            `  ${C.err("❌ User skill not found:")} ${arg} ` +
+              `${C.dim("(system skills cannot be edited from the REPL)")}`,
+          );
+          return true;
+        }
+        const filePath = join(getUserSkillsDir(), arg, "SKILL.md");
+        console.log(`  ${C.label("📝 Edit:")} ${filePath}`);
+        console.log(
+          `  ${C.dim("Open in your editor, save, then the change applies on next /suggest_approach.")}`,
+        );
+        return true;
+      }
+
+      // /skills delete <name> — remove a user skill (system ones are immutable).
+      if (sub === "delete") {
+        if (!arg) {
+          console.log(`  ${C.dim("Usage: /skills delete <name>")}`);
+          return true;
+        }
+        const nameError = validateSkillName(arg);
+        if (nameError) {
+          console.log(`  ${C.err("❌ Invalid skill name:")} ${nameError}`);
+          return true;
+        }
+        if (!userSkillExists(arg)) {
+          console.log(
+            `  ${C.err("❌ User skill not found:")} ${arg} ` +
+              `${C.dim("(system skills cannot be deleted)")}`,
+          );
+          return true;
+        }
+        // Confirm before deletion — destructive, no undo.
+        await drainAndWarn(rl);
+        const confirmed = state.autoApprove
+          ? true
+          : (
+              await rl.question(
+                `  ${C.warn("🗑️  Delete user skill")} ${C.tool(arg)}? [y/n] `,
+              )
+            )
+              .trim()
+              .toLowerCase() === "y";
+        if (!confirmed) {
+          console.log(`  ${C.dim("Cancelled.")}`);
+          return true;
+        }
+        deleteUserSkill(arg);
+        console.log(`  ${C.ok("🗑️  Deleted user skill:")} ${arg}`);
+        return true;
+      }
+
+      // /skills <name> — invoke a skill (delegates to SDK).
+      const skillArg = parts[1]?.trim();
+      if (skillArg && sub !== "list") {
+        console.log(`  ${C.info("📚")} Invoking skill: ${C.tool(skillArg)}`);
+        return false;
+      }
+
+      // /skills (no args) or /skills list — list system + user skills,
+      // tagging user-authored ones with the 👤 badge.  Merged so the user
+      // sees a single namespace and any user override is obvious.
+      try {
+        const { readdirSync, readFileSync } = await import("node:fs");
+        type Row = {
+          name: string;
+          desc: string;
+          source: "system" | "user";
+          overridden: boolean;
+        };
+        const rows: Map<string, Row> = new Map();
+
+        if (existsSync(skillsDir)) {
+          const dirs = readdirSync(skillsDir, { withFileTypes: true }).filter(
+            (d) => d.isDirectory(),
+          );
+          for (const dir of dirs) {
+            const skillFile = join(skillsDir, dir.name, "SKILL.md");
+            if (!existsSync(skillFile)) continue;
+            const content = readFileSync(skillFile, "utf8");
+            const descMatch = content.match(/^description:\s*(.+)$/m);
+            rows.set(dir.name, {
+              name: dir.name,
+              desc: descMatch ? descMatch[1] : "(no description)",
+              source: "system",
+              overridden: false,
+            });
+          }
+        }
+
+        for (const info of listUserSkills()) {
+          const content = readUserSkill(info.name);
+          const descMatch = content?.match(/^description:\s*(.+)$/m);
+          const wasSystem = rows.has(info.name);
+          rows.set(info.name, {
+            name: info.name,
+            desc: descMatch ? descMatch[1] : "(no description)",
+            source: "user",
+            overridden: wasSystem,
+          });
+        }
+
+        if (rows.size === 0) {
+          console.log("  No skills found.");
+          return true;
+        }
+
+        const sorted = Array.from(rows.values()).sort((a, b) =>
+          a.name.localeCompare(b.name),
+        );
+        console.log(
+          `  ${C.label("📚 Available skills")} (${sorted.length}):\n`,
+        );
+        for (const row of sorted) {
+          const badge =
+            row.source === "user"
+              ? row.overridden
+                ? " 👤 (overrides built-in)"
+                : " 👤"
+              : "";
+          console.log(`     /${row.name}${badge}`);
+          console.log(`     ${C.dim(row.desc)}\n`);
+        }
+        console.log(
+          `  ${C.dim("Invoke: /skills <name> · Manage: /skills info|edit|delete <name>")}`,
+        );
+      } catch {
+        console.log("  Error reading skills directory.");
+      }
+      return true;
+    }
+
+    case "/save-skill": {
+      // Capture session learnings as a user-authored SKILL.md.
+      //
+      // We don't author the SKILL.md ourselves — we hand a structured
+      // summary of "what happened this session" to the LLM and ask it
+      // to call the generate_skill tool with the right shape.  The
+      // model has all the context (it's been the agent the whole time),
+      // so it's better placed than the REPL to write the guidance text.
+      const desiredName = parts[1]?.trim();
+      if (!state.activeSession) {
+        console.log(
+          `  ${C.err("❌ No active session — start the agent first.")}`,
+        );
+        return true;
+      }
+
+      const ctx = extractSessionContext(state);
+      if (ctx.totalToolCalls === 0 && !ctx.userPrompt) {
+        console.log(
+          `  ${C.warn("⚠️  Nothing to learn from yet — run a task first, then /save-skill.")}`,
+        );
+        return true;
+      }
+
+      const rendered = renderSessionContext(ctx);
+      const nameDirective = desiredName
+        ? `Use the name "${desiredName}" for the skill.`
+        : "Pick a kebab-case name that summarises the workflow (e.g. 'teams-transcript-finder').";
+
+      const promptLines = [
+        "The user has asked me to save what we learned in this session as a reusable skill.",
+        "Call the `generate_skill` tool with a SKILL.md that captures the workflow.",
+        "",
+        nameDirective,
+        "",
+        "Authoring rules:",
+        "  • description: ≤280 chars, action-oriented (what the skill helps the user do).",
+        "  • triggers: 3–10 distinctive phrases that future related prompts are likely to contain.",
+        "  • guidance: concise markdown — workflow steps, gotchas, do/don't. NOT a transcript.",
+        "  • requiresMcp: only include MCP servers actually needed by the workflow.",
+        "  • allowedTools: the smallest set of tools needed to execute this workflow.",
+        "  • companionModule: include ONLY if there's reusable JS that should ship with the skill.",
+        "",
+        "Session context to draw on:",
+        "",
+        rendered,
+        "",
+        "After calling `generate_skill`, briefly tell me what you saved and what it'll be triggered by.",
+      ];
+      const synthetic = promptLines.join("\n");
+
+      console.log(
+        `  ${C.label("📝 Capturing session learnings…")}` +
+          (desiredName ? ` ${C.dim("(name: " + desiredName + ")")}` : ""),
+      );
+      // "distinct tools" = full-history cardinality, NOT the bounded
+      // topTools view (capped at MAX_TOP_TOOLS).  Computing it from
+      // toolCallHistory keeps the status line honest.
+      const distinctToolCount = new Set(
+        state.toolCallHistory.map((e) => e.tool),
+      ).size;
+      console.log(
+        `  ${C.dim("Context: " + ctx.totalToolCalls + " tool calls, " + distinctToolCount + " distinct tools.")}`,
+      );
+
+      // Bypass auto suggest_approach on the next turn — the synthetic
+      // prompt mentions "MCP", "SKILL.md", etc. as scaffolding and
+      // would otherwise match unrelated skill triggers.
+      deps.submitToLLM(synthetic, { skipAutoSuggest: true });
+      return true;
     }
 
     case "/clear": {

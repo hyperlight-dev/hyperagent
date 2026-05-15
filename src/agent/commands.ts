@@ -488,11 +488,27 @@ const COMMANDS: readonly CommandEntry[] = Object.freeze([
     help: "List and invoke available skills",
     group: "General",
     detail:
-      "/skills — list all available skills\n" +
+      "/skills — list system + user skills (user-authored marked 👤)\n" +
       "/skills <name> — invoke a skill (injects domain expertise)\n" +
+      "/skills info <name> — show the full SKILL.md\n" +
+      "/skills edit <name> — print path of user skill for $EDITOR\n" +
+      "/skills delete <name> — remove a user skill (system ones are immutable)\n" +
       "Skills are SKILL.md files in the skills/ directory.\n" +
-      "Invoke a skill to get specialised instructions for a task.\n" +
+      "User skills live in ~/.hyperagent/skills/ and override system ones.\n" +
       "Example: /skills pptx-expert — expert at building PPTX presentations.",
+  },
+  {
+    completion: "/save-skill",
+    help: "Save session learnings as a reusable skill",
+    group: "General",
+    detail:
+      "/save-skill — capture what we learned this session as a SKILL.md\n" +
+      "/save-skill <name> — same, but suggest a name to the LLM\n" +
+      "Sends a structured summary of the session's tool activity, MCP\n" +
+      "servers used, modules registered, and errors hit to the LLM,\n" +
+      "which then calls the generate_skill tool to write SKILL.md to\n" +
+      "~/.hyperagent/skills/<name>/. The skill is loaded on next start\n" +
+      "and triggered automatically by /suggest_approach.",
   },
   {
     completion: "/help",
