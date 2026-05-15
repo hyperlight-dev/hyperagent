@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [v0.6.1] - 2026-05-15
+
+### Fixed
+
+- **`/skills <name>` did nothing** — the REPL forwarded the raw `/skills kql-expert` string but the Copilot SDK only understands `/<skillname>`, so the LLM saw a free-text request and sometimes mis-fired `generate_skill`. REPL now rewrites `/skills <name>` → `/<name>` before dispatch, gating on `validateSkillName()` so reserved subcommands (`info`, `edit`, `delete`, `list`, `reload`) pass through untouched (#151)
+- **`/skills reload` was rewritten to `/reload`** — a parallel hardcoded `KNOWN_SKILLS_SUBS` set drifted from `RESERVED_SKILL_NAMES` and missed the new `reload` subcommand. Rewrite is now gated on `validateSkillName()` (single source of truth) (#151)
+- **Path traversal in slash-command skill detection** — default-case `existsSync(join(skillsDir, cmd.slice(1), "SKILL.md"))` used unvalidated input; `/../etc` resolved outside `skillsDir`, turning the "is this a skill?" check into an arbitrary filesystem probe. Now routes through `systemSkillExists()` which validates first (#151)
+- **`generate_skill` could silently shadow built-in skills** — collision check only consulted user skills, letting `/save-skill kql-expert` overwrite the bundled curated copy without warning. New `systemSkillExists()` helper + ⚠️ SHADOW banner + explicit `overwrite=true` requirement on system collisions (#151)
+- **Sandbox verbose traces leaked into REPL terminal** — `[sandbox] setPlugins / invalidateSandboxWithSave / autoSaveState` chatter bypassed the debug log. `tool.js` now takes a `debugLog` callback, wired to the existing `~/.hyperagent/logs/agent-debug-*.log` sink (#151)
+- **`marked-terminal` v7 broke `**bold**` in tight list items** — its `text` renderer used `token.text` raw instead of recursing via `parseInline()`, leaking literal asterisks to the terminal. Patched via renderer override + regression tests (#151)
+- **`###` heading prefix leaked through terminal renderer** — flipped `showSectionPrefix: false` so headings render cleanly (#151)
+- **Profile-apply preview printed raw `**Configuration:**`** — two `console.log` callsites bypassed the markdown renderer. Fixed to route through `renderMarkdown()` (#151)
+- **MCP missing-prerequisite guidance was buried mid-document** — `formatGuidance()` hid the "you need to configure server X" block where the model ignored it. Now appears at the top under a `MISSING PREREQUISITES` banner (#151)
+- **MCP synthesised fake `--mcp-setup-${name}` flags** — for servers without a real shortcut. `MCP_SETUP_COMMANDS` expanded to all 5 supported servers; unsupported servers now correctly point at `config.json` instead of a non-existent flag (#151)
+
+### Added
+
+- **`/skills reload`** — hot-reload the SDK skill registry mid-session without restarting. Auto-reload also fires after `generate_skill` writes so freshly authored skills are invocable immediately (#151)
+- **`/markdown` subcommands** — `/markdown status`, `/markdown on`, `/markdown off`, `/markdown toggle` — no more toggle-trap where you couldn't query the current state (#151)
+- **Profile-apply preview as markdown table** — `applyProfileImpl` now emits a `Limit / Before / After` table when `/markdown` is on, rendered by `marked-terminal` as a unicode box-drawing table that's much easier to scan than the previous flat list (#151)
+- **README quick install section** — surfaced near the top of the README for faster onboarding (#149)
+
+### Changed
+
+- **Dependency bumps** — `@github/copilot` 1.0.39 → 1.0.48 (#150)
+
 ## [v0.6.0] - 2026-05-15
 
 ### Added
