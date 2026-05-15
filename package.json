@@ -37,7 +37,7 @@
     "boxen": "^8.0.1",
     "highlight.js": "^10.7.3",
     "hyperlight-analysis": "file:src/code-validator/guest",
-    "marked": "^15.0.12",
+    "marked": "^18.0.3",
     "marked-terminal": "^7.3.0",
     "zod": "^4.3.6"
   },
