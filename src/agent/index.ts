@@ -110,6 +110,7 @@ import {
   getUserSkillsDir,
   writeUserSkill,
   userSkillExists,
+  systemSkillExists,
   type SkillData,
 } from "./skill-writer.js";
 import { validatePath } from "../../plugins/shared/path-jail.js";
@@ -709,8 +710,13 @@ const MAX_TOOL_HISTORY = 200;
 /**
  * Create the sandbox tool instance. Configuration is resolved from
  * environment variables (see shared/sandbox-tool.js for details).
+ *
+ * `debugLog` routes the sandbox's verbose lifecycle traces (the noisy
+ * `[sandbox] setPlugins`, `invalidateSandboxWithSave`, etc. lines) into
+ * `~/.hyperagent/logs/agent-debug-*.log` when --debug is on, keeping
+ * them OFF the user-facing terminal.
  */
-const sandbox = createSandboxTool();
+const sandbox = createSandboxTool({ debugLog });
 
 /**
  * Session transcript recorder. Created at module level so the SIGINT
@@ -2579,6 +2585,7 @@ async function getBashSandbox() {
     outputBufferKb: 2048,
     cpuTimeoutMs: 10000,
     wallClockTimeoutMs: 15000,
+    debugLog,
   });
 
   // Load ONLY the bash module — no pptx/pdf/xlsx
@@ -5552,11 +5559,33 @@ const generateSkillTool = defineTool("generate_skill", {
         return { success: false, error: "No readline available" };
       }
 
-      // Refuse silent overwrite — the LLM must opt in explicitly.
-      if (!params.overwrite && userSkillExists(params.name)) {
+      // Detect collisions with BOTH user skills and the bundled
+      // built-in skills under <CONTENT_ROOT>/skills/.
+      //
+      // Without this check the user-skill loader would silently
+      // shadow the curated built-in (see Bug 2: kql-expert) — the
+      // LLM hallucinates a half-formed replacement and the carefully
+      // authored bundled skill becomes unreachable.  Require an
+      // explicit overwrite=true to make the destructive intent visible.
+      const systemSkillsDir = join(CONTENT_ROOT, "skills");
+      const userExists = userSkillExists(params.name);
+      const systemExists = systemSkillExists(params.name, systemSkillsDir);
+
+      if (!params.overwrite && userExists) {
         return {
           success: false,
           error: `Skill "${params.name}" already exists. Set overwrite=true to replace it.`,
+        };
+      }
+      if (!params.overwrite && systemExists) {
+        return {
+          success: false,
+          error:
+            `Skill "${params.name}" is a built-in system skill. ` +
+            `Saving a user skill with this name would SHADOW the curated ` +
+            `built-in for this user only — almost always not what you want. ` +
+            `Pick a different name (e.g. "${params.name}-custom"), or set ` +
+            `overwrite=true to deliberately shadow the built-in.`,
         };
       }
 
@@ -5588,9 +5617,26 @@ const generateSkillTool = defineTool("generate_skill", {
       // Surface the overwrite path explicitly — the LLM passing
       // `overwrite=true` is necessary but not sufficient.  The user
       // gets a chance to refuse before we replace existing content.
-      const isOverwrite =
-        params.overwrite === true && userSkillExists(params.name);
-      if (isOverwrite) {
+      // Shadowing a built-in is louder because it's almost always
+      // a regrettable action (the curated skill becomes unreachable
+      // for this user only — see Bug 2).
+      const isOverwrite = params.overwrite === true && userExists;
+      const isShadowingBuiltin =
+        params.overwrite === true && systemExists && !userExists;
+      if (isShadowingBuiltin) {
+        console.log(
+          `\n  ${C.err("⚠️  SHADOW built-in skill:")} ${C.tool(params.name)}`,
+        );
+        console.log(
+          `     ${C.warn("This will OVERRIDE the curated built-in skill for THIS USER only.")}`,
+        );
+        console.log(
+          `     ${C.warn("The bundled version stays on disk but stops loading.")}`,
+        );
+        console.log(
+          `     ${C.warn("Consider using a different name unless you really mean to override.")}`,
+        );
+      } else if (isOverwrite) {
         console.log(
           `\n  ${C.warn("⚠️  Overwrite existing user skill:")} ${C.tool(params.name)}`,
         );
@@ -5611,9 +5657,11 @@ const generateSkillTool = defineTool("generate_skill", {
       }
 
       await drainAndWarn(rl);
-      const promptLabel = isOverwrite
-        ? `  ${C.dim("Overwrite skill? [y/n] ")}`
-        : `  ${C.dim("Save skill? [y/n] ")}`;
+      const promptLabel = isShadowingBuiltin
+        ? `  ${C.dim("Shadow built-in skill? [y/n] ")}`
+        : isOverwrite
+          ? `  ${C.dim("Overwrite skill? [y/n] ")}`
+          : `  ${C.dim("Save skill? [y/n] ")}`;
       const approval = state.autoApprove
         ? "y"
         : await promptUser(rl, promptLabel);
@@ -6963,6 +7011,24 @@ async function main(): Promise<void> {
       // suggestion acceptance is stale.
       if (trimmed.startsWith("/")) {
         pendingContinuation = null;
+        // Bug 3: rewrite "/skills <name>" → "/<name>" so the Copilot
+        // SDK's skill-invocation grammar matches.  Previously the raw
+        // "/skills <name>" string was forwarded; the SDK couldn't
+        // parse it as a skill invocation and the LLM interpreted it
+        // as natural language — sometimes calling generate_skill to
+        // SAVE a same-named skill, shadowing the built-in.  /skills
+        // followed by a known subcommand (info|edit|delete|list) is
+        // left alone so those commands keep working.
+        const skillsParts = trimmed.split(/\s+/);
+        const KNOWN_SKILLS_SUBS = new Set(["info", "edit", "delete", "list"]);
+        if (
+          skillsParts[0] === "/skills" &&
+          skillsParts.length === 2 &&
+          skillsParts[1] &&
+          !KNOWN_SKILLS_SUBS.has(skillsParts[1].toLowerCase())
+        ) {
+          trimmed = `/${skillsParts[1]}`;
+        }
         const handled = await handleSlashCommand(trimmed, rl);
         if (handled) continue;
         // Not handled — could be a skill (/<skill-name>).

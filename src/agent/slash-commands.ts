@@ -2241,11 +2241,17 @@ export async function handleSlashCommand(
         return true;
       }
 
-      // /skills <name> — invoke a skill (delegates to SDK).
+      // /skills <name> — bridge to "/<name>" so the SDK's skill-
+      // invocation grammar matches (Bug 3).  Previously this block
+      // printed "Invoking skill" and forwarded the raw "/skills <name>"
+      // text to the SDK, which doesn't speak that grammar — the LLM
+      // saw it as natural language and sometimes mis-fired
+      // generate_skill.  The REPL intake layer also rewrites this
+      // form, but we cover synthetic callers (--skill flag, suggested
+      // command auto-apply, /save-skill prompts) here as well.
       const skillArg = parts[1]?.trim();
       if (skillArg && sub !== "list") {
-        console.log(`  ${C.info("📚")} Invoking skill: ${C.tool(skillArg)}`);
-        return false;
+        return await handleSlashCommand(`/${skillArg}`, rl, deps);
       }
 
       // /skills (no args) or /skills list — list system + user skills,
@@ -2313,7 +2319,7 @@ export async function handleSlashCommand(
           console.log(`     ${C.dim(row.desc)}\n`);
         }
         console.log(
-          `  ${C.dim("Invoke: /skills <name> · Manage: /skills info|edit|delete <name>")}`,
+          `  ${C.dim("Invoke: /<name> · Manage: /skills info|edit|delete <name>")}`,
         );
       } catch {
         console.log("  Error reading skills directory.");
@@ -3062,8 +3068,15 @@ export async function handleSlashCommand(
       try {
         const { existsSync } = await import("node:fs");
         const skillName = cmd.slice(1); // remove leading /
-        const skillPath = join(skillsDir, skillName, "SKILL.md");
-        if (existsSync(skillPath)) {
+        // System skills live under <CONTENT_ROOT>/skills/, user skills
+        // under getUserSkillsDir().  The SDK has both in
+        // skillDirectories so it can invoke either — we just need to
+        // recognise both here so the "Invoking skill" log fires and
+        // the input gets forwarded instead of reported as unknown.
+        if (
+          existsSync(join(skillsDir, skillName, "SKILL.md")) ||
+          userSkillExists(skillName)
+        ) {
           console.log(`  ${C.info("📚")} Invoking skill: ${C.tool(skillName)}`);
           return false; // Let SDK handle it
         }

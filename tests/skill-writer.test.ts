@@ -364,3 +364,45 @@ describe("writeUserSkill / listUserSkills / readUserSkill / deleteUserSkill", ()
     ).toThrow(/exceeds maximum size/);
   });
 });
+
+// ── systemSkillExists ────────────────────────────────────────────────
+
+describe("systemSkillExists", () => {
+  it("returns true when <systemSkillsDir>/<name>/SKILL.md exists", () => {
+    const sysDir = mkdtempSync(join(tmpdir(), "skill-writer-sys-"));
+    try {
+      const skillDir = join(sysDir, "kql-expert");
+      mkdirSync(skillDir, { recursive: true });
+      writeFileSync(join(skillDir, "SKILL.md"), "stub", "utf-8");
+      expect(writer.systemSkillExists("kql-expert", sysDir)).toBe(true);
+    } finally {
+      rmSync(sysDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns false when the skill directory has no SKILL.md", () => {
+    const sysDir = mkdtempSync(join(tmpdir(), "skill-writer-sys-"));
+    try {
+      mkdirSync(join(sysDir, "kql-expert"), { recursive: true });
+      // Empty dir — no SKILL.md
+      expect(writer.systemSkillExists("kql-expert", sysDir)).toBe(false);
+    } finally {
+      rmSync(sysDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns false when the systemSkillsDir itself is missing", () => {
+    expect(
+      writer.systemSkillExists(
+        "anything",
+        join(tmpdir(), "definitely-not-here-" + Date.now()),
+      ),
+    ).toBe(false);
+  });
+
+  it("returns false for an invalid skill name (no path traversal)", () => {
+    // Validation runs first so a malicious name can't escape the dir.
+    expect(writer.systemSkillExists("../etc", "/usr")).toBe(false);
+    expect(writer.systemSkillExists("Has Spaces", "/usr")).toBe(false);
+  });
+});
