@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [v0.6.0] - 2026-05-15
+
+### Added
+
+- **User-generated skills from session learnings** — Persist what the agent learned in a session as a reusable skill at `~/.hyperagent/skills/<name>/SKILL.md`, surviving upgrades and overriding bundled skills with the same name. Triggered via `/save-skill [name]` or natural language ("save this as a skill"). New `generate_skill` tool with interactive approval; `/skills` gains `info`, `edit`, `delete` subcommands; skill-loader supports override semantics across multiple directories (#139)
+- **KQL expert skill** — New skill with 35 triggers and `requires-mcp: fabric-rti-mcp` frontmatter, KQL/Kusto syntax highlighting in terminal markdown (derived from `@kusto/monaco-kusto`), `requires-mcp` enrichment wiring, `--mcp-setup-fabric-rti` CLI command, intent-matcher regression tests (#137)
+- **Terminal markdown rendering** — LLM output is now rendered through `marked` + `marked-terminal` with proper headings, bold, code blocks, lists, tables, and links. Enabled by default; opt out with `--no-markdown` (or toggle off with `/markdown` / `/md`, or set `HYPERAGENT_MARKDOWN=0`) to restore raw streaming (#135, #136)
+- **Verbose/debug diagnostic gating** — `[hyperlight-analysis]` Rust diagnostics, `[mcp]` connection messages, and MCP subprocess stderr now only surface under `HYPERAGENT_VERBOSE` / `HYPERAGENT_DEBUG` (#137)
+- **`execute_bash` large output interception** — Mirrors the `execute_javascript` pattern, saves results to disk before the SDK can truncate to inaccessible host `/tmp` files (#134)
+
+### Fixed
+
+- **`marked` v15 + `marked-terminal` v7 incompat** — Switched from the legacy `new TerminalRenderer(opts)` constructor to the `markedTerminal()` factory; the legacy route assigned config to own enumerable properties (`this.o`, `this.tab`, …) which made `marked` v15's `use()` validator throw "renderer 'o' does not exist" at module init. Added a regression import test (#138)
+- **HybridFs sandbox path mapping** — `/tmp/foo.txt` now maps to `tmp/foo.txt` (not `foo.txt`), preventing collisions with user files in `baseDir`; bash FS adapter refactored from a 12-method delegation object into `HybridFs extends InMemoryFs` for cleaner super-method fallbacks (#134)
+- **Prettier mangling of styled help/error templates** — Nested template literals inside `C.dim`/`C.err`/`C.ok`/`C.warn` replaced with string concatenation so Prettier can't rewrite them into broken output (#134)
+- **Error message styling** — Full error text (not just the `❌ Error:` label) is now wrapped in `C.err()` so the detail stays red across 11 paths in `slash-commands.ts` and SDK-level tool-failure display in `event-handler.ts` (#135)
+- **`/markdown` toggle missed system-prompt rebuild** — Setting the toggle now flips `sessionNeedsRebuild` so the system prompt reflects the new mode (#136)
+- **Markdown false positives** — Removed over-eager bold and unordered-list patterns from `looksLikeMarkdown`; `Marked` now uses a local instance instead of global `setOptions` (#136)
+
+### Changed
+
+- **Dependency bumps** — `@azure/msal-node` 5.1.5 → 5.2.1, `tsx` 4.21.0 → 4.22.0, `@types/node` 25.6.0 → 25.8.0, `tokio` in code-validator guest (#142, #143, #146, #147)
+
 ## [v0.5.0] - 2026-05-07
 
 ### Added
@@ -257,6 +280,7 @@ Initial public release.
 - Path jailing for filesystem plugins
 - SSRF protection for fetch plugin (DNS + post-connect IP validation)
 
+[v0.6.0]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.6.0
 [v0.5.0]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.5.0
 [v0.4.2]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.4.2
 [v0.4.1]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.4.1
