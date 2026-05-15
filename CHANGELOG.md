@@ -11,8 +11,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Added
 
 - **User-generated skills from session learnings** — Persist what the agent learned in a session as a reusable skill at `~/.hyperagent/skills/<name>/SKILL.md`, surviving upgrades and overriding bundled skills with the same name. Triggered via `/save-skill [name]` or natural language ("save this as a skill"). New `generate_skill` tool with interactive approval; `/skills` gains `info`, `edit`, `delete` subcommands; skill-loader supports override semantics across multiple directories (#139)
-- **KQL expert skill** — New skill with 35 triggers and `requires-mcp: fabric-rti-mcp` frontmatter, KQL/Kusto syntax highlighting in terminal markdown (derived from `@kusto/monaco-kusto`), `requires-mcp` enrichment wiring, `--mcp setup-fabric-rti` CLI command, intent-matcher regression tests (#137)
-- **Terminal markdown rendering** — New `--markdown` CLI flag and `/markdown` (`/md`) toggle that render LLM output through `marked` + `marked-terminal` with proper headings, bold, code blocks, lists, tables, and links. Raw streaming remains the default (#135, #136)
+- **KQL expert skill** — New skill with 35 triggers and `requires-mcp: fabric-rti-mcp` frontmatter, KQL/Kusto syntax highlighting in terminal markdown (derived from `@kusto/monaco-kusto`), `requires-mcp` enrichment wiring, `--mcp-setup-fabric-rti` CLI command, intent-matcher regression tests (#137)
+- **Terminal markdown rendering** — LLM output is now rendered through `marked` + `marked-terminal` with proper headings, bold, code blocks, lists, tables, and links. Enabled by default; opt out with `--no-markdown` (or toggle off with `/markdown` / `/md`, or set `HYPERAGENT_MARKDOWN=0`) to restore raw streaming (#135, #136)
 - **Verbose/debug diagnostic gating** — `[hyperlight-analysis]` Rust diagnostics, `[mcp]` connection messages, and MCP subprocess stderr now only surface under `HYPERAGENT_VERBOSE` / `HYPERAGENT_DEBUG` (#137)
 - **`execute_bash` large output interception** — Mirrors the `execute_javascript` pattern, saves results to disk before the SDK can truncate to inaccessible host `/tmp` files (#134)
 
@@ -280,6 +280,7 @@ Initial public release.
 - Path jailing for filesystem plugins
 - SSRF protection for fetch plugin (DNS + post-connect IP validation)
 
+[v0.6.0]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.6.0
 [v0.5.0]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.5.0
 [v0.4.2]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.4.2
 [v0.4.1]: https://github.com/hyperlight-dev/hyperagent/releases/tag/v0.4.1
