@@ -1,0 +1,127 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+
+# Manual probe: confirm the Virtualization.framework is available on a
+# GitHub-hosted Apple Silicon (ARM64) macOS runner.
+#
+# Apple's Virtualization.framework is the macOS analogue of KVM/WHP that
+# hyperlight needs for micro-VMs. This job inspects the runner so we can
+# verify before betting on macOS hosting (see /memories/azure-hosting-kvm.md
+# for why "just use platform X" warrants a real check first).
+
+name: Check macOS Virtualization Framework
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-virtualization:
+    name: Inspect Virtualization.framework on ARM macOS
+    runs-on: macos-latest
+
+    steps:
+      - name: Report runner identity
+        run: |
+          echo "::group::Runner identity"
+          echo "OS:            $(sw_vers -productName) $(sw_vers -productVersion) (build $(sw_vers -buildVersion))"
+          echo "Architecture:  $(uname -m)"
+          echo "Kernel:        $(uname -srv)"
+          echo "::endgroup::"
+
+      - name: Assert Apple Silicon (arm64)
+        run: |
+          arch="$(uname -m)"
+          if [ "$arch" != "arm64" ]; then
+            echo "::error::Expected arm64 runner, got '$arch'"
+            exit 1
+          fi
+          echo "Confirmed ARM64 runner."
+
+      - name: Check hypervisor support via sysctl
+        run: |
+          echo "::group::sysctl hv/vmm"
+          # kern.hv_support is the canonical "hypervisor available" flag.
+          hv_support="$(sysctl -n kern.hv_support 2>/dev/null || echo missing)"
+          echo "kern.hv_support = ${hv_support}"
+          # Useful neighbours for diagnostics; not all present on every release.
+          sysctl -a 2>/dev/null | grep -E '^(kern\.hv_|hw\.optional\.arm|machdep\.cpu\.brand_string)' || true
+          echo "::endgroup::"
+
+          if [ "$hv_support" != "1" ]; then
+            echo "::error::kern.hv_support is not 1 — hypervisor not advertised by kernel."
+            exit 1
+          fi
+
+      - name: Locate Virtualization.framework
+        run: |
+          fw="/System/Library/Frameworks/Virtualization.framework"
+          if [ ! -d "$fw" ]; then
+            echo "::error::Virtualization.framework not present at $fw"
+            exit 1
+          fi
+          echo "Found framework bundle: $fw"
+          ls -la "$fw"
+          # Best-effort version read; not fatal if Info.plist layout changes.
+          if [ -f "$fw/Resources/Info.plist" ]; then
+            /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$fw/Resources/Info.plist" 2>/dev/null \
+              | sed 's/^/Framework version: /' || true
+          fi
+
+      - name: Probe VZVirtualMachine.isSupported via Swift
+        # The framework being on disk doesn't guarantee the runtime says
+        # "yes you can boot a VM here". The authoritative check is
+        # VZVirtualMachine.isSupported, exposed by Apple's Swift API.
+        run: |
+          probe="$(mktemp -t vz-probe.XXXXXX).swift"
+          cat > "$probe" <<'SWIFT'
+          import Foundation
+          #if canImport(Virtualization)
+          import Virtualization
+          let supported = VZVirtualMachine.isSupported
+          FileHandle.standardOutput.write(Data("VZVirtualMachine.isSupported = \(supported)\n".utf8))
+          exit(supported ? 0 : 2)
+          #else
+          FileHandle.standardError.write(Data("Virtualization module not importable on this runner\n".utf8))
+          exit(3)
+          #endif
+          SWIFT
+
+          echo "Running probe: $probe"
+          set +e
+          swift "$probe"
+          rc=$?
+          set -e
+
+          case "$rc" in
+            0)
+              echo "Virtualization framework is ENABLED on this runner."
+              ;;
+            2)
+              echo "::error::Virtualization.framework loaded but VZVirtualMachine.isSupported == false"
+              exit 1
+              ;;
+            3)
+              echo "::error::Swift could not import the Virtualization module"
+              exit 1
+              ;;
+            *)
+              echo "::error::Swift probe failed with exit code $rc"
+              exit 1
+              ;;
+          esac
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### macOS Virtualization Framework check"
+            echo ""
+            echo "| Property | Value |"
+            echo "| --- | --- |"
+            echo "| Runner label | macos-latest |"
+            echo "| OS | $(sw_vers -productName) $(sw_vers -productVersion) |"
+            echo "| Architecture | $(uname -m) |"
+            echo "| kern.hv_support | $(sysctl -n kern.hv_support 2>/dev/null || echo missing) |"
+          } >> "$GITHUB_STEP_SUMMARY"
