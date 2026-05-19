@@ -1,0 +1,198 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+
+# Manual probe: confirm the Virtualization.framework is available on a
+# GitHub-hosted Apple Silicon (ARM64) macOS runner.
+#
+# Apple's Virtualization.framework is the macOS analogue of KVM/WHP that
+# hyperlight needs for micro-VMs. This job inspects the runner so we can
+# verify before betting on macOS hosting (see /memories/azure-hosting-kvm.md
+# for why "just use platform X" warrants a real check first).
+#
+# Authoritative pass/fail: VZVirtualMachine.isSupported (Apple's own runtime
+# verdict). The sysctl dump is diagnostic only — on Apple Silicon some keys
+# (notably kern.hv_support) simply do not exist; treating their absence as a
+# failure is wrong. We also capture kern.hv_vmm_present which tells us whether
+# this kernel itself is running inside a hypervisor (true for GitHub-hosted
+# macOS runners) — relevant because nested-virt support is silicon/OS
+# version dependent.
+
+name: Check macOS Virtualization Framework
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-virtualization:
+    name: Inspect Virtualization.framework on ARM macOS
+    runs-on: macos-latest
+
+    steps:
+      - name: Report runner identity
+        id: identity
+        run: |
+          os_name="$(sw_vers -productName)"
+          os_version="$(sw_vers -productVersion)"
+          os_build="$(sw_vers -buildVersion)"
+          arch="$(uname -m)"
+          kernel="$(uname -srv)"
+          cpu_brand="$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo unknown)"
+
+          echo "::group::Runner identity"
+          echo "OS:            ${os_name} ${os_version} (build ${os_build})"
+          echo "Architecture:  ${arch}"
+          echo "Kernel:        ${kernel}"
+          echo "CPU brand:     ${cpu_brand}"
+          echo "::endgroup::"
+
+          {
+            echo "os_name=${os_name}"
+            echo "os_version=${os_version}"
+            echo "os_build=${os_build}"
+            echo "arch=${arch}"
+            echo "cpu_brand=${cpu_brand}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Assert Apple Silicon (arm64)
+        run: |
+          arch="$(uname -m)"
+          if [ "$arch" != "arm64" ]; then
+            echo "::error::Expected arm64 runner, got '$arch'"
+            exit 1
+          fi
+          echo "Confirmed ARM64 runner."
+
+      - name: Capture hypervisor sysctls (diagnostic)
+        id: sysctls
+        # Diagnostic only — does NOT gate the job. On Apple Silicon
+        # kern.hv_support does not exist; kern.hv_vmm_present indicates the
+        # *kernel* itself is running inside a hypervisor (expected on
+        # GitHub-hosted runners since they are virtualised). The real
+        # pass/fail is VZVirtualMachine.isSupported in a later step.
+        run: |
+          hv_support="$(sysctl -n kern.hv_support 2>/dev/null || echo missing)"
+          hv_vmm_present="$(sysctl -n kern.hv_vmm_present 2>/dev/null || echo missing)"
+
+          echo "::group::Hypervisor sysctls"
+          echo "kern.hv_support      = ${hv_support}   (Intel-era key; 'missing' is expected on arm64)"
+          echo "kern.hv_vmm_present  = ${hv_vmm_present}   (1 = this kernel is itself running inside a hypervisor)"
+          echo ""
+          echo "Full kern.hv_* / hw.optional.arm / cpu brand dump:"
+          sysctl -a 2>/dev/null \
+            | grep -E '^(kern\.hv_|hw\.optional\.arm|machdep\.cpu\.brand_string)' \
+            || true
+          echo "::endgroup::"
+
+          {
+            echo "hv_support=${hv_support}"
+            echo "hv_vmm_present=${hv_vmm_present}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Locate Virtualization.framework
+        id: framework
+        run: |
+          fw="/System/Library/Frameworks/Virtualization.framework"
+          if [ ! -d "$fw" ]; then
+            echo "::error::Virtualization.framework not present at $fw"
+            echo "framework_present=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          echo "Found framework bundle: $fw"
+          ls -la "$fw"
+
+          fw_version="unknown"
+          # Best-effort version read; not fatal if Info.plist layout changes.
+          if [ -f "$fw/Resources/Info.plist" ]; then
+            fw_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+              "$fw/Resources/Info.plist" 2>/dev/null || echo unknown)"
+            echo "Framework version: ${fw_version}"
+          fi
+
+          {
+            echo "framework_present=true"
+            echo "framework_version=${fw_version}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Probe VZVirtualMachine.isSupported via Swift
+        id: vz_probe
+        # The framework being on disk doesn't guarantee the runtime says
+        # "yes you can boot a VM here". The authoritative check is
+        # VZVirtualMachine.isSupported, exposed by Apple's Swift API.
+        # This step is the SINGLE source of truth for pass/fail.
+        run: |
+          probe="$(mktemp -t vz-probe.XXXXXX).swift"
+          cat > "$probe" <<'SWIFT'
+          import Foundation
+          #if canImport(Virtualization)
+          import Virtualization
+          let supported = VZVirtualMachine.isSupported
+          FileHandle.standardOutput.write(Data("VZVirtualMachine.isSupported = \(supported)\n".utf8))
+          exit(supported ? 0 : 2)
+          #else
+          FileHandle.standardError.write(Data("Virtualization module not importable on this runner\n".utf8))
+          exit(3)
+          #endif
+          SWIFT
+
+          echo "Running probe: $probe"
+          set +e
+          swift "$probe"
+          rc=$?
+          set -e
+
+          # Record the verdict in step output BEFORE potentially failing, so
+          # the always()-summary at the end can render an accurate value.
+          case "$rc" in
+            0)
+              {
+                echo "vz_supported=true"
+                echo "vz_status=enabled"
+              } >> "$GITHUB_OUTPUT"
+              echo "Virtualization framework is ENABLED on this runner."
+              ;;
+            2)
+              {
+                echo "vz_supported=false"
+                echo "vz_status=isSupported==false"
+              } >> "$GITHUB_OUTPUT"
+              echo "::error::Virtualization.framework loaded but VZVirtualMachine.isSupported == false"
+              exit 1
+              ;;
+            3)
+              {
+                echo "vz_supported=false"
+                echo "vz_status=module-not-importable"
+              } >> "$GITHUB_OUTPUT"
+              echo "::error::Swift could not import the Virtualization module"
+              exit 1
+              ;;
+            *)
+              {
+                echo "vz_supported=false"
+                echo "vz_status=probe-error-${rc}"
+              } >> "$GITHUB_OUTPUT"
+              echo "::error::Swift probe failed with exit code $rc"
+              exit 1
+              ;;
+          esac
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### macOS Virtualization Framework check"
+            echo ""
+            echo "| Property | Value |"
+            echo "| --- | --- |"
+            echo "| Runner label | macos-latest |"
+            echo "| OS | ${{ steps.identity.outputs.os_name }} ${{ steps.identity.outputs.os_version }} (build ${{ steps.identity.outputs.os_build }}) |"
+            echo "| Architecture | ${{ steps.identity.outputs.arch }} |"
+            echo "| CPU | ${{ steps.identity.outputs.cpu_brand }} |"
+            echo "| kern.hv_support | ${{ steps.sysctls.outputs.hv_support }} _(Intel-era; 'missing' is normal on arm64)_ |"
+            echo "| kern.hv_vmm_present | ${{ steps.sysctls.outputs.hv_vmm_present }} _(1 = runner is itself a VM)_ |"
+            echo "| Virtualization.framework present | ${{ steps.framework.outputs.framework_present || 'unknown' }} |"
+            echo "| Virtualization.framework version | ${{ steps.framework.outputs.framework_version || 'unknown' }} |"
+            echo "| **VZVirtualMachine.isSupported** | **${{ steps.vz_probe.outputs.vz_supported || 'not-run' }}** (${{ steps.vz_probe.outputs.vz_status || 'n/a' }}) |"
+          } >> "$GITHUB_STEP_SUMMARY"
