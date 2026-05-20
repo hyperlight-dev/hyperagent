@@ -27,7 +27,7 @@ permissions:
 jobs:
   check-virtualization:
     name: Inspect Virtualization.framework on ARM macOS
-    runs-on: macos-latest
+    runs-on: ["self-hosted", "macOS", "ARM64"]
 
     steps:
       - name: Report runner identity
