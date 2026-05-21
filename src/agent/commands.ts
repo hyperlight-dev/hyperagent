@@ -70,7 +70,7 @@ const COMMANDS: readonly CommandEntry[] = Object.freeze([
       "\n" +
       "Levels: low | medium | high | xhigh\n" +
       "\n" +
-      "Also: --show-reasoning [level] CLI flag.",
+      "Also: --reasoning-effort [level] CLI flag.",
   },
   {
     completion: "/reasoning audit ",

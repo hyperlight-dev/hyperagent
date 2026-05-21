@@ -95,6 +95,16 @@ export interface AgentState {
   verboseOutput: boolean;
 
   /**
+   * Very-verbose output mode. When true, full result bodies are shown
+   * for *all* tools (including non-sandbox protocol tools like
+   * `plugin_info`, `module_info`, `register_handler`, `suggest_approach`).
+   * Only meaningful when `verboseOutput` is also true — plain `--verbose`
+   * only shows full bodies for sandbox tools (execute_javascript / execute_bash).
+   * Set via `--very-verbose` / `-vv` CLI flag (which also enables verbose).
+   */
+  veryVerboseOutput: boolean;
+
+  /**
    * Markdown rendering mode. When true, LLM output is buffered
    * (not streamed character-by-character) and rendered through
    * marked-terminal for proper headings, code blocks, lists, etc.
@@ -358,6 +368,7 @@ export function createAgentState(
     scratchOverride: null,
     reasoningEffort: null,
     verboseOutput: cli.verbose,
+    veryVerboseOutput: cli.veryVerbose,
     markdownEnabled: cli.markdown ?? true,
     auditReasoningEffort: null,
 

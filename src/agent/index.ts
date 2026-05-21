@@ -294,6 +294,7 @@ if (cli.profile) {
 }
 
 if (cli.verbose) process.env.HYPERAGENT_VERBOSE = "1";
+if (cli.veryVerbose) process.env.HYPERAGENT_VERY_VERBOSE = "1";
 if (cli.debug) process.env.HYPERAGENT_DEBUG = "1";
 
 // Conditionally allow the tuning tool through the gate
@@ -780,6 +781,60 @@ if (discoveredCount > 0 && cli.verbose) {
   }
 }
 
+// ── Apply --base-dir to fs-read + fs-write at startup ────────────────
+// When --base-dir is set, both plugins are auto-audited (LOW risk —
+// they are first-party path-jailed builtins), auto-approved (the user
+// supplied the CLI flag, which IS the approval signal), configured
+// with the supplied path as `baseDir`, and enabled. Per-plugin failures
+// log a warning and skip rather than aborting startup.
+if (cli.baseDir) {
+  const resolvedBaseDir = resolve(cli.baseDir.trim());
+  for (const name of ["fs-read", "fs-write"] as const) {
+    const plugin = pluginManager.getPlugin(name);
+    if (!plugin) {
+      console.warn(
+        `  ${C.warn("⚠️")}  --base-dir: plugin "${name}" not discovered, skipping`,
+      );
+      continue;
+    }
+    const hash = computePluginHash(plugin.dir);
+    if (!hash) {
+      console.warn(
+        `  ${C.warn("⚠️")}  --base-dir: could not hash "${name}" source, skipping`,
+      );
+      continue;
+    }
+    pluginManager.setAuditResult(name, {
+      contentHash: hash,
+      auditedAt: new Date().toISOString(),
+      findings: [],
+      riskLevel: "LOW",
+      summary: `First-party ${name} plugin with path-jail enforcement.`,
+      descriptionAccurate: true,
+      capabilities:
+        name === "fs-read"
+          ? ["Read files under baseDir"]
+          : ["Write files under baseDir"],
+      riskReasons: [
+        "Operates only under the configured baseDir (symlinks rejected)",
+      ],
+      recommendation: {
+        verdict: "approve",
+        reason: "Auto-approved via --base-dir CLI flag",
+      },
+    });
+    pluginManager.approve(name);
+    pluginManager.setConfig(name, {
+      ...plugin.config,
+      baseDir: resolvedBaseDir,
+    });
+    pluginManager.enable(name);
+    console.log(
+      `  ${C.ok("✅")} Enabled ${name} with baseDir: ${resolvedBaseDir}`,
+    );
+  }
+}
+
 // ── MCP Integration ──────────────────────────────────────────────────
 import { parseMCPConfig } from "./mcp/config.js";
 import {
@@ -1067,9 +1122,9 @@ const state = createAgentState(cli, {
   showTiming: !!sandbox.config.timingLogPath,
 });
 
-// Wire CLI --show-reasoning <level> to state.reasoningEffort
-if (cli.showReasoning) {
-  state.reasoningEffort = cli.showReasoning as
+// Wire CLI --reasoning-effort <level> to state.reasoningEffort
+if (cli.reasoningEffort) {
+  state.reasoningEffort = cli.reasoningEffort as
     | "low"
     | "medium"
     | "high"

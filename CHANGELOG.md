@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- **`--show-reasoning` / `HYPERAGENT_SHOW_REASONING` removed** — the flag was misnamed (it controls reasoning effort, not the display of reasoning). Use `--reasoning-effort [level]` / `HYPERAGENT_REASONING_EFFORT` instead. Same accepted levels (`low` / `medium` / `high` / `xhigh`, default `high`), same wiring into the Copilot SDK session — the old name is gone, no silent fallback.
+
+### Added
+
+- **`--very-verbose` / `-vv` / `HYPERAGENT_VERY_VERBOSE`** — extends `--verbose` so the full result body is printed for **every** tool (audit progress, plugin enable/disable, module registration, intent reports, handler registration, …), not just the sandbox tools. `--verbose` on its own keeps the leaner default (sandbox tool bodies only; one-line `✅ Done` for everything else).
+- **`--base-dir <path>` / `HYPERAGENT_BASE_DIR`** — auto-enables both the `fs-read` and `fs-write` plugins at startup with the supplied directory as their `baseDir`. The directory is created if missing and symlinks are still rejected. Independent of `--auto-approve` — the flag itself is the approval signal for the two first-party path-jailed plugins.
+
+### Fixed
+
+- **`--verbose` ignored non-sandbox tool result bodies** — the event handler returned early for anything other than `execute_javascript` / `execute_bash`, so `plugin_info`, `module_info`, `report_intent`, `register_handler`, and friends always rendered as a terse `✅ Done` even in verbose mode. The early-return is gone; `--verbose` now prints sandbox tool bodies and `--very-verbose` prints every tool body.
+
 ## [v0.6.1] - 2026-05-15
 
 ### Fixed
