@@ -10,6 +10,38 @@
 import { readFileSync } from "node:fs";
 import type { MCPSetupCommand } from "./mcp/setup-commands.js";
 
+/**
+ * Reasoning-effort levels accepted by the Copilot SDK session config.
+ * The CLI flag handler and the env-var initialiser both validate against
+ * this list so an unexpected value (e.g. `HYPERAGENT_REASONING_EFFORT=potato`)
+ * is rejected before it can reach the SDK and cause a runtime error.
+ */
+const VALID_REASONING_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
+
+/**
+ * Normalise a reasoning-effort string from env or CLI: lowercase, then
+ * accept only values in {@link VALID_REASONING_EFFORTS}. Anything else
+ * (including `undefined`/empty) maps to `""` which the agent treats as
+ * "unset" — the SDK falls back to the model's default.
+ */
+function normaliseReasoningEffort(raw: string | undefined): string {
+  if (!raw) return "";
+  const lower = raw.toLowerCase();
+  return (VALID_REASONING_EFFORTS as readonly string[]).includes(lower)
+    ? lower
+    : "";
+}
+
+/**
+ * Trim a base-dir string from env or CLI. A value of `"   "` (whitespace-only)
+ * becomes `""`, which the agent treats as "unset" and skips the fs-read /
+ * fs-write auto-enable block — avoiding the surprising failure mode where
+ * `resolve("")` returns `process.cwd()` and silently makes CWD the sandbox.
+ */
+function normaliseBaseDir(raw: string | undefined): string {
+  return raw?.trim() ?? "";
+}
+
 export interface CliConfig {
   model: string;
   cpuTimeout: string;
@@ -19,8 +51,23 @@ export interface CliConfig {
   scratchSize: string;
   showCode: boolean;
   showTiming: boolean;
-  showReasoning: string;
+  /**
+   * Reasoning effort level requested for the session, one of
+   * "low" | "medium" | "high" | "xhigh" — or "" when unset.
+   * Wired to `state.reasoningEffort` at startup. CLI: `--reasoning-effort <level>`
+   * (default: "high" when flag given without value). Env: HYPERAGENT_REASONING_EFFORT.
+   */
+  reasoningEffort: string;
   verbose: boolean;
+  /**
+   * Very-verbose output: show full result bodies for *all* tools, including
+   * non-sandbox protocol tools (plugin_info, module_info, register_handler,
+   * suggest_approach, etc.). Plain `--verbose` only shows full bodies for
+   * `execute_javascript` / `execute_bash`; `--very-verbose` adds the rest.
+   * CLI: `--very-verbose` or `-vv`. Env: HYPERAGENT_VERY_VERBOSE.
+   * Implies `--verbose`; standalone `-vv` enables both.
+   */
+  veryVerbose: boolean;
   /** Render LLM markdown output with ANSI formatting (headings, code, lists). */
   markdown: boolean;
   transcript: boolean;
@@ -40,6 +87,15 @@ export interface CliConfig {
    * audit approvals, module registration). YOLO mode. 🎸
    */
   autoApprove: boolean;
+  /**
+   * Base directory for the fs-read and fs-write plugins. When set, both
+   * plugins are auto-enabled at startup with this directory as their
+   * `baseDir` config, replacing the default "unique-temp-dir" sandbox.
+   * CLI: `--base-dir <path>`. Env: HYPERAGENT_BASE_DIR.
+   * Independent of `--auto-approve` / `--yolo` (works on its own).
+   * Path is resolved relative to cwd; created if missing; symlinks rejected.
+   */
+  baseDir: string;
   /**
    * Non-interactive prompt — send this message, wait for completion, exit.
    * Combines with --auto-approve for fully autonomous operation.
@@ -102,8 +158,12 @@ Options:
   --scratch-size <MB>     Guest scratch size (default: ${defaults.scratchSize})
   --show-code            Log generated JS to ~/.hyperagent/logs/
   --show-timing          Log timing breakdown to ~/.hyperagent/logs/
-  --show-reasoning [level] Set reasoning effort (low|medium|high|xhigh, default: high)
-  --verbose              Verbose output mode (scrolling reasoning, turn details)
+  --reasoning-effort [level] Set reasoning effort (low|medium|high|xhigh, default: high)
+                         Env: HYPERAGENT_REASONING_EFFORT
+  --verbose              Stream reasoning + show sandbox tool result bodies
+  --very-verbose, -vv    Like --verbose, plus show full bodies for ALL tools
+                         (including plugin_info, module_info, register_handler, etc.)
+                         Env: HYPERAGENT_VERY_VERBOSE
   --[no-]markdown        Toggle markdown rendering (default: on, env: HYPERAGENT_MARKDOWN)
                          Aliases: --md, --no-md
   --transcript           Record session transcript to ~/.hyperagent/logs/
@@ -115,7 +175,10 @@ Options:
   --profile <name>       Apply resource profile at startup (limits only)
                          Stack: --profile "web-research heavy-compute"
                          Profiles: default, file-builder, web-research, heavy-compute, mcp-network
-  --auto-approve         Auto-approve all interactive prompts (YOLO mode)
+  --auto-approve, --yolo Auto-approve all interactive prompts (YOLO mode)
+  --base-dir <path>      Base dir for fs-read + fs-write (auto-enables both plugins,
+                         created if missing, symlinks rejected)
+                         Env: HYPERAGENT_BASE_DIR
   --prompt "<text>"      Send a prompt non-interactively and exit after completion
   --prompt-file <path>   Read prompt from a file (avoids shell quoting issues)
   --skill <name>         Invoke skill(s) before the prompt (e.g. --skill pptx-expert)
@@ -151,7 +214,10 @@ Environment variables (overridden by CLI flags):
   HYPERLIGHT_HEAP_SIZE_MB    Heap size (megabytes)
   HYPERLIGHT_SCRATCH_SIZE_MB   Scratch size (megabytes)
   HYPERAGENT_DEBUG           Set to '1' for debug logging
+  HYPERAGENT_REASONING_EFFORT Reasoning effort level (low/medium/high/xhigh)
   HYPERAGENT_VERBOSE         Set to '1' for verbose output mode
+  HYPERAGENT_VERY_VERBOSE    Set to '1' for very-verbose output (all tool bodies)
+  HYPERAGENT_BASE_DIR        Base dir for fs-read + fs-write plugins
   HYPERAGENT_PROFILE         Profile name(s) to apply at startup
   HYPERAGENT_PROMPT          Non-interactive prompt text
   HYPERAGENT_PROMPT_FILE     Path to file containing prompt text
@@ -180,8 +246,18 @@ export function parseCliArgs(
     scratchSize: process.env.HYPERLIGHT_SCRATCH_SIZE_MB || "16",
     showCode: false,
     showTiming: false,
-    showReasoning: process.env.HYPERAGENT_SHOW_REASONING || "",
-    verbose: process.env.HYPERAGENT_VERBOSE === "1",
+    reasoningEffort: normaliseReasoningEffort(
+      process.env.HYPERAGENT_REASONING_EFFORT,
+    ),
+    // HYPERAGENT_VERY_VERBOSE implies HYPERAGENT_VERBOSE — keeps the env-var
+    // path symmetric with the CLI flag (--very-verbose implies --verbose).
+    // Without this, env-var-only --very-verbose would set `veryVerbose=true`
+    // but `verbose=false`, and the event-handler gate (`verboseOutput && ...`)
+    // would silently suppress all tool bodies.
+    verbose:
+      process.env.HYPERAGENT_VERBOSE === "1" ||
+      process.env.HYPERAGENT_VERY_VERBOSE === "1",
+    veryVerbose: process.env.HYPERAGENT_VERY_VERBOSE === "1",
     markdown: process.env.HYPERAGENT_MARKDOWN !== "0",
     transcript: process.env.HYPERAGENT_TRANSCRIPT === "1",
     listModels: process.env.HYPERAGENT_LIST_MODELS === "1",
@@ -191,6 +267,7 @@ export function parseCliArgs(
     tune: process.env.HYPERAGENT_TUNE === "1",
     profile: process.env.HYPERAGENT_PROFILE || "",
     autoApprove: process.env.HYPERAGENT_AUTO_APPROVE === "1",
+    baseDir: normaliseBaseDir(process.env.HYPERAGENT_BASE_DIR),
     prompt: process.env.HYPERAGENT_PROMPT || "",
     promptFile: process.env.HYPERAGENT_PROMPT_FILE || "",
     skill: process.env.HYPERAGENT_SKILL || "",
@@ -251,21 +328,33 @@ export function parseCliArgs(
       case "--show-timing":
         config.showTiming = true;
         break;
-      case "--show-reasoning": {
-        // --show-reasoning can optionally take an effort level argument
+      case "--reasoning-effort": {
+        // --reasoning-effort can optionally take an effort level argument
         const nextArg = argv[i + 1];
-        const validEfforts = ["low", "medium", "high", "xhigh"];
-        if (nextArg && validEfforts.includes(nextArg.toLowerCase())) {
-          config.showReasoning = nextArg.toLowerCase();
+        if (
+          nextArg &&
+          (VALID_REASONING_EFFORTS as readonly string[]).includes(
+            nextArg.toLowerCase(),
+          )
+        ) {
+          config.reasoningEffort = nextArg.toLowerCase();
           i++;
         } else {
           // No argument or invalid → default to "high"
-          config.showReasoning = "high";
+          config.reasoningEffort = "high";
         }
         break;
       }
       case "--verbose":
         config.verbose = true;
+        break;
+      case "--very-verbose":
+      case "-vv":
+        // --very-verbose implies --verbose: standalone -vv enables both.
+        // Plain --verbose without --very-verbose only shows full bodies for
+        // sandbox tools (execute_javascript / execute_bash).
+        config.verbose = true;
+        config.veryVerbose = true;
         break;
       case "--no-markdown":
       case "--no-md":
@@ -316,6 +405,18 @@ export function parseCliArgs(
       case "--yolo":
         config.autoApprove = true;
         break;
+      case "--base-dir": {
+        // Trim at parse-time: --base-dir "   " should be rejected, not
+        // silently resolved to process.cwd() later via resolve("").
+        const raw = argv[++i] ?? "";
+        const trimmed = raw.trim();
+        if (!trimmed) {
+          console.error("--base-dir requires a non-empty path");
+          process.exit(1);
+        }
+        config.baseDir = trimmed;
+        break;
+      }
       case "--prompt":
         config.prompt = argv[++i] ?? "";
         if (!config.prompt) {

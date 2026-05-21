@@ -309,22 +309,30 @@ export function registerEventHandler(
           : "unknown";
         if (callId) pendingTools.delete(callId);
 
-        // Skip noisy protocol tools in non-debug mode
+        // ── Result-body gating ─────────────────────────────────────
+        // Sandbox tools (execute_javascript / execute_bash) are the
+        // LLM's primary work — `--verbose` is enough to see their
+        // full output. Non-sandbox tools (plugin_info, module_info,
+        // register_handler, suggest_approach, etc.) are protocol /
+        // infrastructure with frequently-huge JSON payloads — gate
+        // their bodies behind `--very-verbose` so plain `--verbose`
+        // stays readable. Terse `✅ Done` / `❌ error` lines are
+        // emitted for every tool in every mode, so the user always
+        // sees that the tool completed.
         const isSandboxTool =
           toolName === "execute_javascript" || toolName === "execute_bash";
-        if (!isSandboxTool) {
-          if (state.debugEnabled) {
-            const status = event.data?.success ? "✅" : "❌";
-            debugLog(`${status} ${toolName} complete`);
-          }
-          break;
+        const showFullBody =
+          state.verboseOutput && (isSandboxTool || state.veryVerboseOutput);
+        if (state.debugEnabled) {
+          const status = event.data?.success ? "✅" : "❌";
+          debugLog(`${status} ${toolName} complete`);
         }
 
-        // Show result summary for our sandbox tools
+        // Show result summary
         if (event.data?.success) {
           // In non-verbose mode, still show errors — but skip verbose
           // result display since the LLM will summarise for the user.
-          if (!state.verboseOutput) {
+          if (!showFullBody) {
             const content = event.data?.result?.content ?? "";
             let parsed;
             try {

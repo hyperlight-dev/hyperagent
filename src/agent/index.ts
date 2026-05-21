@@ -294,6 +294,7 @@ if (cli.profile) {
 }
 
 if (cli.verbose) process.env.HYPERAGENT_VERBOSE = "1";
+if (cli.veryVerbose) process.env.HYPERAGENT_VERY_VERBOSE = "1";
 if (cli.debug) process.env.HYPERAGENT_DEBUG = "1";
 
 // Conditionally allow the tuning tool through the gate
@@ -312,6 +313,7 @@ import {
   copyFileSync,
   unlinkSync,
   rmSync,
+  lstatSync,
   type WriteStream,
 } from "node:fs";
 
@@ -780,6 +782,112 @@ if (discoveredCount > 0 && cli.verbose) {
   }
 }
 
+// ── Apply --base-dir to fs-read + fs-write at startup ────────────────
+// When --base-dir is set, both plugins are auto-audited (LOW risk —
+// they are first-party path-jailed builtins), auto-approved (the user
+// supplied the CLI flag, which IS the approval signal), configured
+// with the supplied path as `baseDir`, and enabled. Per-plugin failures
+// log a warning and skip rather than aborting startup.
+if (cli.baseDir) {
+  // cli.baseDir was already trimmed in the parser.
+  const resolvedBaseDir = resolve(cli.baseDir);
+
+  // Up-front validation of the supplied directory: create it if missing,
+  // reject if it's a symlink (consistent with the fs-read/fs-write runtime
+  // no-symlink policy), reject if it's not a directory at all. If any of
+  // these checks fail we skip the whole auto-enable block rather than
+  // printing a misleading "Enabled" line for a baseDir that won't work.
+  let baseDirOk = true;
+  try {
+    const stat = lstatSync(resolvedBaseDir);
+    if (stat.isSymbolicLink()) {
+      console.warn(
+        `  ${C.warn("⚠️")}  --base-dir: "${resolvedBaseDir}" is a symlink — symlinks are rejected for security. Skipping fs-read/fs-write auto-enable.`,
+      );
+      baseDirOk = false;
+    } else if (!stat.isDirectory()) {
+      console.warn(
+        `  ${C.warn("⚠️")}  --base-dir: "${resolvedBaseDir}" exists but is not a directory. Skipping fs-read/fs-write auto-enable.`,
+      );
+      baseDirOk = false;
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      // Doesn't exist yet — create it (recursive).
+      try {
+        mkdirSync(resolvedBaseDir, { recursive: true });
+      } catch (mkErr) {
+        console.warn(
+          `  ${C.warn("⚠️")}  --base-dir: failed to create "${resolvedBaseDir}": ${(mkErr as Error).message}. Skipping fs-read/fs-write auto-enable.`,
+        );
+        baseDirOk = false;
+      }
+    } else {
+      console.warn(
+        `  ${C.warn("⚠️")}  --base-dir: cannot access "${resolvedBaseDir}": ${(err as Error).message}. Skipping fs-read/fs-write auto-enable.`,
+      );
+      baseDirOk = false;
+    }
+  }
+
+  if (baseDirOk) {
+    for (const name of ["fs-read", "fs-write"] as const) {
+      const plugin = pluginManager.getPlugin(name);
+      if (!plugin) {
+        console.warn(
+          `  ${C.warn("⚠️")}  --base-dir: plugin "${name}" not discovered, skipping`,
+        );
+        continue;
+      }
+      const hash = computePluginHash(plugin.dir);
+      if (!hash) {
+        console.warn(
+          `  ${C.warn("⚠️")}  --base-dir: could not hash "${name}" source, skipping`,
+        );
+        continue;
+      }
+      pluginManager.setAuditResult(name, {
+        contentHash: hash,
+        auditedAt: new Date().toISOString(),
+        findings: [],
+        riskLevel: "LOW",
+        summary: `First-party ${name} plugin with path-jail enforcement.`,
+        descriptionAccurate: true,
+        capabilities:
+          name === "fs-read"
+            ? ["Read files under baseDir"]
+            : ["Write files under baseDir"],
+        riskReasons: [
+          "Operates only under the configured baseDir (symlinks rejected)",
+        ],
+        recommendation: {
+          verdict: "approve",
+          reason: "Auto-approved via --base-dir CLI flag",
+        },
+      });
+      pluginManager.approve(name);
+      pluginManager.setConfig(name, {
+        ...plugin.config,
+        baseDir: resolvedBaseDir,
+      });
+      // Load source into plugin.source — required for verifySourceHash()
+      // to pass when syncPluginsToSandbox runs. Without this, the hash
+      // check fails ("source changed since audit") and the plugin is
+      // silently rejected. Mirrors the fast-path in /plugin enable.
+      if (!pluginManager.loadSource(name)) {
+        console.warn(
+          `  ${C.warn("⚠️")}  --base-dir: failed to load "${name}" source, skipping enable`,
+        );
+        continue;
+      }
+      pluginManager.enable(name);
+      console.log(
+        `  ${C.ok("✅")} Enabled ${name} with baseDir: ${resolvedBaseDir}`,
+      );
+    }
+  }
+}
+
 // ── MCP Integration ──────────────────────────────────────────────────
 import { parseMCPConfig } from "./mcp/config.js";
 import {
@@ -1067,9 +1175,9 @@ const state = createAgentState(cli, {
   showTiming: !!sandbox.config.timingLogPath,
 });
 
-// Wire CLI --show-reasoning <level> to state.reasoningEffort
-if (cli.showReasoning) {
-  state.reasoningEffort = cli.showReasoning as
+// Wire CLI --reasoning-effort <level> to state.reasoningEffort
+if (cli.reasoningEffort) {
+  state.reasoningEffort = cli.reasoningEffort as
     | "low"
     | "medium"
     | "high"

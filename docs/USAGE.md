@@ -6,31 +6,33 @@ Complete reference for HyperAgent configuration, features, and commands.
 
 | Flag                       | Description                                                    |
 | -------------------------- | -------------------------------------------------------------- |
-| `--model <name>`           | LLM model (default: `claude-opus-4.6`)                         |
-| `--cpu-timeout <ms>`       | CPU time limit per JS execution (default: 1000)                |
-| `--wall-timeout <ms>`      | Wall-clock backstop per execution (default: 5000)              |
-| `--send-timeout <ms>`      | Agent inactivity timeout (default: 300000)                     |
-| `--heap-size <MB>`         | Guest heap size (default: 16)                                  |
-| `--scratch-size <MB>`      | Guest scratch size, includes stack (default: 16)               |
-| `--profile <name>`         | Apply resource profile at startup (stackable)                  |
-| `--skill <name>`           | Invoke skill(s) before the prompt                              |
-| `--auto-approve`           | Auto-approve all interactive prompts                           |
-| `--prompt "<text>"`        | Non-interactive: send prompt, wait for completion, exit        |
-| `--prompt-file <path>`     | Read the non-interactive prompt from a file                    |
-| `--show-code`              | Log generated JS to a timestamped file                         |
-| `--show-timing`            | Log timing breakdown to a timestamped file                     |
-| `--show-reasoning [level]` | Set reasoning effort (low\|medium\|high\|xhigh, default: high) |
-| `--verbose`                | Verbose output mode (scrolling reasoning, turn details)        |
-| `--transcript`             | Record session transcript to `~/.hyperagent/logs/`             |
-| `--tune`                   | Capture LLM decision/reasoning logs to JSONL                   |
-| `--plugins-dir <path>`     | Custom plugins directory (default: `./plugins`)                |
-| `--list-models`            | List available models and exit                                 |
-| `--resume [id]`            | Resume a previous session (latest if no ID given)              |
-| `--skip-suggest`           | Skip mandatory suggest_approach/API-discovery enforcement      |
-| `--output-threshold <n>`   | Large output threshold in bytes (default: 20480)               |
-| `--debug`                  | Enable debug event/lifecycle logging                           |
-| `--version`                | Show version and exit                                          |
-| `--help`                   | Show help message                                              |
+| `--model <name>`              | LLM model (default: `claude-opus-4.6`)                                              |
+| `--cpu-timeout <ms>`          | CPU time limit per JS execution (default: 1000)                                     |
+| `--wall-timeout <ms>`         | Wall-clock backstop per execution (default: 5000)                                   |
+| `--send-timeout <ms>`         | Agent inactivity timeout (default: 300000)                                          |
+| `--heap-size <MB>`            | Guest heap size (default: 16)                                                       |
+| `--scratch-size <MB>`         | Guest scratch size, includes stack (default: 16)                                    |
+| `--profile <name>`            | Apply resource profile at startup (stackable)                                       |
+| `--skill <name>`              | Invoke skill(s) before the prompt                                                   |
+| `--auto-approve` / `--yolo`   | Auto-approve all interactive prompts                                                |
+| `--base-dir <path>`           | Auto-enable fs-read + fs-write with this directory as their base                    |
+| `--prompt "<text>"`           | Non-interactive: send prompt, wait for completion, exit                             |
+| `--prompt-file <path>`        | Read the non-interactive prompt from a file                                         |
+| `--show-code`                 | Log generated JS to a timestamped file                                              |
+| `--show-timing`               | Log timing breakdown to a timestamped file                                          |
+| `--reasoning-effort [level]`  | Set reasoning effort (low\|medium\|high\|xhigh, default: high)                      |
+| `--verbose`                   | Stream reasoning + show sandbox tool result bodies                                  |
+| `--very-verbose` / `-vv`      | Like `--verbose` plus full result bodies for **every** tool (audit/registration/…) |
+| `--transcript`                | Record session transcript to `~/.hyperagent/logs/`                                  |
+| `--tune`                      | Capture LLM decision/reasoning logs to JSONL                                        |
+| `--plugins-dir <path>`        | Custom plugins directory (default: `./plugins`)                                     |
+| `--list-models`               | List available models and exit                                                      |
+| `--resume [id]`               | Resume a previous session (latest if no ID given)                                   |
+| `--skip-suggest`              | Skip mandatory suggest_approach/API-discovery enforcement                           |
+| `--output-threshold <n>`      | Large output threshold in bytes (default: 20480)                                    |
+| `--debug`                     | Enable debug event/lifecycle logging                                                |
+| `--version`                   | Show version and exit                                                               |
+| `--help`                      | Show help message                                                                   |
 
 ## Environment Variables
 
@@ -52,8 +54,10 @@ All configuration is also available via environment variables (overridden by CLI
 | `HYPERAGENT_PROMPT_FILE`            | _(none)_          | File containing the non-interactive prompt                       |
 | `HYPERAGENT_SKILL`                  | _(none)_          | Skill name(s) to invoke                                          |
 | `HYPERAGENT_TUNE`                   | _(none)_          | Set to `1` to capture LLM decision logs                          |
-| `HYPERAGENT_SHOW_REASONING`         | _(none)_          | Reasoning effort level (low/medium/high/xhigh)                   |
+| `HYPERAGENT_REASONING_EFFORT`       | _(none)_          | Reasoning effort level (low/medium/high/xhigh)                   |
 | `HYPERAGENT_VERBOSE`                | _(none)_          | Set to `1` for verbose output mode                               |
+| `HYPERAGENT_VERY_VERBOSE`           | _(none)_          | Set to `1` for very-verbose output (full body for **every** tool) |
+| `HYPERAGENT_BASE_DIR`               | _(none)_          | Base directory for fs-read/fs-write plugins (auto-enables both)  |
 | `HYPERAGENT_LIST_MODELS`            | _(none)_          | Set to `1` to list models and exit                               |
 | `HYPERAGENT_RESUME_SESSION`         | _(none)_          | Session ID to resume, or `__last__` for latest                   |
 | `HYPERAGENT_PLUGINS_DIR`            | _(none)_          | Custom plugins directory path                                    |
