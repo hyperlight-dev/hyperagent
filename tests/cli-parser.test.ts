@@ -87,6 +87,21 @@ describe("parseCliArgs — breaking flag cleanup", () => {
         parseCliArgs(["--reasoning-effort", "xhigh"]).reasoningEffort,
       ).toBe("xhigh");
     });
+
+    it("HYPERAGENT_REASONING_EFFORT with an invalid value falls back to ''", () => {
+      // Regression: an unexpected env value (e.g. typo, leftover from an
+      // older flag schema) must NOT propagate verbatim to the SDK union
+      // type — it should be treated as unset so the SDK falls back to its
+      // default reasoning level instead of throwing at session-config time.
+      process.env.HYPERAGENT_REASONING_EFFORT = "potato";
+      expect(parseCliArgs([]).reasoningEffort).toBe("");
+    });
+
+    it("HYPERAGENT_REASONING_EFFORT is case-normalised (HIGH → high)", () => {
+      // Symmetry with the CLI flag handler which lowercases its argument.
+      process.env.HYPERAGENT_REASONING_EFFORT = "HIGH";
+      expect(parseCliArgs([]).reasoningEffort).toBe("high");
+    });
   });
 
   // ── --show-reasoning is REMOVED (hard break) ─────────────────────
@@ -195,14 +210,50 @@ describe("parseCliArgs — breaking flag cleanup", () => {
       const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
       expect(() => parseCliArgs(["--base-dir"])).toThrow("__exit_1");
-      expect(errSpy).toHaveBeenCalledWith("--base-dir requires a value");
+      expect(errSpy).toHaveBeenCalledWith(
+        "--base-dir requires a non-empty path",
+      );
       exitSpy.mockRestore();
       errSpy.mockRestore();
+    });
+
+    it("rejects whitespace-only --base-dir value with exit", () => {
+      // Regression: `--base-dir "   "` was previously truthy and let
+      // `index.ts` call `resolve("".trim())` → `process.cwd()`, silently
+      // making CWD the sandbox root. Parser must trim+reject at the boundary.
+      const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
+        code?: number,
+      ) => {
+        throw new Error(`__exit_${code}`);
+      }) as never);
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      expect(() => parseCliArgs(["--base-dir", "   "])).toThrow("__exit_1");
+      expect(errSpy).toHaveBeenCalledWith(
+        "--base-dir requires a non-empty path",
+      );
+      exitSpy.mockRestore();
+      errSpy.mockRestore();
+    });
+
+    it("trims whitespace around --base-dir value", () => {
+      // Tabs / spaces around the path are stripped — keeps the parser
+      // forgiving for shell-mangled args while still rejecting empty.
+      const cfg = parseCliArgs(["--base-dir", "  /tmp/foo  "]);
+      expect(cfg.baseDir).toBe("/tmp/foo");
     });
 
     it("reads HYPERAGENT_BASE_DIR env var", () => {
       process.env.HYPERAGENT_BASE_DIR = "/var/data";
       expect(parseCliArgs([]).baseDir).toBe("/var/data");
+    });
+
+    it("treats whitespace-only HYPERAGENT_BASE_DIR as unset", () => {
+      // Symmetry with the CLI flag: env-var path must also trim and treat
+      // an empty-after-trim string as missing rather than letting it flow
+      // into `resolve("".trim())` → `process.cwd()`.
+      process.env.HYPERAGENT_BASE_DIR = "   ";
+      expect(parseCliArgs([]).baseDir).toBe("");
     });
 
     it("CLI flag overrides env var", () => {

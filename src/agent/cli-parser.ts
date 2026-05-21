@@ -10,6 +10,38 @@
 import { readFileSync } from "node:fs";
 import type { MCPSetupCommand } from "./mcp/setup-commands.js";
 
+/**
+ * Reasoning-effort levels accepted by the Copilot SDK session config.
+ * The CLI flag handler and the env-var initialiser both validate against
+ * this list so an unexpected value (e.g. `HYPERAGENT_REASONING_EFFORT=potato`)
+ * is rejected before it can reach the SDK and cause a runtime error.
+ */
+const VALID_REASONING_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
+
+/**
+ * Normalise a reasoning-effort string from env or CLI: lowercase, then
+ * accept only values in {@link VALID_REASONING_EFFORTS}. Anything else
+ * (including `undefined`/empty) maps to `""` which the agent treats as
+ * "unset" — the SDK falls back to the model's default.
+ */
+function normaliseReasoningEffort(raw: string | undefined): string {
+  if (!raw) return "";
+  const lower = raw.toLowerCase();
+  return (VALID_REASONING_EFFORTS as readonly string[]).includes(lower)
+    ? lower
+    : "";
+}
+
+/**
+ * Trim a base-dir string from env or CLI. A value of `"   "` (whitespace-only)
+ * becomes `""`, which the agent treats as "unset" and skips the fs-read /
+ * fs-write auto-enable block — avoiding the surprising failure mode where
+ * `resolve("")` returns `process.cwd()` and silently makes CWD the sandbox.
+ */
+function normaliseBaseDir(raw: string | undefined): string {
+  return raw?.trim() ?? "";
+}
+
 export interface CliConfig {
   model: string;
   cpuTimeout: string;
@@ -214,7 +246,9 @@ export function parseCliArgs(
     scratchSize: process.env.HYPERLIGHT_SCRATCH_SIZE_MB || "16",
     showCode: false,
     showTiming: false,
-    reasoningEffort: process.env.HYPERAGENT_REASONING_EFFORT || "",
+    reasoningEffort: normaliseReasoningEffort(
+      process.env.HYPERAGENT_REASONING_EFFORT,
+    ),
     // HYPERAGENT_VERY_VERBOSE implies HYPERAGENT_VERBOSE — keeps the env-var
     // path symmetric with the CLI flag (--very-verbose implies --verbose).
     // Without this, env-var-only --very-verbose would set `veryVerbose=true`
@@ -233,7 +267,7 @@ export function parseCliArgs(
     tune: process.env.HYPERAGENT_TUNE === "1",
     profile: process.env.HYPERAGENT_PROFILE || "",
     autoApprove: process.env.HYPERAGENT_AUTO_APPROVE === "1",
-    baseDir: process.env.HYPERAGENT_BASE_DIR || "",
+    baseDir: normaliseBaseDir(process.env.HYPERAGENT_BASE_DIR),
     prompt: process.env.HYPERAGENT_PROMPT || "",
     promptFile: process.env.HYPERAGENT_PROMPT_FILE || "",
     skill: process.env.HYPERAGENT_SKILL || "",
@@ -297,8 +331,12 @@ export function parseCliArgs(
       case "--reasoning-effort": {
         // --reasoning-effort can optionally take an effort level argument
         const nextArg = argv[i + 1];
-        const validEfforts = ["low", "medium", "high", "xhigh"];
-        if (nextArg && validEfforts.includes(nextArg.toLowerCase())) {
+        if (
+          nextArg &&
+          (VALID_REASONING_EFFORTS as readonly string[]).includes(
+            nextArg.toLowerCase(),
+          )
+        ) {
           config.reasoningEffort = nextArg.toLowerCase();
           i++;
         } else {
@@ -367,13 +405,18 @@ export function parseCliArgs(
       case "--yolo":
         config.autoApprove = true;
         break;
-      case "--base-dir":
-        config.baseDir = argv[++i] ?? "";
-        if (!config.baseDir) {
-          console.error("--base-dir requires a value");
+      case "--base-dir": {
+        // Trim at parse-time: --base-dir "   " should be rejected, not
+        // silently resolved to process.cwd() later via resolve("").
+        const raw = argv[++i] ?? "";
+        const trimmed = raw.trim();
+        if (!trimmed) {
+          console.error("--base-dir requires a non-empty path");
           process.exit(1);
         }
+        config.baseDir = trimmed;
         break;
+      }
       case "--prompt":
         config.prompt = argv[++i] ?? "";
         if (!config.prompt) {
