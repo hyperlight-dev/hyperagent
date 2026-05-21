@@ -149,6 +149,18 @@ describe("parseCliArgs — breaking flag cleanup", () => {
       expect(cfg.veryVerbose).toBe(true);
     });
 
+    it("HYPERAGENT_VERY_VERBOSE=1 ALSO enables verbose (env-path symmetry)", () => {
+      // Regression: without this, env-var-only very-verbose would set
+      // veryVerbose=true but verbose=false, and the event-handler gate
+      // (`verboseOutput && (isSandbox || veryVerbose)`) would silently
+      // suppress all tool bodies — defeating the whole flag.
+      process.env.HYPERAGENT_VERY_VERBOSE = "1";
+      delete process.env.HYPERAGENT_VERBOSE;
+      const cfg = parseCliArgs([]);
+      expect(cfg.verbose).toBe(true);
+      expect(cfg.veryVerbose).toBe(true);
+    });
+
     it("HYPERAGENT_VERY_VERBOSE=0 leaves veryVerbose false", () => {
       process.env.HYPERAGENT_VERY_VERBOSE = "0";
       const cfg = parseCliArgs([]);

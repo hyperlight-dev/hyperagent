@@ -215,7 +215,14 @@ export function parseCliArgs(
     showCode: false,
     showTiming: false,
     reasoningEffort: process.env.HYPERAGENT_REASONING_EFFORT || "",
-    verbose: process.env.HYPERAGENT_VERBOSE === "1",
+    // HYPERAGENT_VERY_VERBOSE implies HYPERAGENT_VERBOSE — keeps the env-var
+    // path symmetric with the CLI flag (--very-verbose implies --verbose).
+    // Without this, env-var-only --very-verbose would set `veryVerbose=true`
+    // but `verbose=false`, and the event-handler gate (`verboseOutput && ...`)
+    // would silently suppress all tool bodies.
+    verbose:
+      process.env.HYPERAGENT_VERBOSE === "1" ||
+      process.env.HYPERAGENT_VERY_VERBOSE === "1",
     veryVerbose: process.env.HYPERAGENT_VERY_VERBOSE === "1",
     markdown: process.env.HYPERAGENT_MARKDOWN !== "0",
     transcript: process.env.HYPERAGENT_TRANSCRIPT === "1",

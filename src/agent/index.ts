@@ -828,6 +828,16 @@ if (cli.baseDir) {
       ...plugin.config,
       baseDir: resolvedBaseDir,
     });
+    // Load source into plugin.source — required for verifySourceHash()
+    // to pass when syncPluginsToSandbox runs. Without this, the hash
+    // check fails ("source changed since audit") and the plugin is
+    // silently rejected. Mirrors the fast-path in /plugin enable.
+    if (!pluginManager.loadSource(name)) {
+      console.warn(
+        `  ${C.warn("⚠️")}  --base-dir: failed to load "${name}" source, skipping enable`,
+      );
+      continue;
+    }
     pluginManager.enable(name);
     console.log(
       `  ${C.ok("✅")} Enabled ${name} with baseDir: ${resolvedBaseDir}`,
