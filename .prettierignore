@@ -1,0 +1,4 @@
+# Generated NAPI binding type declarations (emitted by `napi build`).
+# napi-derive >= 3 writes JSDoc into this file, which is not Prettier-formatted.
+# The canonical, hand-written types live in src/code-validator/guest/index.d.ts.
+src/code-validator/guest/host/index.d.ts
