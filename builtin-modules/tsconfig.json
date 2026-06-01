@@ -13,7 +13,6 @@
     "noEmitOnError": true,
     "skipLibCheck": true,
     "typeRoots": ["src/types"],
-    "baseUrl": ".",
     "paths": {
       "ha:doc-core": ["./src/doc-core.ts"],
       "ha:ooxml-core": ["./src/ooxml-core.ts"],
