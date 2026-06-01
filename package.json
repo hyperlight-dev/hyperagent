@@ -45,7 +45,7 @@
     "@types/marked-terminal": "^6.1.1",
     "@types/node": "^25.3.3",
     "@types/pngjs": "^6.0.5",
-    "@xarsh/ooxml-validator": "^0.2.0",
+    "@xarsh/ooxml-validator": "^0.3.0",
     "esbuild": "^0.28.0",
     "just-bash": "^3.0.0",
     "pdf-parse": "^2.4.5",
