@@ -37,7 +37,7 @@
     "boxen": "^8.0.1",
     "highlight.js": "^11.11.1",
     "hyperlight-analysis": "file:src/code-validator/guest",
-    "marked": "^15.0.12",
+    "marked": "^18.0.4",
     "marked-terminal": "^7.3.0",
     "zod": "^4.3.6"
   },
@@ -55,5 +55,10 @@
     "tsx": "^4.0.0",
     "typescript": "^5.8.0",
     "vitest": "^4.0.18"
+  },
+  "overrides": {
+    "marked-terminal": {
+      "marked": "$marked"
+    }
   }
 }
