@@ -9,7 +9,7 @@ name = "native_image"
 path = "src/lib.rs"
 
 [dependencies]
-rquickjs = { version = "0.11", default-features = false, features = ["bindgen", "futures", "macro", "loader"] }
+rquickjs = { version = "0.12", default-features = false, features = ["bindgen", "futures", "macro", "loader"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = ['cfg(hyperlight)'] }
