@@ -1013,6 +1013,8 @@ const mcpWriteSafetyGate: WriteSafetyGate = async (
     ? C.err("⚠️  MCP DESTRUCTIVE operation")
     : C.warn("⚠️  MCP write operation");
 
+  spinner.stop();
+
   console.log();
   console.log(`  ${label}: ${C.label(serverName)}.${C.label(toolName)}`);
   if (argSummary) {
