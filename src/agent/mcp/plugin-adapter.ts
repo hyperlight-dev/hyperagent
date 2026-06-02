@@ -98,7 +98,7 @@ export function createMCPPluginAdapter(
           // Write-safety gate: check tools that are not known or inferred
           // read-only. The guest VM is paused during this check, so it is
           // safe to prompt the user.
-          if (gate && !isReadOnlyMCPTool(tool)) {
+          if (gate && !isReadOnlyMCPTool(tool, toolArgs)) {
             const allowed = await gate(
               conn.name,
               tool.name,

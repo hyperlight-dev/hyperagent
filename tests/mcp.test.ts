@@ -1050,6 +1050,23 @@ describe("MCP tool utility helpers", () => {
     expect(isReadOnlyMCPTool(tools[1])).toBe(true);
     expect(isReadOnlyMCPTool(tools[2])).toBe(false);
   });
+
+  it("treats Power BI-style list operations as read-only from the request payload", () => {
+    const powerBiTool = {
+      name: "connection_operations",
+      originalName: "connection_operations",
+      description: "Connect to Power BI models",
+      inputSchema: {
+        type: "object",
+        properties: {
+          operation: { type: "string" },
+        },
+      },
+    } as never;
+
+    expect(isReadOnlyMCPTool(powerBiTool, { operation: "ListLocalInstances" })).toBe(true);
+    expect(isReadOnlyMCPTool(powerBiTool, { operation: "CreateModel" })).toBe(false);
+  });
 });
 
 describe("normaliseToolResult", () => {
