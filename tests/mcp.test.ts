@@ -1058,7 +1058,7 @@ describe("MCP tool utility helpers", () => {
       "utf-8",
     );
 
-    expect(source).toContain('anyOf: [');
+    expect(source).toContain("anyOf: [");
     expect(source).toContain('type: "array", items: { type: "string" }');
   });
 
@@ -1078,9 +1078,9 @@ describe("MCP tool utility helpers", () => {
     expect(
       isReadOnlyMCPTool(powerBiTool, { operation: "ListLocalInstances" }),
     ).toBe(true);
-    expect(
-      isReadOnlyMCPTool(powerBiTool, { operation: "CreateModel" }),
-    ).toBe(false);
+    expect(isReadOnlyMCPTool(powerBiTool, { operation: "CreateModel" })).toBe(
+      false,
+    );
   });
 
   it("keeps write-prefixed tool names as write operations even with read-like payload hints", () => {
