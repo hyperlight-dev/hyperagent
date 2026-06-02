@@ -1012,6 +1012,8 @@ const mcpWriteSafetyGate: WriteSafetyGate = async (
     ? C.err("⚠️  MCP DESTRUCTIVE operation")
     : C.warn("⚠️  MCP write operation");
 
+  spinner.stop();
+
   console.log();
   console.log(`  ${label}: ${C.label(serverName)}.${C.label(toolName)}`);
   if (argSummary) {
@@ -5358,7 +5360,10 @@ const moduleInfoTool = defineTool("module_info", {
         description: "Module name (e.g. 'str-bytes', 'pptx')",
       },
       functionName: {
-        type: ["string", "array"],
+        anyOf: [
+          { type: "string" },
+          { type: "array", items: { type: "string" } },
+        ],
         description:
           "Optional: get info for specific function(s). Accepts single name, comma-separated list, or array (e.g. 'chartSlide' or 'chartSlide,heroSlide,table' or ['chartSlide', 'heroSlide'])",
       },
