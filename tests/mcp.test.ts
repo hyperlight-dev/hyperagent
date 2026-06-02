@@ -732,7 +732,6 @@ import {
   hasCachedTokens,
 } from "../src/agent/mcp/auth/token-cache.js";
 import { mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
-import { join as joinPath } from "node:path";
 import { homedir } from "node:os";
 import { tmpdir } from "node:os";
 
