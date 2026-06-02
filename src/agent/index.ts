@@ -64,6 +64,7 @@ import {
 import { COMPLETION_STRINGS, renderHelp, renderTopicHelp } from "./commands.js";
 import { buildSystemMessage } from "./system-message.js";
 import { Spinner } from "./spinner.js";
+import { moduleInfoParameters } from "./module-info-schema.js";
 import { makeAuditProgressCallback } from "./audit-progress.js";
 import { createAgentState, type AgentState } from "./state.js";
 import {
@@ -5352,34 +5353,7 @@ const moduleInfoTool = defineTool("module_info", {
     "  - signatures: true for full parameter details on ALL functions (useful for API discovery)",
     "  - compact: true for condensed cheat sheet (just function names + required params)",
   ].join("\n"),
-  parameters: {
-    type: "object",
-    properties: {
-      name: {
-        type: "string",
-        description: "Module name (e.g. 'str-bytes', 'pptx')",
-      },
-      functionName: {
-        anyOf: [
-          { type: "string" },
-          { type: "array", items: { type: "string" } },
-        ],
-        description:
-          "Optional: get info for specific function(s). Accepts single name, comma-separated list, or array (e.g. 'chartSlide' or 'chartSlide,heroSlide,table' or ['chartSlide', 'heroSlide'])",
-      },
-      signatures: {
-        type: "boolean",
-        description:
-          "Optional: return full parameter types and descriptions for ALL functions (better for API discovery)",
-      },
-      compact: {
-        type: "boolean",
-        description:
-          "Optional: return condensed one-liner per export (just names + required params, no descriptions)",
-      },
-    },
-    required: ["name"],
-  },
+  parameters: moduleInfoParameters,
   handler: async ({
     name,
     functionName,

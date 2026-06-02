@@ -1054,7 +1054,7 @@ describe("MCP tool utility helpers", () => {
 
   it("keeps the module_info functionName schema valid for array inputs", () => {
     const source = readFileSync(
-      join(import.meta.dirname, "..", "src", "agent", "index.ts"),
+      join(import.meta.dirname, "..", "src", "agent", "module-info-schema.ts"),
       "utf-8",
     );
 

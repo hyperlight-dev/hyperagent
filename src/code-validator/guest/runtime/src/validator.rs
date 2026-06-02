@@ -32,7 +32,7 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::sync::atomic::{AtomicU64, Ordering};
 use hashbrown::HashMap;
-use rquickjs::loader::{Loader, Resolver};
+use rquickjs::loader::{ImportAttributes, Loader, Resolver};
 use rquickjs::{Context, Ctx, Module, Result as QjsResult, Runtime};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -62,14 +62,25 @@ struct StubModuleLoader {
 }
 
 impl Resolver for StubModuleLoader {
-    fn resolve(&mut self, _ctx: &Ctx<'_>, _base: &str, name: &str) -> QjsResult<String> {
+    fn resolve(
+        &mut self,
+        _ctx: &Ctx<'_>,
+        _base: &str,
+        name: &str,
+        _attributes: Option<ImportAttributes<'_>>,
+    ) -> QjsResult<String> {
         // Accept any module name for syntax validation
         Ok(name.to_string())
     }
 }
 
 impl Loader for StubModuleLoader {
-    fn load<'js>(&mut self, ctx: &Ctx<'js>, name: &str) -> QjsResult<Module<'js>> {
+    fn load<'js>(
+        &mut self,
+        ctx: &Ctx<'js>,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> QjsResult<Module<'js>> {
         // Track that we saw this module
         self.seen.borrow_mut().insert(name.to_string(), ());
         // Provide a minimal stub module
