@@ -191,7 +191,7 @@ pub fn check_hyperlight_availability() -> Result<String> {
     #[cfg(target_os = "windows")]
     {
         // WHP is always available on Windows 10+
-        return Ok("whp".to_string());
+        Ok("whp".to_string())
     }
 
     #[cfg(not(target_os = "windows"))]
