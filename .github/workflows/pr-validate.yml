@@ -161,6 +161,34 @@ jobs:
           path: dist/
           retention-days: 7
 
+  # Lint Windows-only Rust code paths (cfg(target_os = "windows") / WHP) that
+  # the Linux lint-and-test job never scans. Runs the analysis-guest clippy
+  # natively on the Windows 1ES pool so cfg(windows) branches in the host crate
+  # are checked under -D warnings.
+  clippy-windows:
+    name: Clippy (Windows)
+    needs: [docs-pr]
+    if: needs.docs-pr.outputs.docs-only != 'true'
+    runs-on: [self-hosted, Windows, X64, "1ES.Pool=hld-win2025-amd", "JobId=clippy-windows-${{ github.run_id }}-${{ github.run_number }}-${{ github.run_attempt }}"]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - uses: hyperlight-dev/ci-setup-workflow@v1.9.0
+        with:
+          rust-toolchain: "1.89"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup
+        run: just setup
+
+      - name: Clippy (analysis-guest)
+        run: just lint-analysis-guest
+
   # PDF visual regression tests — run on a GitHub-hosted ubuntu-22.04 image
   # so goldens are pixel-matched against a reproducible, fork-accessible runner.
   # The update-golden.yml workflow uses the same image to regenerate baselines.
@@ -247,7 +275,7 @@ jobs:
   # Gate PR merges on all jobs passing
   ci-status:
     name: CI Status
-    needs: [docs-pr, lint-and-test, build-and-test, pdf-visual, build-docker]
+    needs: [docs-pr, lint-and-test, build-and-test, clippy-windows, pdf-visual, build-docker]
     if: always()
     runs-on: ubuntu-latest
     steps:
