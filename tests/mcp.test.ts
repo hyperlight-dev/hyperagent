@@ -1,6 +1,8 @@
 // ── MCP integration tests ────────────────────────────────────────────
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   parseMCPConfig,
   computeMCPConfigHash,
@@ -730,7 +732,6 @@ import {
   hasCachedTokens,
 } from "../src/agent/mcp/auth/token-cache.js";
 import { mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
-import { join } from "node:path";
 import { homedir } from "node:os";
 import { tmpdir } from "node:os";
 
@@ -1049,6 +1050,55 @@ describe("MCP tool utility helpers", () => {
     expect(isReadOnlyMCPTool(tools[0])).toBe(true);
     expect(isReadOnlyMCPTool(tools[1])).toBe(true);
     expect(isReadOnlyMCPTool(tools[2])).toBe(false);
+  });
+
+  it("keeps the module_info functionName schema valid for array inputs", () => {
+    const source = readFileSync(
+      join(import.meta.dirname, "..", "src", "agent", "module-info-schema.ts"),
+      "utf-8",
+    );
+
+    expect(source).toContain("anyOf: [");
+    expect(source).toContain('type: "array", items: { type: "string" }');
+  });
+
+  it("treats Power BI-style list operations as read-only from the request payload", () => {
+    const powerBiTool: MCPToolSchema = {
+      name: "connection_operations",
+      originalName: "connection_operations",
+      description: "Connect to Power BI models",
+      inputSchema: {
+        type: "object",
+        properties: {
+          operation: { type: "string" },
+        },
+      },
+    } as MCPToolSchema;
+
+    expect(
+      isReadOnlyMCPTool(powerBiTool, { operation: "ListLocalInstances" }),
+    ).toBe(true);
+    expect(isReadOnlyMCPTool(powerBiTool, { operation: "CreateModel" })).toBe(
+      false,
+    );
+  });
+
+  it("keeps write-prefixed tool names as write operations even with read-like payload hints", () => {
+    const deleteTool: MCPToolSchema = {
+      name: "delete_model",
+      originalName: "delete_model",
+      description: "Delete a Power BI model",
+      inputSchema: {
+        type: "object",
+        properties: {
+          operation: { type: "string" },
+        },
+      },
+    } as MCPToolSchema;
+
+    expect(
+      isReadOnlyMCPTool(deleteTool, { operation: "ListLocalInstances" }),
+    ).toBe(false);
   });
 });
 

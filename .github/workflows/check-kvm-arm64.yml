@@ -1,0 +1,120 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+
+# Manual probe: confirm the Tart/Ubuntu KVM runner actually exposes nested
+# virtualization inside the guest VM.
+#
+# This mirrors the macOS virtualization probe in spirit: it checks the runner
+# identity, asserts the expected ARM64/Linux environment, and fails if /dev/kvm
+# or kvm-ok are not available.
+
+name: Check KVM ARM64 Runner
+
+on:
+  workflow_dispatch:
+  # Path-scoped so it only runs on PRs that touch this probe, not every PR.
+  pull_request:
+    paths:
+      - .github/workflows/check-kvm-arm64.yml
+
+permissions:
+  contents: read
+
+jobs:
+  check-kvm:
+    name: Inspect KVM on Tart ARM64 Linux runner
+    runs-on: [self-hosted, arm64, kvm, linux, ubuntu-24.04]
+
+    steps:
+      - name: Report runner identity
+        id: identity
+        run: |
+          os_name="$(uname -s)"
+          os_release="$(uname -r)"
+          arch="$(uname -m)"
+          kernel="$(uname -srv)"
+          cpu_brand="$(lscpu 2>/dev/null | awk -F: '/^Model name/ {print $2}' | xargs || true)"
+
+          echo "::group::Runner identity"
+          echo "OS:            ${os_name} ${os_release}"
+          echo "Architecture:  ${arch}"
+          echo "Kernel:        ${kernel}"
+          echo "CPU brand:     ${cpu_brand}"
+          echo "::endgroup::"
+
+          {
+            echo "os_name=${os_name}"
+            echo "os_release=${os_release}"
+            echo "arch=${arch}"
+            echo "cpu_brand=${cpu_brand}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Assert ARM64 Linux guest
+        run: |
+          arch="$(uname -m)"
+          if [ "$arch" != "aarch64" ] && [ "$arch" != "arm64" ]; then
+            echo "::error::Expected arm64/aarch64 runner, got '$arch'"
+            exit 1
+          fi
+          echo "Confirmed ARM64 Linux runner."
+
+      - name: Verify /dev/kvm is present and usable
+        id: kvm_device
+        run: |
+          if [ ! -e /dev/kvm ]; then
+            echo "::error::/dev/kvm is missing on this runner"
+            exit 1
+          fi
+
+          ls -l /dev/kvm
+          stat -c 'mode=%a owner=%U group=%G' /dev/kvm
+
+          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            echo "::error::/dev/kvm exists but is not readable/writable by this user"
+            exit 1
+          fi
+
+          echo "kvm_present=true" >> "$GITHUB_OUTPUT"
+
+      - name: Verify kvm-ok is available and reports KVM
+        id: kvm_ok
+        run: |
+          if ! command -v kvm-ok >/dev/null 2>&1; then
+            echo "::error::kvm-ok not found on PATH"
+            exit 1
+          fi
+
+          echo "Found kvm-ok: $(command -v kvm-ok)"
+          set +e
+          kvm-ok
+          rc=$?
+          set -e
+
+          case "$rc" in
+            0)
+              echo "kvm_ok=true" >> "$GITHUB_OUTPUT"
+              echo "kvm_ok_status=ok" >> "$GITHUB_OUTPUT"
+              echo "KVM acceleration is available on this runner."
+              ;;
+            *)
+              echo "kvm_ok=false" >> "$GITHUB_OUTPUT"
+              echo "kvm_ok_status=failed-${rc}" >> "$GITHUB_OUTPUT"
+              echo "::error::kvm-ok failed with exit code $rc"
+              exit 1
+              ;;
+          esac
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Tart KVM runner check"
+            echo ""
+            echo "| Property | Value |"
+            echo "| --- | --- |"
+            echo "| Runner label set | self-hosted, arm64, kvm, linux, ubuntu-24.04 |"
+            echo "| OS | ${{ steps.identity.outputs.os_name }} ${{ steps.identity.outputs.os_release }} |"
+            echo "| Architecture | ${{ steps.identity.outputs.arch }} |"
+            echo "| CPU | ${{ steps.identity.outputs.cpu_brand || 'unknown' }} |"
+            echo "| /dev/kvm present | ${{ steps.kvm_device.outputs.kvm_present || 'false' }} |"
+            echo "| kvm-ok verdict | ${{ steps.kvm_ok.outputs.kvm_ok || 'not-run' }} (${{ steps.kvm_ok.outputs.kvm_ok_status || 'n/a' }}) |"
+          } >> "$GITHUB_STEP_SUMMARY"
