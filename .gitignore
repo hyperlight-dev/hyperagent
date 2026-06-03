@@ -55,6 +55,6 @@ plugins/host-modules.d.ts
 output-hyperagent-*/
 scripts/bash-bundle/_tmp_bundle.js
 
-# Generated NAPI binding loader + type declarations (emitted by `napi build`)
+# Generated NAPI bindings (emitted by `napi build`)
 src/code-validator/guest/host/index.d.ts
 src/code-validator/guest/host/index.js
