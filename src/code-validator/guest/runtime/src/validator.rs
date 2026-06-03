@@ -48,7 +48,8 @@ use crate::metadata::{MetadataConfig, extract_dts_metadata, extract_module_metad
 /// Static QuickJS runtime for validation.
 /// Initialized once via `init_runtime()`, called from hyperlight_main().
 /// Following the pattern from hyperlight-js.
-static RUNTIME: spin::Lazy<Mutex<Option<ValidationRuntime>>> = spin::Lazy::new(|| Mutex::new(None));
+static RUNTIME: spin::LazyLock<Mutex<Option<ValidationRuntime>>> =
+    spin::LazyLock::new(|| Mutex::new(None));
 
 /// Counter for unique module names to avoid QuickJS module name collisions.
 static MODULE_COUNTER: AtomicU64 = AtomicU64::new(0);
