@@ -17,8 +17,8 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 hyperlight-host = { workspace = true }
-napi = { version = "2", features = ["async", "napi6"] }
-napi-derive = "2"
+napi = { version = "3", features = ["async", "napi6"] }
+napi-derive = "3"
 sha2 = "0.11"
 hex = "0.4"
 base64 = "0.22"

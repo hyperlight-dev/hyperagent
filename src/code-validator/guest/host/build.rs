@@ -166,17 +166,40 @@ fn bundle_runtime() {
     let runtime_resource = build_runtime();
     let runtime_bytes = fs::read(&runtime_resource).expect("Failed to read runtime binary");
 
-    // Compute SHA256 hash
+    assert!(
+        !runtime_bytes.is_empty(),
+        "analysis runtime binary is empty: {runtime_resource:?}"
+    );
+
+    let out_dir = env::var_os("OUT_DIR").unwrap();
+
+    // Snapshot the runtime binary into this crate's OUT_DIR and embed THAT copy.
+    //
+    // The hash below is computed from `runtime_bytes`, while the embedded bytes
+    // come from `include_bytes!` evaluated when this crate is compiled — two
+    // reads at different times. The build path of `runtime_resource` lives in a
+    // shared target directory that other cargo invocations (clippy, the napi
+    // typedef pass, repeated `just build`/`just test` runs) can rebuild, and the
+    // guest binary is not bit-for-bit reproducible. If that file changed between
+    // hashing and the `include_bytes!` compile, the embedded bytes would no
+    // longer match the stored hash and the runtime integrity check would fail.
+    //
+    // Writing a private snapshot into OUT_DIR — which nothing else ever touches —
+    // and pointing `include_bytes!` at it guarantees the embedded bytes are
+    // exactly the bytes we hashed, as a single atomic pair.
+    let embedded_path = Path::new(&out_dir).join("analysis-runtime.bin");
+    fs::write(&embedded_path, &runtime_bytes).expect("Failed to write runtime snapshot");
+
+    // Compute SHA256 hash of the same in-memory buffer we just embedded.
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(&runtime_bytes);
     let hash = hasher.finalize();
     let hash_hex = hex::encode(hash);
 
-    let out_dir = env::var_os("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("host_resource.rs");
     let contents = format!(
-        r#"pub(crate) static ANALYSIS_RUNTIME: &[u8] = include_bytes!({runtime_resource:?});
+        r#"pub(crate) static ANALYSIS_RUNTIME: &[u8] = include_bytes!({embedded_path:?});
 pub(crate) const ANALYSIS_RUNTIME_SHA256: &str = "{hash_hex}";"#
     );
 
