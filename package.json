@@ -35,9 +35,9 @@
     "@hyperlight/js-host-api": "file:deps/js-host-api",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "boxen": "^8.0.1",
-    "highlight.js": "^10.7.3",
+    "highlight.js": "^11.11.1",
     "hyperlight-analysis": "file:src/code-validator/guest",
-    "marked": "^15.0.12",
+    "marked": "^18.0.4",
     "marked-terminal": "^7.3.0",
     "zod": "^4.3.6"
   },
@@ -53,7 +53,12 @@
     "pngjs": "^7.0.0",
     "prettier": "^3.8.1",
     "tsx": "^4.0.0",
-    "typescript": "^5.8.0",
+    "typescript": "^6.0.3",
     "vitest": "^4.0.18"
+  },
+  "overrides": {
+    "marked-terminal": {
+      "marked": "$marked"
+    }
   }
 }

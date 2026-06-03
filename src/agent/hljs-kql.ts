@@ -8,7 +8,12 @@
 //
 // ─────────────────────────────────────────────────────────────────────
 
-/// <reference types="highlight.js" />
+// highlight.js v11 ships its type definitions inside `declare module
+// 'highlight.js'` rather than as global ambient types, so the v10-era
+// `/// <reference types="highlight.js" />` no longer exposes `HLJSApi`,
+// `Language` or `Mode`. Import them explicitly instead (`import type` is
+// erased at compile time, so there is no runtime dependency change).
+import type { HLJSApi, Language, Mode } from "highlight.js";
 
 // ── Keyword Lists (from @kusto/monaco-kusto Monarch definition) ─────
 

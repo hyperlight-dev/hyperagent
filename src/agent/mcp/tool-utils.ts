@@ -127,7 +127,10 @@ export function selectMCPTools(
   };
 }
 
-export function isReadOnlyMCPTool(tool: MCPToolSchema): boolean {
+export function isReadOnlyMCPTool(
+  tool: MCPToolSchema,
+  args?: Record<string, unknown>,
+): boolean {
   if (tool.annotations?.readOnlyHint === true) return true;
   if (tool.annotations?.destructiveHint === true) return false;
 
@@ -135,7 +138,43 @@ export function isReadOnlyMCPTool(tool: MCPToolSchema): boolean {
   if (WRITE_TOOL_PREFIXES.some((prefix) => name.startsWith(prefix))) {
     return false;
   }
-  return READ_ONLY_TOOL_PREFIXES.some((prefix) => name.startsWith(prefix));
+  if (READ_ONLY_TOOL_PREFIXES.some((prefix) => name.startsWith(prefix))) {
+    return true;
+  }
+
+  const operationHint = inferReadOnlyFromArgs(args);
+  if (operationHint !== null) return operationHint;
+
+  return false;
+}
+
+function inferReadOnlyFromArgs(
+  args: Record<string, unknown> | undefined,
+): boolean | null {
+  if (!args || typeof args !== "object") return null;
+
+  const candidates = [
+    args.operation,
+    args.action,
+    args.command,
+    args.method,
+    args.kind,
+    args.type,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") continue;
+
+    const value = normaliseToolName(candidate);
+    if (WRITE_TOOL_PREFIXES.some((prefix) => value.startsWith(prefix))) {
+      return false;
+    }
+    if (READ_ONLY_TOOL_PREFIXES.some((prefix) => value.startsWith(prefix))) {
+      return true;
+    }
+  }
+
+  return null;
 }
 
 export function getMCPToolSafety(tool: MCPToolSchema): MCPToolInfo["safety"] {
