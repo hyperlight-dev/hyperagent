@@ -19,7 +19,7 @@ native-image = { path = "modules/native-image" }
 native-html = { path = "modules/native-html" }
 native-markdown = { path = "modules/native-markdown" }
 native-globals = { path = "modules/native-globals" }
-rquickjs = { version = "0.11", default-features = false, features = ["bindgen", "futures", "macro", "loader"] }
+rquickjs = { version = "0.12", default-features = false, features = ["bindgen", "futures", "macro", "loader"] }
 
 # anyhow is only needed for the native CLI entry point, not the hyperlight guest
 [target.'cfg(not(hyperlight))'.dependencies]
