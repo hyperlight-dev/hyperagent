@@ -174,9 +174,24 @@ fn bundle_runtime() {
     let hash_hex = hex::encode(hash);
 
     let out_dir = env::var_os("OUT_DIR").unwrap();
-    let dest_path = Path::new(&out_dir).join("host_resource.rs");
+    let out_dir = Path::new(&out_dir);
+
+    // Stage the runtime binary into OUT_DIR and embed that copy rather than the
+    // live build-target binary. `include_bytes!` is expanded by rustc when the
+    // host crate is compiled, which happens after this build script runs. If we
+    // pointed `include_bytes!` at the mutable target-dir binary, a later rebuild
+    // of the runtime (e.g. by clippy or a subsequent `cargo build` that does not
+    // re-trigger this script) could change those bytes while the recorded
+    // ANALYSIS_RUNTIME_SHA256 stays stale, producing a `.node` whose embedded
+    // bytes and integrity hash disagree. The OUT_DIR copy is written here, in
+    // lock-step with the hash, and is only ever touched by this build script, so
+    // the embedded bytes and hash can never desync.
+    let embedded_path = out_dir.join("analysis-runtime.bin");
+    fs::write(&embedded_path, &runtime_bytes).expect("Failed to stage runtime binary in OUT_DIR");
+
+    let dest_path = out_dir.join("host_resource.rs");
     let contents = format!(
-        r#"pub(crate) static ANALYSIS_RUNTIME: &[u8] = include_bytes!({runtime_resource:?});
+        r#"pub(crate) static ANALYSIS_RUNTIME: &[u8] = include_bytes!({embedded_path:?});
 pub(crate) const ANALYSIS_RUNTIME_SHA256: &str = "{hash_hex}";"#
     );
 
