@@ -8,7 +8,7 @@
 //
 // Prerequisites: npm install (just-bash and esbuild must be in node_modules)
 
-import { execSync } from "node:child_process";
+import { build } from "esbuild";
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,37 +32,44 @@ if (!existsSync(join(repoRoot, "node_modules", "just-bash"))) {
   process.exit(1);
 }
 
-const aliasArgs = [
-  `--alias:node:module=${join(stubDir, "module-stub.mjs")}`,
-  `--alias:node:zlib=${join(stubDir, "zlib-stub.mjs")}`,
-  `--alias:node:worker_threads=${join(stubDir, "worker-stub.mjs")}`,
-  `--alias:node:path=${join(stubDir, "node-path-stub.mjs")}`,
-  `--alias:node:dns=${join(stubDir, "dns-stub.mjs")}`,
-  `--alias:node:crypto=${join(stubDir, "crypto-stub.mjs")}`,
-  `--alias:node:url=${join(stubDir, "url-stub.mjs")}`,
-  `--alias:node:fs=${join(stubDir, "fs-stub.mjs")}`,
-  `--alias:node:fs/promises=${join(stubDir, "fs-stub.mjs")}`,
-  `--alias:node:child_process=${join(stubDir, "worker-stub.mjs")}`,
-  `--alias:node:os=${join(stubDir, "worker-stub.mjs")}`,
-  `--alias:node:async_hooks=${join(stubDir, "worker-stub.mjs")}`,
-  `--alias:turndown=${join(stubDir, "turndown-stub.mjs")}`,
-  `--alias:seek-bzip=${join(stubDir, "bzip-stub.mjs")}`,
-  `--alias:node-liblzma=${join(stubDir, "liblzma-stub.mjs")}`,
-  `--alias:@mongodb-js/zstd=${join(stubDir, "zstd-stub.mjs")}`,
-  `--alias:sql.js=${join(stubDir, "sqljs-stub.mjs")}`,
-].join(" ");
+const alias = {
+  "node:module": join(stubDir, "module-stub.mjs"),
+  "node:zlib": join(stubDir, "zlib-stub.mjs"),
+  "node:worker_threads": join(stubDir, "worker-stub.mjs"),
+  "node:path": join(stubDir, "node-path-stub.mjs"),
+  "node:dns": join(stubDir, "dns-stub.mjs"),
+  "node:crypto": join(stubDir, "crypto-stub.mjs"),
+  "node:url": join(stubDir, "url-stub.mjs"),
+  "node:fs": join(stubDir, "fs-stub.mjs"),
+  "node:fs/promises": join(stubDir, "fs-stub.mjs"),
+  "node:child_process": join(stubDir, "worker-stub.mjs"),
+  "node:os": join(stubDir, "worker-stub.mjs"),
+  "node:async_hooks": join(stubDir, "worker-stub.mjs"),
+  turndown: join(stubDir, "turndown-stub.mjs"),
+  "seek-bzip": join(stubDir, "bzip-stub.mjs"),
+  "node-liblzma": join(stubDir, "liblzma-stub.mjs"),
+  "@mongodb-js/zstd": join(stubDir, "zstd-stub.mjs"),
+  "sql.js": join(stubDir, "sqljs-stub.mjs"),
+};
 
 const tmpBundle = join(stubDir, "_tmp_bundle.js");
 
-execSync(
-  `npx esbuild ${entryFile} ` +
-    `--bundle --format=esm --platform=neutral --target=es2020 ` +
-    `--main-fields=module,main ` +
-    `${aliasArgs} ` +
-    `--outfile=${tmpBundle} ` +
-    `--minify --tree-shaking=true`,
-  { stdio: "inherit", cwd: repoRoot },
-);
+// Use esbuild's JS API rather than spawning the CLI. This avoids passing
+// interpolated paths through a shell entirely (resolving the CodeQL
+// shell-injection alert) and is portable: the esbuild CLI bin is a native
+// binary on some platforms, so it can't be launched via `node`.
+await build({
+  entryPoints: [entryFile],
+  bundle: true,
+  format: "esm",
+  platform: "neutral",
+  target: "es2020",
+  mainFields: ["module", "main"],
+  alias,
+  outfile: tmpBundle,
+  minify: true,
+  treeShaking: true,
+});
 
 // ── Step 2: Prepend polyfills ───────────────────────────────────────
 

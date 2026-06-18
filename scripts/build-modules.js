@@ -12,12 +12,14 @@
  * 7. Regenerates host-modules.d.ts
  */
 
-import { execSync } from "child_process";
+import { execSync, execFileSync } from "child_process";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { createRequire } from "module";
 import { existsSync, unlinkSync, readdirSync, statSync } from "fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
 const ROOT = join(__dirname, "..");
 const BUILTIN_DIR = join(ROOT, "builtin-modules");
 const PLUGINS_DIR = join(ROOT, "plugins");
@@ -68,10 +70,20 @@ execSync("npx tsx scripts/generate-ha-modules-dts.ts", {
 });
 
 // Step 4: Format with Prettier
-execSync(`prettier --write "${BUILTIN_DIR}/*.js"`, {
-  cwd: ROOT,
-  stdio: "inherit",
-});
+// Invoke prettier without a shell (execFileSync) so the interpolated path
+// can't be interpreted as a shell command. Prettier expands the glob itself.
+execFileSync(
+  process.execPath,
+  [
+    require.resolve("prettier/bin/prettier.cjs"),
+    "--write",
+    join(BUILTIN_DIR, "*.js"),
+  ],
+  {
+    cwd: ROOT,
+    stdio: "inherit",
+  },
+);
 
 console.log("\nUpdating module hashes...");
 
@@ -160,6 +172,5 @@ execSync("npx tsx scripts/generate-host-modules-dts.ts", {
   cwd: ROOT,
   stdio: "inherit",
 });
-
 
 console.log("✓ Build complete");
