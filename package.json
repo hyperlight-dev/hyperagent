@@ -43,7 +43,7 @@
   },
   "devDependencies": {
     "@types/marked-terminal": "^6.1.1",
-    "@types/node": "^25.3.3",
+    "@types/node": "^26.0.0",
     "@types/pngjs": "^6.0.5",
     "@xarsh/ooxml-validator": "^0.3.0",
     "esbuild": "^0.28.0",
