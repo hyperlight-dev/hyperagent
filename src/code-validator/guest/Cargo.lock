@@ -194,9 +194,9 @@ checksum = "5d20789868f4b01b2f2caec9f5c4e0213b41e3e5702a50157d699ae31ced2fcb"
 
 [[package]]
 name = "cargo-hyperlight"
-version = "0.1.11"
+version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "416fd0f4dc4e1e972da8365f840bf95a708f92d233377f0210b167739dfde736"
+checksum = "4580eb16c90b910fe496797d6340c2d321d06e5640a45b1a973a1d9171ae24c1"
 dependencies = [
  "anyhow",
  "clap",
@@ -206,6 +206,8 @@ dependencies = [
  "libc",
  "object",
  "os_str_bytes",
+ "proc-macro2",
+ "quote",
  "regex",
  "rustc-demangle",
  "semver",
