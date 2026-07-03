@@ -6756,7 +6756,7 @@ async function main(): Promise<void> {
   try {
     const { createRequire } = await import("node:module");
     const require = createRequire(import.meta.url);
-    require("@hyperlight/js-host-api");
+    require("@hyperlight-dev/js-host-api");
   } catch {
     console.error(
       `${ANSI.red}❌ Native addon failed to load — rebuild with 'just setup' from the repo root.${ANSI.reset}`,

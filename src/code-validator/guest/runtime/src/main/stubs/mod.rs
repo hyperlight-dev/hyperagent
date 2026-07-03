@@ -14,12 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-//! Libc function stubs required by rquickjs.
+//! Libc overrides required by the analysis guest.
 //!
-//! Some libc functions that rquickjs requires are not implemented in
-//! the libc provided by the hyperlight runtime, so we provide our own
-//! implementations here.
+//! picolibc (via hyperlight-guest-bin) provides putchar/fflush/localtime_r, so we
+//! only override the time functions — via `-wrap=clock_gettime`/`-wrap=gettimeofday`
+//! link flags (see build.rs) — to return a deterministic fixed timestamp.
 
 mod clock;
-mod io;
-mod localtime;

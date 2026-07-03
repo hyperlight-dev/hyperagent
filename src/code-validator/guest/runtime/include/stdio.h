@@ -15,15 +15,8 @@ limitations under the License.
 */
 #pragma once
 
-#include "printf.h"
+// picolibc (via cargo-hyperlight 0.1.12's sysroot) provides the full stdio API
+// for the hyperlight guest target — printf/fprintf/fputc/putchar/fflush/stdout
+// are all present. The older sysroot lacked them, which the removed macros
+// bridged. Keep this as a thin passthrough so `#include <stdio.h>` still works.
 #include_next "stdio.h"
-
-#define stdout NULL
-
-int putchar(int c);
-
-#define vfprintf(f, ...) vprintf(__VA_ARGS__)
-#define fprintf(f, ...) printf(__VA_ARGS__)
-#define fputc(c, f) putc((char)(c), f)
-
-int fflush(FILE *f);

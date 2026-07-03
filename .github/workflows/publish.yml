@@ -75,8 +75,8 @@ jobs:
           rustup target add x86_64-unknown-linux-musl
 
           # Rebuild hyperlight-js NAPI addon targeting musl in release mode.
-          hl_dir=$(just resolve-hyperlight-dir)
-          cd "${hl_dir}/src/js-host-api"
+          # deps/js-host-api is a symlink into the hyperlight-js release-tag checkout.
+          cd "$GITHUB_WORKSPACE/deps/js-host-api"
           npx napi build --platform --release --strip --target x86_64-unknown-linux-musl
 
           # Rebuild hyperlight-analysis NAPI addon targeting musl in release mode.
@@ -86,12 +86,12 @@ jobs:
 
           # This matrix leg must upload only musl artifacts; the setup step also
           # creates host-platform glibc addons, which are supplied by linux-kvm.
-          rm -f "${hl_dir}/src/js-host-api/"*.linux-x64-gnu.node
+          rm -f "$GITHUB_WORKSPACE/deps/js-host-api/"*.linux-x64-gnu.node
           rm -f "$GITHUB_WORKSPACE/src/code-validator/guest/host/"*.linux-x64-gnu.node
           rm -f "$GITHUB_WORKSPACE/src/code-validator/guest/"*.linux-x64-gnu.node
 
           # Verify musl .node files were actually produced
-          ls -la "${hl_dir}/src/js-host-api/"*.linux-x64-musl.node
+          ls -la "$GITHUB_WORKSPACE/deps/js-host-api/"*.linux-x64-musl.node
           ls -la "$GITHUB_WORKSPACE/src/code-validator/guest/"*linux-x64-musl* || ls -la "$GITHUB_WORKSPACE/src/code-validator/guest/host/"*linux-x64-musl*
 
       - name: Build release binary

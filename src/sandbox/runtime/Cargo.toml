@@ -13,7 +13,7 @@ name = "hyperagent-runtime"
 path = "src/main.rs"
 
 [dependencies]
-hyperlight-js-runtime = { git = "https://github.com/simongdavies/hyperlight-js.git", branch = "hyperagent" }
+hyperlight-js-runtime = { version = "0.3.3" }
 native-deflate = { path = "modules/native-deflate" }
 native-image = { path = "modules/native-image" }
 native-html = { path = "modules/native-html" }

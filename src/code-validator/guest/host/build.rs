@@ -126,7 +126,12 @@ fn build_runtime() -> PathBuf {
     let cargo_profile = if profile == "debug" { "dev" } else { "release" };
 
     let stubs_inc = runtime_dir.join("include");
-    let cflags = format!("-I{} -D__wasi__=1", stubs_inc.display());
+    // -D_POSIX_MONOTONIC_CLOCK is required for clock_gettime; cargo-hyperlight
+    // 0.1.12 supplies the picolibc sysroot (errno.h etc.). Mirrors hyperlight-js.
+    let cflags = format!(
+        "-I{} -D__wasi__=1 -D_POSIX_MONOTONIC_CLOCK",
+        stubs_inc.display()
+    );
     let cflags = cflags.replace('\\', "/");
 
     let mut cargo_cmd = cargo_hyperlight::cargo().unwrap();
@@ -141,6 +146,10 @@ fn build_runtime() -> PathBuf {
         .arg(&manifest_path)
         .arg("--locked")
         .env_clear_cargo()
+        // cargo-hyperlight >= 0.1.12 strips --target-dir from the forwarded cargo
+        // args (re-applying only --target), so set CARGO_TARGET_DIR explicitly to
+        // keep the guest build in its own dir and avoid a .cargo-lock deadlock.
+        .env("CARGO_TARGET_DIR", &target_dir)
         .env("HYPERLIGHT_CFLAGS", cflags);
 
     cmd.status().unwrap_or_else(|e| {

@@ -17,11 +17,12 @@ license = "Apache-2.0"
 repository = "https://github.com/anthropics/hyperagent"
 
 [workspace.dependencies]
-# Hyperlight dependencies - aligned with the hyperlight-js runtime resolved via Cargo git checkout
-hyperlight-common = { git = "https://github.com/simongdavies/hyperlight", branch = "update-surrogate", default-features = false }
-hyperlight-guest-bin = { git = "https://github.com/simongdavies/hyperlight", branch = "update-surrogate" }
-hyperlight-guest = { git = "https://github.com/simongdavies/hyperlight", branch = "update-surrogate" }
-hyperlight-host = { git = "https://github.com/simongdavies/hyperlight", branch = "update-surrogate", default-features = false, features = ["executable_heap", "kvm", "mshv3"] }
+# Hyperlight core crates — published on crates.io, pinned to the version that
+# hyperlight-js 0.3.x builds against.
+hyperlight-common = { version = "0.16.0", default-features = false }
+hyperlight-guest-bin = { version = "0.16.0" }
+hyperlight-guest = { version = "0.16.0" }
+hyperlight-host = { version = "0.16.0", default-features = false, features = ["executable_heap", "kvm", "mshv3"] }
 
 [profile.dev]
 panic = "abort"

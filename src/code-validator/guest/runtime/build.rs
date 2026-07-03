@@ -24,6 +24,13 @@ use std::path::PathBuf;
 use bindgen::RustEdition::Edition2024;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // picolibc's guest clock_gettime/gettimeofday are poor stubs; wrap them so our
+    // __wrap_* overrides (stubs/clock.rs) supply a deterministic fixed timestamp.
+    if std::env::var("CARGO_CFG_HYPERLIGHT").is_ok() {
+        println!("cargo::rustc-link-arg=-wrap=clock_gettime");
+        println!("cargo::rustc-link-arg=-wrap=gettimeofday");
+    }
+
     let mut bindings = bindgen::builder()
         .use_core()
         .wrap_unsafe_ops(true)

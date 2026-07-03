@@ -91,12 +91,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "autocfg"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
-
-[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -124,9 +118,9 @@ dependencies = [
 
 [[package]]
 name = "bitflags"
-version = "2.11.0"
+version = "2.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "843867be96c8daad0d758b57df9392b6d8d271134fce549de6ce169ff98a92af"
+checksum = "b4388bee8683e3d04af747c73422af53102d2bd24d9eadb6cbc100baef4b43f8"
 
 [[package]]
 name = "block-buffer"
@@ -148,12 +142,38 @@ dependencies = [
 
 [[package]]
 name = "buddy_system_allocator"
-version = "0.12.0"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b672b945a3e4f4f40bfd4cd5ee07df9e796a42254ce7cd6d2599ad969244c44a"
+checksum = "c1af5a01adeeade54c9f5060300227a8ee64c05b6376f28e9b8ee3b72dd2056f"
 dependencies = [
- "spin",
+ "spin 0.10.0",
 ]
+
+[[package]]
+name = "bytemuck"
+version = "1.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8efb64bd706a16a1bdde310ae86b351e4d21550d98d056f22f8a7f7a2183fec"
+dependencies = [
+ "bytemuck_derive",
+]
+
+[[package]]
+name = "bytemuck_derive"
+version = "1.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9abbd1bc6865053c427f7198e6af43bfdedc55ab791faed4fbd361d789575ff"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "bytes"
+version = "1.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ae3f5d315924270530207e2a68396c3cc547f6dca3fbdca317cfb1a51edb593"
 
 [[package]]
 name = "cc"
@@ -179,15 +199,6 @@ name = "cfg-if"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
-
-[[package]]
-name = "chrono"
-version = "0.4.44"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c673075a2e0e5f4a1dde27ce9dee1ea4558c7ffe648f576438a20ca1d2acc4b0"
-dependencies = [
- "num-traits",
-]
 
 [[package]]
 name = "clang-sys"
@@ -367,6 +378,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
+name = "fixedbitset"
+version = "0.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
+
+[[package]]
 name = "flatbuffers"
 version = "25.12.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -415,13 +432,6 @@ name = "hashbrown"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
-dependencies = [
- "allocator-api2",
- "equivalent",
- "foldhash",
- "serde",
- "serde_core",
-]
 
 [[package]]
 name = "hashbrown"
@@ -432,6 +442,8 @@ dependencies = [
  "allocator-api2",
  "equivalent",
  "foldhash",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -480,21 +492,28 @@ dependencies = [
 
 [[package]]
 name = "hyperlight-common"
-version = "0.13.1"
-source = "git+https://github.com/simongdavies/hyperlight?branch=update-surrogate#5f1912b4ce8a8d83e6ce63425d766bd50f511ef8"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "436dac5cc08da3db27de38b174a9b22498ab6443aaffd83b97f66a5d2f1d74cc"
 dependencies = [
  "anyhow",
+ "bitflags",
+ "bytemuck",
+ "bytes",
+ "fixedbitset",
  "flatbuffers",
  "log",
- "spin",
+ "smallvec",
+ "spin 0.12.1",
  "thiserror",
  "tracing-core",
 ]
 
 [[package]]
 name = "hyperlight-guest"
-version = "0.13.1"
-source = "git+https://github.com/simongdavies/hyperlight?branch=update-surrogate#5f1912b4ce8a8d83e6ce63425d766bd50f511ef8"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cb2e6548e2b837400a7b27a5ed6a6570c28801253e6ec80959700dd63925c40"
 dependencies = [
  "anyhow",
  "flatbuffers",
@@ -505,28 +524,28 @@ dependencies = [
 
 [[package]]
 name = "hyperlight-guest-bin"
-version = "0.13.1"
-source = "git+https://github.com/simongdavies/hyperlight?branch=update-surrogate#5f1912b4ce8a8d83e6ce63425d766bd50f511ef8"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cdeccde6490e76aefe2e8ca17e1a225d2da3338f020f17533b8ee0cee7cf9a11"
 dependencies = [
  "buddy_system_allocator",
- "cc",
- "cfg-if",
  "flatbuffers",
- "glob",
  "hyperlight-common",
  "hyperlight-guest",
  "hyperlight-guest-macro",
  "hyperlight-guest-tracing",
+ "hyperlight-libc",
  "linkme",
  "log",
- "spin",
+ "spin 0.12.1",
  "tracing",
 ]
 
 [[package]]
 name = "hyperlight-guest-macro"
-version = "0.13.1"
-source = "git+https://github.com/simongdavies/hyperlight?branch=update-surrogate#5f1912b4ce8a8d83e6ce63425d766bd50f511ef8"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "620ed77c5c07027c63a6a741da8a9a2462a56e660691da715c3700cb281a3d23"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -536,32 +555,34 @@ dependencies = [
 
 [[package]]
 name = "hyperlight-guest-tracing"
-version = "0.13.1"
-source = "git+https://github.com/simongdavies/hyperlight?branch=update-surrogate#5f1912b4ce8a8d83e6ce63425d766bd50f511ef8"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8b39160c2001db5c79916d946d04a601e4e1f2827e2c785d477b31e48f5e514"
 dependencies = [
  "hyperlight-common",
- "spin",
+ "spin 0.12.1",
  "tracing",
  "tracing-core",
 ]
 
 [[package]]
 name = "hyperlight-js-common"
-version = "0.1.1"
-source = "git+https://github.com/simongdavies/hyperlight-js.git?branch=hyperagent#96a2b36f8ae23d231873c6e646b0b3b99cd7801a"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a2ca4a9f3afe879c8fcdf7802672f0dbdc37d1301f268b263e08c560f42530b"
 
 [[package]]
 name = "hyperlight-js-runtime"
-version = "0.1.1"
-source = "git+https://github.com/simongdavies/hyperlight-js.git?branch=hyperagent#96a2b36f8ae23d231873c6e646b0b3b99cd7801a"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c020ac9e87be141f63e2237437707c634d0850a1b2d5499bbcafc053cd47345"
 dependencies = [
  "anyhow",
  "base64",
  "bindgen",
- "chrono",
  "clap",
  "fn-traits",
- "hashbrown 0.16.1",
+ "hashbrown 0.17.1",
  "hex",
  "hmac",
  "hyperlight-common",
@@ -572,8 +593,20 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "spin",
+ "spin 0.12.1",
  "tracing",
+]
+
+[[package]]
+name = "hyperlight-libc"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c258315b4c0ec4aae172c4ff31b34590559fb6699c144f779be2246672b3147"
+dependencies = [
+ "anyhow",
+ "bindgen",
+ "cc",
+ "glob",
 ]
 
 [[package]]
@@ -631,18 +664,18 @@ dependencies = [
 
 [[package]]
 name = "linkme"
-version = "0.3.35"
+version = "0.3.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e3283ed2d0e50c06dd8602e0ab319bb048b6325d0bba739db64ed8205179898"
+checksum = "e83272d46373fb8decca684579ac3e7c8f3d71d4cc3aa693df8759e260ae41cf"
 dependencies = [
  "linkme-impl",
 ]
 
 [[package]]
 name = "linkme-impl"
-version = "0.3.35"
+version = "0.3.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5cec0ec4228b4853bb129c84dbf093a27e6c7a20526da046defc334a1b017f7"
+checksum = "32d59e20403c7d08fe62b4376edfe5c7fb2ef1e6b1465379686d0f21c8df444b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -660,9 +693,9 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.29"
+version = "0.4.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
+checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "memchr"
@@ -732,15 +765,6 @@ checksum = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
 dependencies = [
  "memchr",
  "minimal-lexical",
-]
-
-[[package]]
-name = "num-traits"
-version = "0.2.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
-dependencies = [
- "autocfg",
 ]
 
 [[package]]
@@ -938,9 +962,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.149"
+version = "1.0.150"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
+checksum = "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9"
 dependencies = [
  "itoa",
  "memchr",
@@ -989,10 +1013,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
+name = "smallvec"
+version = "1.15.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
+
+[[package]]
 name = "spin"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5fe4ccb98d9c292d56fec89a5e07da7fc4cf0dc11e156b41793132775d3e591"
+
+[[package]]
+name = "spin"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd5231412d905519dca6a5deb0327d407be68d6c941feec004533401d3a0a715"
 dependencies = [
  "lock_api",
 ]

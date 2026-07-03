@@ -24,13 +24,16 @@ use crate::libc;
 /// Fixed timestamp: 2024-01-01 00:00:00 UTC in microseconds since epoch.
 const FIXED_TIMESTAMP_MICROS: u64 = 1704067200u64 * 1_000_000u64;
 
+// picolibc provides clock_gettime/gettimeofday, but as poor guest stubs. The build
+// script sets `-wrap=clock_gettime` / `-wrap=gettimeofday`, redirecting calls here so
+// we return a deterministic fixed timestamp (the analysis guest needs no real time).
 #[unsafe(no_mangle)]
-extern "C" fn clock_gettime(clk_id: libc::clockid_t, ts: *mut libc::timespec) -> libc::c_int {
+extern "C" fn __wrap_clock_gettime(clk_id: libc::clockid_t, ts: *mut libc::timespec) -> libc::c_int {
     const CLOCK_REALTIME: libc::clockid_t = libc::CLOCK_REALTIME as libc::clockid_t;
     const CLOCK_MONOTONIC: libc::clockid_t = libc::CLOCK_MONOTONIC as libc::clockid_t;
 
     if clk_id != CLOCK_REALTIME && clk_id != CLOCK_MONOTONIC {
-        unsafe { libc::__errno_location().write(libc::EINVAL as _) };
+        unsafe { libc::errno = libc::EINVAL as _ };
         return -1;
     }
 
@@ -45,7 +48,7 @@ extern "C" fn clock_gettime(clk_id: libc::clockid_t, ts: *mut libc::timespec) ->
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn gettimeofday(tp: *mut libc::timeval, _tz: *mut libc::c_void) -> libc::c_int {
+extern "C" fn __wrap_gettimeofday(tp: *mut libc::timeval, _tz: *mut libc::c_void) -> libc::c_int {
     let micros = FIXED_TIMESTAMP_MICROS;
     unsafe {
         tp.write(libc::timeval {
