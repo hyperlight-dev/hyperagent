@@ -23,7 +23,7 @@ jobs:
     outputs:
       docs-only: ${{ steps.docs-only.outputs.result }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 2
       - uses: dorny/paths-filter@v4
@@ -61,7 +61,7 @@ jobs:
     if: needs.docs-pr.outputs.docs-only != 'true'
     runs-on: [self-hosted, Linux, X64, "1ES.Pool=hld-kvm-amd","JobId=hyperagent-pr-validate-${{ github.run_id }}-${{ github.run_number }}-${{ github.run_attempt }}"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:
@@ -129,7 +129,7 @@ jobs:
         github.run_number,
         github.run_attempt)) }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:
@@ -171,7 +171,7 @@ jobs:
     if: needs.docs-pr.outputs.docs-only != 'true'
     runs-on: [self-hosted, Windows, X64, "1ES.Pool=hld-win2025-amd", "JobId=clippy-windows-${{ github.run_id }}-${{ github.run_number }}-${{ github.run_attempt }}"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:
@@ -198,7 +198,7 @@ jobs:
     if: needs.docs-pr.outputs.docs-only != 'true'
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:
@@ -235,7 +235,7 @@ jobs:
     if: needs.docs-pr.outputs.docs-only != 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:
