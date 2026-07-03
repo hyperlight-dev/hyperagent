@@ -190,11 +190,7 @@ export interface AuditResult {
  * long-lived (persisted to disk), enablement is session-scoped.
  */
 export type PluginState =
-  | "discovered"
-  | "audited"
-  | "configured"
-  | "enabled"
-  | "disabled";
+  "discovered" | "audited" | "configured" | "enabled" | "disabled";
 
 // ── Approval ─────────────────────────────────────────────────────────
 

@@ -54,9 +54,7 @@ export interface MCPStdioServerConfig extends MCPServerConfigBase {
 
 /** Supported authentication methods for HTTP MCP servers. */
 export type MCPAuthMethod =
-  | "oauth"
-  | "workload-identity"
-  | "client-credentials";
+  "oauth" | "workload-identity" | "client-credentials";
 
 /**
  * OAuth 2.0 user-delegated authentication via MSAL.
@@ -138,9 +136,7 @@ export interface MCPClientCredentialsConfig {
 
 /** Discriminated union of all auth configurations. */
 export type MCPAuthConfig =
-  | MCPOAuthConfig
-  | MCPWorkloadIdentityConfig
-  | MCPClientCredentialsConfig;
+  MCPOAuthConfig | MCPWorkloadIdentityConfig | MCPClientCredentialsConfig;
 
 /**
  * Configuration for an MCP server accessible over HTTP (Streamable HTTP).
@@ -234,11 +230,7 @@ export interface MCPToolSchema {
 
 /** Connection state for an MCP server. */
 export type MCPConnectionState =
-  | "idle"
-  | "connecting"
-  | "connected"
-  | "error"
-  | "closed";
+  "idle" | "connecting" | "connected" | "error" | "closed";
 
 /** Runtime state for a single MCP server connection. */
 export interface MCPConnection {
