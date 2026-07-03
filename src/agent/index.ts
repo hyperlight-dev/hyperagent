@@ -7439,9 +7439,9 @@ async function main(): Promise<void> {
       );
     }
 
-    // Clean up: destroy the session and stop the CLI server
+    // Clean up: disconnect the session and stop the CLI server
     if (state.activeSession) {
-      await state.activeSession.destroy();
+      await state.activeSession.disconnect();
       state.activeSession = null;
     }
     await client.stop();
@@ -7486,13 +7486,13 @@ process.on("SIGINT", async () => {
     console.log();
   }
 
-  // Graceful SDK shutdown — destroy session, then stop client
+  // Graceful SDK shutdown — disconnect session, then stop client
   // with a timeout fallback to forceStop.
   if (state.activeSession) {
     try {
-      await state.activeSession.destroy();
+      await state.activeSession.disconnect();
     } catch {
-      // Best-effort — don't block exit on destroy failure
+      // Best-effort — don't block exit on disconnect failure
     }
     state.activeSession = null;
   }

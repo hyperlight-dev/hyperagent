@@ -968,7 +968,7 @@ export async function deepAudit(
     };
   } finally {
     // Clean up the one-shot audit session.
-    // SDK's session.destroy() clears local handlers but does NOT
+    // SDK's session.disconnect() releases local handlers but does NOT
     // remove the session from client.sessions — the zombie entry
     // persists and can cause duplicate event dispatch. We must
     // evict it ourselves.
@@ -977,7 +977,7 @@ export async function deepAudit(
         const auditSessionId = session.sessionId;
         const sessionsMap = (client as any).sessions as
           Map<string, unknown> | undefined;
-        await session.destroy();
+        await session.disconnect();
         sessionsMap?.delete(auditSessionId);
       } catch {
         // Best-effort cleanup — don't mask the original error
