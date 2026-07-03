@@ -75,8 +75,14 @@ jobs:
           rustup target add x86_64-unknown-linux-musl
 
           # Rebuild hyperlight-js NAPI addon targeting musl in release mode.
-          # deps/js-host-api is a symlink into the hyperlight-js release-tag checkout.
+          # deps/js-host-api is a symlink into the hyperlight-js release-tag checkout,
+          # which pins its own Rust toolchain via rust-toolchain.toml (currently 1.90).
+          # rustup honours that pin from the cwd, so the musl target must be added to
+          # THAT toolchain here — the top-level `rustup target add` only covered the
+          # default 1.89 toolchain, so the cross-compile failed with
+          # "error[E0463]: can't find crate for `core`".
           cd "$GITHUB_WORKSPACE/deps/js-host-api"
+          rustup target add x86_64-unknown-linux-musl
           npx napi build --platform --release --strip --target x86_64-unknown-linux-musl
 
           # Rebuild hyperlight-analysis NAPI addon targeting musl in release mode.
