@@ -606,7 +606,7 @@ export async function handleSlashCommand(
         return true;
       }
       try {
-        await state.activeSession.destroy();
+        await state.activeSession.disconnect();
         state.activeSession = await state.copilotClient.createSession({
           sessionId: makeSessionId(),
           model: state.currentModel,
@@ -810,7 +810,7 @@ export async function handleSlashCommand(
           // If no match, pass through — the SDK will error if invalid
         }
         if (state.activeSession) {
-          await state.activeSession.destroy();
+          await state.activeSession.disconnect();
         }
         state.activeSession = await state.copilotClient.resumeSession(
           targetId,
@@ -1007,7 +1007,7 @@ export async function handleSlashCommand(
 
     case "/history": {
       // Display recent conversation messages from the active session.
-      // Uses the SDK's session.getMessages() to retrieve the full
+      // Uses the SDK's session.getEvents() to retrieve the full
       // event log, then filters for user & assistant messages.
       if (!state.activeSession) {
         console.log(`  ${C.err("❌ No active session.")}`);
@@ -1018,7 +1018,7 @@ export async function handleSlashCommand(
       const showCount =
         Number.isFinite(histCount) && histCount > 0 ? histCount : 10;
       try {
-        const events = await state.activeSession.getMessages();
+        const events = await state.activeSession.getEvents();
         // Filter to user/assistant messages — skip tool calls, deltas, etc.
         const messages = events
           .filter(

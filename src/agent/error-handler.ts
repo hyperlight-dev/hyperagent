@@ -13,7 +13,15 @@
 // barrel (index.d.ts), so we define them locally to stay type-safe
 // without reaching into node_modules internals.
 
-/** Input provided to the onErrorOccurred hook by the SDK. */
+/**
+ * Input provided to the onErrorOccurred hook by the SDK.
+ *
+ * Declared as a minimal structural subset of the SDK's ErrorOccurredHookInput
+ * (which extends BaseHookInput) — only the fields this handler reads. Keeping it
+ * a subset means the handler stays assignable to ErrorOccurredHandler as the SDK
+ * evolves surrounding fields (e.g. 1.0.5 dropped the previously-present
+ * `cwd`/`timestamp`).
+ */
 interface ErrorOccurredHookInput {
   /** Human-readable error description. */
   error: string;
@@ -21,10 +29,6 @@ interface ErrorOccurredHookInput {
   errorContext: "model_call" | "tool_execution" | "system" | "user_input";
   /** Whether the SDK considers this error recoverable. */
   recoverable: boolean;
-  /** Unix timestamp (ms) when the error occurred. */
-  timestamp: number;
-  /** Working directory at time of error. */
-  cwd: string;
 }
 
 /** Output returned from the onErrorOccurred hook to tell the SDK what to do. */
