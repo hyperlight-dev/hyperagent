@@ -976,8 +976,7 @@ export async function deepAudit(
       try {
         const auditSessionId = session.sessionId;
         const sessionsMap = (client as any).sessions as
-          | Map<string, unknown>
-          | undefined;
+          Map<string, unknown> | undefined;
         await session.destroy();
         sessionsMap?.delete(auditSessionId);
       } catch {

@@ -1528,8 +1528,7 @@ function loadTokenFromCache(): string | undefined {
         readFileSync(join(M365_TOKENS_DIR, file), "utf8"),
       ) as Record<string, unknown>;
       const tokenMap = parsed.AccessToken as
-        | Record<string, { secret?: string; expires_on?: string }>
-        | undefined;
+        Record<string, { secret?: string; expires_on?: string }> | undefined;
       if (!tokenMap) continue;
       for (const entry of Object.values(tokenMap)) {
         if (typeof entry.secret !== "string") continue;

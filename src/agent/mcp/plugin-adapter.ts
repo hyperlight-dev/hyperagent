@@ -193,8 +193,7 @@ function generateInputInterface(tool: MCPToolSchema): string | null {
   if (!schema || typeof schema !== "object") return null;
 
   const properties = (schema as Record<string, unknown>).properties as
-    | Record<string, Record<string, unknown>>
-    | undefined;
+    Record<string, Record<string, unknown>> | undefined;
   if (!properties) return null;
 
   const required = new Set(
@@ -262,8 +261,7 @@ function pascalCase(name: string): string {
  */
 function extractParameterSummary(schema: Record<string, unknown>): string {
   const properties = schema.properties as
-    | Record<string, Record<string, unknown>>
-    | undefined;
+    Record<string, Record<string, unknown>> | undefined;
   if (!properties) return "(no parameters)";
 
   const required = new Set((schema.required as string[]) ?? []);

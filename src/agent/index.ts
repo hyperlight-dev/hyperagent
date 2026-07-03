@@ -636,10 +636,7 @@ if (cli.tune) {
  * - alternative_rejected: records an approach that was considered but not taken
  */
 type TuneCategory =
-  | "decision"
-  | "concern"
-  | "constraint"
-  | "alternative_rejected";
+  "decision" | "concern" | "constraint" | "alternative_rejected";
 
 const TUNE_CATEGORIES = new Set<string>([
   "decision",
@@ -1181,10 +1178,7 @@ const state = createAgentState(cli, {
 // Wire CLI --reasoning-effort <level> to state.reasoningEffort
 if (cli.reasoningEffort) {
   state.reasoningEffort = cli.reasoningEffort as
-    | "low"
-    | "medium"
-    | "high"
-    | "xhigh";
+    "low" | "medium" | "high" | "xhigh";
   state.sessionNeedsRebuild = true;
 }
 
@@ -5893,8 +5887,7 @@ const generateSkillTool = defineTool("generate_skill", {
       // Optionally save a companion module (delegated to register_module
       // so we get the same validation pipeline + sandbox cache update).
       let moduleResult:
-        | { name: string; importAs: string; sizeBytes?: number }
-        | undefined;
+        { name: string; importAs: string; sizeBytes?: number } | undefined;
       if (params.companionModule) {
         const m = params.companionModule;
         const moduleSaveResult = (await registerModuleImpl({
@@ -6238,8 +6231,7 @@ function buildSessionConfig() {
           // tags instead of using the native Rust parseHtml() which is faster
           // and more correct.
           const args = toolInput.toolArgs as
-            | Record<string, unknown>
-            | undefined;
+            Record<string, unknown> | undefined;
           const code =
             typeof args?.code === "string"
               ? args.code
@@ -6968,8 +6960,7 @@ async function main(): Promise<void> {
     // parameters is a raw JSON Schema object (Record<string, unknown>),
     // not a ZodSchema — safe to access .type directly.
     const params = executeJavascriptTool.parameters as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     debugLog(`parameters.type = "${params?.type}"`);
   }
 
