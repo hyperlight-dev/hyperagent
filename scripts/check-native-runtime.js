@@ -17,7 +17,7 @@ const NAPI_DIR = join(
   __dirname,
   "..",
   "node_modules",
-  "@hyperlight",
+  "@hyperlight-dev",
   "js-host-api",
 );
 

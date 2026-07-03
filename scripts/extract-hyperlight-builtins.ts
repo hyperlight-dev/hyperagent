@@ -13,8 +13,9 @@ import { readFileSync, readdirSync } from "fs";
 import { join, dirname } from "path";
 import { execSync } from "child_process";
 
-// Resolve hyperlight-js-runtime source from Cargo's git checkout via cargo metadata.
-// The runtime crate is a dependency of our custom runtime, so cargo metadata knows where it is.
+// Resolve the hyperlight-js-runtime source via cargo metadata. The runtime crate
+// is a dependency of our custom runtime, so cargo metadata knows where it lives
+// (the published crate unpacked under ~/.cargo/registry, or a local checkout).
 function resolveRuntimeSrc(): string {
   const metadata = JSON.parse(
     execSync(

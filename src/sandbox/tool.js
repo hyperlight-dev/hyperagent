@@ -14,7 +14,7 @@ import { appendFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 
 const require = createRequire(import.meta.url);
-const { SandboxBuilder } = require("@hyperlight/js-host-api");
+const { SandboxBuilder } = require("@hyperlight-dev/js-host-api");
 
 // ── Defaults ─────────────────────────────────────────────────────────
 

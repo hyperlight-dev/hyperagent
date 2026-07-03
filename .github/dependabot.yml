@@ -25,5 +25,6 @@ updates:
       time: "03:00"
     open-pull-requests-limit: 20
     ignore:
-      # Build-time symlink to external Cargo checkout — not in the repo
-      - dependency-name: "@hyperlight/js-host-api"
+      # Built from a hyperlight-js release-tag checkout into deps/js-host-api via
+      # a file: dependency — not a registry package, so dependabot can't bump it.
+      - dependency-name: "@hyperlight-dev/js-host-api"

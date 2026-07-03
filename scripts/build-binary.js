@@ -149,7 +149,7 @@ try {
       "import.meta.resolve": "__bundled_import_meta_resolve",
       __HYPERAGENT_VERSION__: JSON.stringify(version),
     },
-    external: ["@hyperlight/js-host-api", "hyperlight-analysis", "fsevents"],
+    external: ["@hyperlight-dev/js-host-api", "hyperlight-analysis", "fsevents"],
     ...(isRelease ? { minify: true, treeShaking: true } : {}),
     ...(!isRelease ? { keepNames: true, sourcemap: "inline" } : {}),
   });
@@ -418,7 +418,7 @@ Module._initPaths();
 // Patch module resolution to find native addons in our lib/ directory
 const originalLoad = Module._load;
 Module._load = function(request, parent, isMain) {
-  if (request === '@hyperlight/js-host-api') {
+  if (request === '@hyperlight-dev/js-host-api') {
     // Load via lib.cjs (not the raw .node) to get Promise wrappers,
     // error enrichment, and Buffer conversion for host function callbacks.
     return originalLoad.call(this, join(LIB_DIR, 'js-host-api', 'lib.cjs'), parent, isMain);
