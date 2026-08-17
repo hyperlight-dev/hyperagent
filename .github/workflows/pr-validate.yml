@@ -67,7 +67,7 @@ jobs:
         with:
           node-version: "22"
 
-      - uses: hyperlight-dev/ci-setup-workflow@v1.9.0
+      - uses: hyperlight-dev/ci-setup-workflow@v1.10.0
         with:
           rust-toolchain: "1.89"
         env:
@@ -135,7 +135,7 @@ jobs:
         with:
           node-version: "22"
 
-      - uses: hyperlight-dev/ci-setup-workflow@v1.9.0
+      - uses: hyperlight-dev/ci-setup-workflow@v1.10.0
         with:
           rust-toolchain: "1.89"
         env:
@@ -177,7 +177,7 @@ jobs:
         with:
           node-version: "22"
 
-      - uses: hyperlight-dev/ci-setup-workflow@v1.9.0
+      - uses: hyperlight-dev/ci-setup-workflow@v1.10.0
         with:
           rust-toolchain: "1.89"
         env:
@@ -204,7 +204,7 @@ jobs:
         with:
           node-version: "22"
 
-      - uses: hyperlight-dev/ci-setup-workflow@v1.9.0
+      - uses: hyperlight-dev/ci-setup-workflow@v1.10.0
         with:
           rust-toolchain: "1.89"
         env:
@@ -241,7 +241,7 @@ jobs:
         with:
           node-version: "22"
 
-      - uses: hyperlight-dev/ci-setup-workflow@v1.9.0
+      - uses: hyperlight-dev/ci-setup-workflow@v1.10.0
         with:
           rust-toolchain: "1.89"
         env:
