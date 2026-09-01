@@ -839,7 +839,7 @@ dependencies = [
  "clap",
  "hashbrown",
  "hyperlight-common 0.17.0",
- "hyperlight-guest",
+ "hyperlight-guest 0.16.0",
  "hyperlight-guest-bin",
  "nom 8.0.0",
  "regex-automata",
@@ -903,15 +903,28 @@ dependencies = [
 ]
 
 [[package]]
-name = "hyperlight-guest-bin"
-version = "0.16.0"
+name = "hyperlight-guest"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdeccde6490e76aefe2e8ca17e1a225d2da3338f020f17533b8ee0cee7cf9a11"
+checksum = "816f673f3f8ef6d5703796bf92927b85177ad1baac6f391551a88451a9e46a7e"
+dependencies = [
+ "anyhow",
+ "flatbuffers",
+ "hyperlight-common 0.17.0",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "hyperlight-guest-bin"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c2d0ea739be89822992706da9dc6812ce359b654b328efd6141ba1549751907"
 dependencies = [
  "buddy_system_allocator",
  "flatbuffers",
- "hyperlight-common 0.16.0",
- "hyperlight-guest",
+ "hyperlight-common 0.17.0",
+ "hyperlight-guest 0.17.0",
  "hyperlight-guest-macro",
  "hyperlight-guest-tracing",
  "hyperlight-libc",
@@ -923,23 +936,23 @@ dependencies = [
 
 [[package]]
 name = "hyperlight-guest-macro"
-version = "0.16.0"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "620ed77c5c07027c63a6a741da8a9a2462a56e660691da715c3700cb281a3d23"
+checksum = "875d03a9e4d302f29d8feb57faff937f80c6f69ec9d31b32f41c41721144e25d"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
  "quote",
- "syn 2.0.118",
+ "syn 3.0.3",
 ]
 
 [[package]]
 name = "hyperlight-guest-tracing"
-version = "0.16.0"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8b39160c2001db5c79916d946d04a601e4e1f2827e2c785d477b31e48f5e514"
+checksum = "8f43a3d5d3fa245ce0fccee8a48ad7d94ec479e0898fc8f91fd440a1d65830c6"
 dependencies = [
- "hyperlight-common 0.16.0",
+ "hyperlight-common 0.17.0",
  "spin 0.12.3",
  "tracing",
  "tracing-core",
@@ -992,9 +1005,9 @@ dependencies = [
 
 [[package]]
 name = "hyperlight-libc"
-version = "0.16.0"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c258315b4c0ec4aae172c4ff31b34590559fb6699c144f779be2246672b3147"
+checksum = "108dd0e7335821a2ef0dfa375c08236c3302a117045822e2aa68c64147f8e895"
 dependencies = [
  "anyhow",
  "bindgen",
