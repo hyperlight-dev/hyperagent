@@ -839,7 +839,7 @@ dependencies = [
  "clap",
  "hashbrown",
  "hyperlight-common 0.17.0",
- "hyperlight-guest",
+ "hyperlight-guest 0.17.0",
  "hyperlight-guest-bin",
  "nom 8.0.0",
  "regex-automata",
@@ -903,6 +903,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyperlight-guest"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "816f673f3f8ef6d5703796bf92927b85177ad1baac6f391551a88451a9e46a7e"
+dependencies = [
+ "anyhow",
+ "flatbuffers",
+ "hyperlight-common 0.17.0",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "hyperlight-guest-bin"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -911,7 +924,7 @@ dependencies = [
  "buddy_system_allocator",
  "flatbuffers",
  "hyperlight-common 0.16.0",
- "hyperlight-guest",
+ "hyperlight-guest 0.16.0",
  "hyperlight-guest-macro",
  "hyperlight-guest-tracing",
  "hyperlight-libc",
