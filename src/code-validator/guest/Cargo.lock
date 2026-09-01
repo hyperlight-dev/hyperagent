@@ -866,7 +866,6 @@ dependencies = [
  "smallvec",
  "spin 0.12.3",
  "thiserror",
- "tracing",
  "tracing-core",
 ]
 
@@ -886,6 +885,7 @@ dependencies = [
  "smallvec",
  "spin 0.12.3",
  "thiserror",
+ "tracing",
  "tracing-core",
 ]
 
@@ -947,21 +947,23 @@ dependencies = [
 
 [[package]]
 name = "hyperlight-host"
-version = "0.16.0"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef3edc7875e70a3b5cc291a17f78cfc352e24c9a665a5a1bbdbc46ada3df43b5"
+checksum = "d85dcf5ae7a578e1b09bdeb76cc3b3ca8e6e57d6395d2f57204aec45c1bbbde9"
 dependencies = [
  "anyhow",
+ "bindgen",
  "bitflags 2.13.0",
  "blake3",
  "bytemuck",
+ "cc",
  "cfg-if",
  "cfg_aliases",
  "crossbeam-channel",
  "flatbuffers",
  "goblin",
  "hex",
- "hyperlight-common 0.16.0",
+ "hyperlight-common 0.17.0",
  "kvm-bindings",
  "kvm-ioctls",
  "lazy_static",
@@ -972,6 +974,7 @@ dependencies = [
  "mshv-ioctls",
  "oci-spec",
  "page_size",
+ "parking_lot",
  "rand",
  "rust-embed",
  "serde",
@@ -1383,6 +1386,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "parking_lot"
+version = "0.12.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93857453250e3077bd71ff98b6a65ea6621a19bb0f559a85248955ac12c45a1a"
+dependencies = [
+ "lock_api",
+ "parking_lot_core",
+]
+
+[[package]]
+name = "parking_lot_core"
+version = "0.9.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2621685985a2ebf1c516881c026032ac7deafcda1a2c9b7850dc81e3dfcb64c1"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "redox_syscall",
+ "smallvec",
+ "windows-link",
+]
+
+[[package]]
 name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1467,6 +1493,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1a224897b65b7ce38bf7b0adb569e7d77e11460d0cc3577908b263d8b5a89aa"
 dependencies = [
  "rustversion",
+]
+
+[[package]]
+name = "redox_syscall"
+version = "0.5.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
+dependencies = [
+ "bitflags 2.13.0",
 ]
 
 [[package]]
