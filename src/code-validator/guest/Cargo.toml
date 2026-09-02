@@ -22,7 +22,7 @@ repository = "https://github.com/anthropics/hyperagent"
 hyperlight-common = { version = "0.17.0", default-features = false }
 hyperlight-guest-bin = { version = "0.16.0" }
 hyperlight-guest = { version = "0.16.0" }
-hyperlight-host = { version = "0.16.0", default-features = false, features = ["executable_heap", "kvm", "mshv3"] }
+hyperlight-host = { version = "0.17.0", default-features = false, features = ["executable_heap", "kvm", "mshv3"] }
 
 [profile.dev]
 panic = "abort"
