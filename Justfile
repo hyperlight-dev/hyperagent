@@ -26,7 +26,7 @@ export CMAKE_GENERATOR := if os() == "windows" { "Ninja" } else { "" }
 # DEFAULT runtime at compile time — it can't carry our native modules. A pinned
 # release tag of the official repo is not a fork/branch. Bump together with the
 # hyperlight-js-runtime crate version.
-hyperlight-js-tag := "v0.3.3"
+hyperlight-js-tag := "v0.4.0"
 
 # Local checkout of the hyperlight-js source, cloned at hyperlight-js-tag.
 hyperlight-src    := justfile_dir() / "deps" / "hyperlight-js-src"

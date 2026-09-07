@@ -117,7 +117,7 @@ fn call_guest_function_sync(function_name: &str, input: String) -> Result<String
     config.set_output_data_size(GUEST_OUTPUT_SIZE);
 
     // Create the guest binary from embedded bytes
-    let guest_binary = GuestBinary::Buffer(ANALYSIS_RUNTIME);
+    let guest_binary = GuestBinary::Buffer(ANALYSIS_RUNTIME.to_vec());
 
     // Create uninitialized sandbox
     let uninitialized = UninitializedSandbox::new(guest_binary, Some(config)).map_err(|e| {
@@ -152,7 +152,7 @@ fn call_guest_function_2_sync(
     config.set_input_data_size(GUEST_INPUT_SIZE);
     config.set_output_data_size(GUEST_OUTPUT_SIZE);
 
-    let guest_binary = GuestBinary::Buffer(ANALYSIS_RUNTIME);
+    let guest_binary = GuestBinary::Buffer(ANALYSIS_RUNTIME.to_vec());
 
     let uninitialized = UninitializedSandbox::new(guest_binary, Some(config)).map_err(|e| {
         Error::new(
