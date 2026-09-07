@@ -17,6 +17,10 @@ updates:
       hyperlight:
         patterns:
           - "hyperlight-*"
+      napi:
+        patterns:
+          - "napi"
+          - "napi-*"
     cooldown:
       default-days: 7
     schedule:
