@@ -13,6 +13,10 @@ updates:
     directories:
       - "/src/sandbox/runtime"
       - "/src/code-validator/guest"
+    groups:
+      hyperlight:
+        patterns:
+          - "hyperlight-*"
     cooldown:
       default-days: 7
     schedule:
