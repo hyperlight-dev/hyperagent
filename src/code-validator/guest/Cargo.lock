@@ -112,6 +112,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "bindgen"
+version = "0.73.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "787ef8ef523575546b106a58213d6e6b06198a05c2f757258c68a74273670cfa"
+dependencies = [
+ "bitflags 2.13.0",
+ "cexpr",
+ "clang-sys",
+ "log",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash",
+ "shlex 2.0.1",
+ "syn 3.0.3",
+]
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -844,7 +863,7 @@ name = "hyperlight-analysis-runtime"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "bindgen",
+ "bindgen 0.73.2",
  "clap",
  "hashbrown",
  "hyperlight-common",
@@ -942,7 +961,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d85dcf5ae7a578e1b09bdeb76cc3b3ca8e6e57d6395d2f57204aec45c1bbbde9"
 dependencies = [
  "anyhow",
- "bindgen",
+ "bindgen 0.72.1",
  "bitflags 2.13.0",
  "blake3",
  "bytemuck",
@@ -990,7 +1009,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "108dd0e7335821a2ef0dfa375c08236c3302a117045822e2aa68c64147f8e895"
 dependencies = [
  "anyhow",
- "bindgen",
+ "bindgen 0.72.1",
  "cc",
  "glob",
 ]
@@ -1587,7 +1606,7 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "53d0aaff245bed1c6f3c39e477fb6b98d710d9d298bfec7c8dfc589bed0e5cef"
 dependencies = [
- "bindgen",
+ "bindgen 0.72.1",
  "cc",
 ]
 
