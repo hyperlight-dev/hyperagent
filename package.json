@@ -49,7 +49,7 @@
     "esbuild": "^0.28.0",
     "just-bash": "^3.0.0",
     "pdf-parse": "^2.4.5",
-    "pixelmatch": "^7.1.0",
+    "pixelmatch": "^8.0.0",
     "pngjs": "^7.0.0",
     "prettier": "^3.8.1",
     "tsx": "^4.0.0",
