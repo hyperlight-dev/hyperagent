@@ -38,7 +38,7 @@ hyperlight-guest-bin = { workspace = true }
 clap = { version = "4.6", features = ["derive"] }
 
 [build-dependencies]
-bindgen = "0.72"
+bindgen = "0.73"
 
 [lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = ['cfg(hyperlight)'] }
