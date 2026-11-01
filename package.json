@@ -34,7 +34,7 @@
     "@github/copilot-sdk": "^1.0.5",
     "@hyperlight-dev/js-host-api": "file:deps/js-host-api",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "boxen": "^8.0.1",
+    "boxen": "^9.0.0",
     "highlight.js": "^11.11.1",
     "hyperlight-analysis": "file:src/code-validator/guest",
     "marked": "^18.0.4",
