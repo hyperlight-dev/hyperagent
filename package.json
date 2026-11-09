@@ -38,7 +38,7 @@
     "highlight.js": "^11.11.1",
     "hyperlight-analysis": "file:src/code-validator/guest",
     "marked": "^18.0.4",
-    "marked-terminal": "^7.3.0",
+    "marked-terminal": "^8.0.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
